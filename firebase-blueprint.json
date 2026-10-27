@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information stored in users/{userId}",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Unique user ID matching request.auth.uid" },
+        "displayName": { "type": "string", "description": "User full name" },
+        "email": { "type": "string", "description": "User email address" },
+        "phoneNumber": { "type": "string", "description": "User contact phone number" },
+        "photoUrl": { "type": "string", "description": "Profile picture URL" },
+        "address": { "type": "string", "description": "Delivery or customer address" },
+        "deviceModel": { "type": "string", "description": "Primary customer device model" },
+        "favoriteProductIds": { "type": "array", "description": "List of product IDs marked as favorite by this user" },
+        "balance": { "type": "number", "description": "User balance in GEL" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last profile update server timestamp" }
+      },
+      "required": ["userId", "displayName", "email", "createdAt"]
+    },
+    "ServiceOrder": {
+      "title": "ServiceOrder",
+      "description": "Customer product, software subscription, or repair order",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Order ID" },
+        "orderNumber": { "type": "string", "description": "Formatted order number (e.g. #BS-1055)" },
+        "userId": { "type": "string", "description": "Owner user UID matching request.auth.uid" },
+        "userName": { "type": "string", "description": "Customer full name snapshot" },
+        "userPhone": { "type": "string", "description": "Customer contact phone number" },
+        "userEmail": { "type": "string", "description": "Customer email address" },
+        "deliveryAddress": { "type": "string", "description": "Customer delivery address" },
+        "deviceModel": { "type": "string", "description": "Device brand and model" },
+        "serviceType": { "type": "string", "description": "Ordered product or software service summary" },
+        "issueDescription": { "type": "string", "description": "Order details, package info, or customer notes" },
+        "items": {
+          "type": "array",
+          "description": "Snapshot list of ordered items at purchase time"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "completed", "cancelled"],
+          "description": "Current order lifecycle status"
+        },
+        "price": { "type": "string", "description": "Formatted total price in GEL" },
+        "totalAmount": { "type": "number", "description": "Numeric total order amount in GEL" },
+        "currency": { "type": "string", "description": "Currency code (GEL)" },
+        "paymentMethod": { "type": "string", "description": "Selected payment method" },
+        "trackingCode": { "type": "string", "description": "Order tracking code" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when order was submitted" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp when order was last updated" }
+      },
+      "required": ["id", "userId", "userPhone", "deviceModel", "serviceType", "status", "createdAt"]
+    },
+    "DiagnosticReport": {
+      "title": "DiagnosticReport",
+      "description": "AI diagnostic analysis report",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Diagnostic report ID" },
+        "userId": { "type": "string", "description": "User who requested the diagnostic" },
+        "deviceModel": { "type": "string", "description": "Target device model" },
+        "issueCategory": { "type": "string", "description": "Category of failure" },
+        "symptoms": { "type": "string", "description": "Reported symptoms" },
+        "aiAnalysis": { "type": "string", "description": "AI diagnostic output and recommendations" },
+        "estimatedCost": { "type": "string", "description": "Estimated cost" },
+        "confidence": { "type": "number", "description": "AI diagnosis confidence percentage" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of diagnostic" }
+      },
+      "required": ["id", "userId", "deviceModel", "issueCategory", "aiAnalysis", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Smartphone replacement part or digital software service in BEKASERVICE catalog",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "number", "description": "Numeric catalog ID" },
+        "title": { "type": "string", "description": "Product or service title" },
+        "name": { "type": "string", "description": "Product name alias" },
+        "shortDescription": { "type": "string", "description": "Short summary shown on cards" },
+        "description": { "type": "string", "description": "Full detailed Georgian description" },
+        "price": { "type": "string", "description": "Formatted price in GEL" },
+        "currency": { "type": "string", "description": "Currency (GEL)" },
+        "rating": { "type": "string", "description": "Product rating" },
+        "image": { "type": "string", "description": "Product image URL" },
+        "imageUrl": { "type": "string", "description": "Product image URL" },
+        "category": { "type": "string", "description": "Main product category" },
+        "subcategory": { "type": "string", "description": "Software or part subcategory" },
+        "type": { "type": "string", "description": "Item type: product or software" },
+        "brand": { "type": "string", "description": "Brand name" },
+        "inStock": { "type": "boolean", "description": "Availability status" },
+        "isAvailable": { "type": "boolean", "description": "Availability flag" },
+        "isFeatured": { "type": "boolean", "description": "Featured on Home screen" },
+        "displayOrder": { "type": "number", "description": "Display sort order" },
+        "sortOrder": { "type": "number", "description": "Sort order" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["title", "price"]
+    },
+    "AppConfig": {
+      "title": "AppConfig",
+      "description": "Global application configuration such as Home Screen slider banners, bank requisites, and app updates",
+      "type": "object",
+      "properties": {
+        "configType": { "type": "string", "description": "Configuration document type (home_banners, bank_requisites, or updates)" },
+        "banners": { "type": "array", "description": "List of Home Screen slider items" },
+        "bogIban": { "type": "string", "description": "Bank of Georgia IBAN" },
+        "bogRecipient": { "type": "string", "description": "BOG recipient name" },
+        "tbcIban": { "type": "string", "description": "TBC Bank IBAN" },
+        "tbcRecipient": { "type": "string", "description": "TBC recipient name" },
+        "latestVersion": { "type": "string", "description": "Published latest app version string (e.g. 2.5.0)" },
+        "changeLog": { "type": "string", "description": "Multiline Georgian release notes / changelog" },
+        "downloadUrl": { "type": "string", "description": "Direct HTTPS APK download URL" },
+        "isPublished": { "type": "boolean", "description": "Whether the update is published for users" },
+        "updatedBy": { "type": "string", "description": "Admin email or UID who last updated the config" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["configType"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Admin-dispatched broadcast push notification stored in notifications/{notificationId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique notification document ID" },
+        "title": { "type": "string", "description": "Notification title" },
+        "body": { "type": "string", "description": "Notification message body" },
+        "type": { "type": "string", "description": "Notification category (announcement, product_offer, discount, order_update)" },
+        "targetProductId": { "type": "number", "description": "Optional target product ID for deep-linking (-1 if none)" },
+        "targetTab": { "type": "number", "description": "Target navigation tab index (0..7, or -1)" },
+        "senderUid": { "type": "string", "description": "Admin Firebase Auth UID" },
+        "senderEmail": { "type": "string", "description": "Admin email (beqa1994@gmail.com)" },
+        "audience": { "type": "string", "description": "Target audience identifier (e.g. all)" },
+        "status": { "type": "string", "description": "Delivery status (e.g. submitted, sent, updated)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "title", "body", "createdAt"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Read-only admin lookup document keyed by admin UID",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Admin Firebase Auth UID" },
+        "email": { "type": "string", "description": "Admin email" },
+        "role": { "type": "string", "description": "Admin role label" }
+      },
+      "required": ["uid"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles partitioned by UID"
+    },
+    "/orders/{orderId}": {
+      "schema": "ServiceOrder",
+      "description": "Customer service, software, and repair orders"
+    },
+    "/diagnostics/{diagnosticId}": {
+      "schema": "DiagnosticReport",
+      "description": "AI device diagnostic results"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Public smartphone parts and software services catalog (admin write only)"
+    },
+    "/app_config/{configId}": {
+      "schema": "AppConfig",
+      "description": "Publicly readable app configuration (home slider banners, bank requisites, app updates; admin write only)"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Publicly readable broadcast push notifications history (admin write/delete only)"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminRole",
+      "description": "Server-managed administrator UID registry"
+    }
+  }
+}
