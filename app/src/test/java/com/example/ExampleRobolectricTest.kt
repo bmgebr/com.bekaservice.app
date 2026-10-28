@@ -406,5 +406,154 @@ class ExampleRobolectricTest {
       AppThemeColorAdapter.inputTextColor()
     )
   }
+
+  @Test
+  fun `ai assistant recommends only Canva when user asks for canva and does not dump other multimedia services`() {
+    val allProducts = ProductRepository.getAllProducts()
+
+    // 1. "canva მინდა" should return ONLY Canva Pro (id=118), NOT CapCut (116) or Adobe (117)
+    val matchedForCanva = GeminiDiagnosticService.findRelevantProducts("canva მინდა", allProducts)
+    assertEquals(1, matchedForCanva.size)
+    assertEquals(118, matchedForCanva.first().id)
+    assertEquals("Canva Pro", matchedForCanva.first().title)
+
+    // 2. Local diagnostic text should be dedicated to Canva Pro without dumping CapCut or Adobe
+    val diagnosticReply = GeminiDiagnosticService.findRelevantProducts("კანვა მინდა", allProducts)
+    assertEquals(1, diagnosticReply.size)
+    assertEquals(118, diagnosticReply.first().id)
+
+    // 3. Similarly for CapCut: should return ONLY CapCut Pro (id=116)
+    val matchedForCapCut = GeminiDiagnosticService.findRelevantProducts("capcut მინდა", allProducts)
+    assertEquals(1, matchedForCapCut.size)
+    assertEquals(116, matchedForCapCut.first().id)
+
+    // 4. General multimedia query should return the broader multimedia services
+    val matchedGeneral = GeminiDiagnosticService.findRelevantProducts("მულტიმედია რა სერვისები გაქვთ?", allProducts)
+    assertTrue("General multimedia request should return multiple services", matchedGeneral.size >= 3)
+    assertTrue(matchedGeneral.any { it.id == 118 })
+    assertTrue(matchedGeneral.any { it.id == 116 })
+    assertTrue(matchedGeneral.any { it.id == 117 })
+  }
+
+  @Test
+  fun `ai assistant dynamically finds newly added services from catalog`() {
+    val baseProducts = ProductRepository.getAllProducts()
+
+    // Create a newly added service by admin
+    val newCustomService = ProductItem(
+      id = 999,
+      title = "Midjourney v7 Mega",
+      price = "45 ₾",
+      category = "პროგრამული სერვისები",
+      type = "software",
+      subcategory = "ხელოვნური ინტელექტი",
+      imageUrl = "https://example.com/midjourney.jpg",
+      shortDescription = "Midjourney v7 უმაღლესი ხარისხის ფოტორეალისტური AI გენერატორი ულიმიტო GPU საათებით.",
+      features = listOf("v7 photorealism", "Fast GPU hours", "Commercial license"),
+      offerType = "თვიური გამოწერა",
+      duration = "1 თვე",
+      accountType = "Private",
+      activationTerms = "მყისიერი აქტივაცია",
+      searchKeywords = "midjourney, მიდჯორნი, გენერაცია",
+      inStock = true,
+      brand = "Midjourney"
+    )
+
+    val updatedCatalog = baseProducts + newCustomService
+
+    // User asks for the newly added service: "midjourney მინდა"
+    val foundNewService = GeminiDiagnosticService.findRelevantProducts("midjourney მინდა", updatedCatalog)
+    assertEquals(1, foundNewService.size)
+    assertEquals(999, foundNewService.first().id)
+    assertEquals("Midjourney v7 Mega", foundNewService.first().title)
+
+    // User asks with Georgian transliteration
+    val foundNewGeorgian = GeminiDiagnosticService.findRelevantProducts("მიდჯორნი მინდა", updatedCatalog)
+    assertEquals(1, foundNewGeorgian.size)
+    assertEquals(999, foundNewGeorgian.first().id)
+  }
+
+  @Test
+  fun `notifications bell badge and history reflect real notifications and unread counts accurately`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    BekaNotificationManager.clearAllNotifications(context)
+
+    // 1. Initial state: history is empty and unread count is 0 (no ghost "1" badge)
+    val initialHistory = BekaNotificationManager.loadLocalNotificationHistory(context)
+    assertTrue("Initial history must be empty", initialHistory.isEmpty())
+    val initialUnread = BekaNotificationManager.getUnreadNotificationsCount(context, emptyList())
+    assertEquals("Initial unread count must be 0", 0, initialUnread)
+
+    // 2. Synthetic or test notifications are rejected and never counted as unread
+    assertTrue(BekaNotificationManager.isSyntheticOrTestNotificationId("welcome_bekaservice"))
+    assertTrue(BekaNotificationManager.isSyntheticOrTestNotificationId("local_test_12345"))
+    assertTrue(BekaNotificationManager.isSyntheticOrTestNotificationId("test_notification"))
+    assertTrue(
+      "Notification with body 'test' must be rejected as test notification",
+      BekaNotificationManager.isSyntheticOrTestNotification(
+        id = "notif_1761553700000",
+        title = "BEKASERVICE • ახალი შეთავაზება",
+        body = "test"
+      )
+    )
+
+    val testNotifOnly = listOf(
+      PushNotificationRecord(
+        id = "notif_1761553700000",
+        title = "BEKASERVICE • ახალი შეთავაზება",
+        body = "test"
+      )
+    )
+    assertTrue(BekaNotificationManager.syncCloudNotificationsToLocal(context, testNotifOnly).isEmpty())
+    assertEquals(0, BekaNotificationManager.getUnreadNotificationsCount(context, testNotifOnly))
+
+    // 3. Simulate real broadcast notifications from Firestore
+    val realCloudNotifs = listOf(
+      PushNotificationRecord(
+        id = "notif_cloud_001",
+        title = "საგაზაფხულო აქცია",
+        body = "ყველა ეკრანის შეცვლაზე 20% ფასდაკლება!",
+        type = "product_offer",
+        targetTab = 1,
+        targetProductId = 101,
+        createdAtMillis = System.currentTimeMillis()
+      ),
+      PushNotificationRecord(
+        id = "notif_cloud_002",
+        title = "ახალი სერვისი",
+        body = "დაემატა ChatGPT Pro ოფიციალური გამოწერა",
+        type = "announcement",
+        targetTab = 3,
+        createdAtMillis = System.currentTimeMillis() - 60000L
+      )
+    )
+
+    // Sync cloud notifications to local
+    val synced = BekaNotificationManager.syncCloudNotificationsToLocal(context, realCloudNotifs)
+    assertEquals(2, synced.size)
+
+    // Unread count must accurately reflect 2 unread notifications
+    val unreadBefore = BekaNotificationManager.getUnreadNotificationsCount(context, realCloudNotifs)
+    assertEquals("Should be 2 unread notifications", 2, unreadBefore)
+
+    // Read single notification
+    BekaNotificationManager.markNotificationRead(context, "notif_cloud_001")
+    assertTrue(BekaNotificationManager.isNotificationRead(context, "notif_cloud_001"))
+    assertFalse(BekaNotificationManager.isNotificationRead(context, "notif_cloud_002"))
+    val unreadAfterOne = BekaNotificationManager.getUnreadNotificationsCount(context, realCloudNotifs)
+    assertEquals("Should be 1 unread notification remaining", 1, unreadAfterOne)
+
+    // Mark all read (simulating clicking the bell icon or 'ყველას წაკითხულად მონიშვნა')
+    BekaNotificationManager.markAllNotificationsRead(context, realCloudNotifs)
+    val unreadAfterAll = BekaNotificationManager.getUnreadNotificationsCount(context, realCloudNotifs)
+    assertEquals("Unread count must be 0 after reading all", 0, unreadAfterAll)
+
+    // When cloud notifications are removed/empty in Firestore, local reconciles and unread is 0
+    val emptyCloud = BekaNotificationManager.syncCloudNotificationsToLocal(context, emptyList())
+    assertTrue(emptyCloud.isEmpty())
+    val unreadEmpty = BekaNotificationManager.getUnreadNotificationsCount(context, emptyList())
+    assertEquals(0, unreadEmpty)
+  }
 }
+
 

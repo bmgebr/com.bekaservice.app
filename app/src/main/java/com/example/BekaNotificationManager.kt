@@ -56,6 +56,8 @@ object BekaNotificationManager {
     private const val KEY_INITIAL_SNAPSHOT_BASELINE_TS = "initial_snapshot_baseline_ts"
     private const val KEY_PERMISSION_PROMPTED = "post_notifications_prompted"
     private const val KEY_FAKE_PURGED_V2 = "fake_welcome_notifications_purged_v2"
+    private const val KEY_FAKE_PURGED_V3 = "fake_welcome_notifications_purged_v3"
+    private const val KEY_FAKE_PURGED_V4 = "fake_welcome_notifications_purged_v4"
 
     // რეაქტიული ვერსიის მთვლელი UI-ს მყისიერი განახლებისთვის
     val stateVersion = mutableIntStateOf(0)
@@ -65,8 +67,34 @@ object BekaNotificationManager {
     }
 
     fun isSyntheticOrTestNotificationId(id: String): Boolean {
-        val clean = id.trim()
-        return clean.startsWith("welcome_bekaservice") || clean.startsWith("local_test_")
+        val clean = id.trim().lowercase()
+        return clean.startsWith("welcome_bekaservice") ||
+            clean.startsWith("local_test_") ||
+            clean.startsWith("test_") ||
+            clean.startsWith("mock_") ||
+            clean.startsWith("dummy_") ||
+            clean.startsWith("sample_") ||
+            clean.startsWith("fake_") ||
+            clean.startsWith("notif_denied") ||
+            clean == "welcome" ||
+            clean == "test" ||
+            clean == "demo"
+    }
+
+    fun isSyntheticOrTestNotification(id: String, title: String = "", body: String = ""): Boolean {
+        if (isSyntheticOrTestNotificationId(id)) return true
+        val cleanBody = body.trim().lowercase()
+        if (cleanBody in listOf("test", "ტესტი", "testing", "ტესტ", "demo", "sample", "check", "check 123", "123", "test notification")) {
+            return true
+        }
+        val cleanTitle = title.trim().lowercase()
+        if (cleanTitle in listOf("test", "ტესტი", "testing", "ტესტ", "bekaservice ტესტი")) {
+            return true
+        }
+        if (cleanTitle.contains("ტესტი", ignoreCase = true) && cleanBody.length <= 10) {
+            return true
+        }
+        return false
     }
 
     fun targetTabLabel(targetTab: Int): String {
@@ -263,12 +291,24 @@ object BekaNotificationManager {
      * ასუფთავებს ძველ სატესტო/მისასალმებელ ჩანაწერებს, რათა ისტორიაში მხოლოდ რეალურად
      * გაგზავნილი ან მიღებული შეტყობინებები გამოჩნდეს.
      */
-    fun purgeSyntheticNotificationsIfNeeded(context: Context) {
+    fun purgeSyntheticNotificationsIfNeeded(context: Context, force: Boolean = false) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_FAKE_PURGED_V2, false)) return
-        val cleaned = loadLocalNotificationHistory(context)
+        if (!force && prefs.getBoolean(KEY_FAKE_PURGED_V4, false)) return
+        val cleaned = loadLocalNotificationHistory(context).filterNot {
+            isSyntheticOrTestNotification(it.id, it.title, it.body)
+        }
         saveLocalNotificationHistoryList(context, cleaned, notify = false)
-        prefs.edit().putBoolean(KEY_FAKE_PURGED_V2, true).apply()
+        prefs.edit().putBoolean(KEY_FAKE_PURGED_V4, true).apply()
+    }
+
+    fun clearAllNotifications(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .remove(KEY_LOCAL_HISTORY_JSON)
+            .remove(KEY_READ_IDS)
+            .remove(KEY_DISMISSED_USER_IDS)
+            .apply()
+        notifyStateChanged()
     }
 
     fun loadLocalNotificationHistory(context: Context): List<PushNotificationRecord> {
@@ -282,7 +322,7 @@ object BekaNotificationManager {
                 val id = obj.optString("id", "").trim()
                 val title = obj.optString("title", "").trim()
                 val body = obj.optString("body", "").trim()
-                if (id.isBlank() || title.isBlank() || isSyntheticOrTestNotificationId(id)) continue
+                if (id.isBlank() || title.isBlank() || isSyntheticOrTestNotification(id, title, body)) continue
                 list.add(
                     PushNotificationRecord(
                         id = id,
@@ -313,7 +353,7 @@ object BekaNotificationManager {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val arr = JSONArray()
         list
-            .filterNot { it.id.isBlank() || isSyntheticOrTestNotificationId(it.id) }
+            .filterNot { it.id.isBlank() || isSyntheticOrTestNotification(it.id, it.title, it.body) }
             .distinctBy { it.id }
             .sortedByDescending { it.createdAtMillis }
             .take(80)
@@ -344,7 +384,7 @@ object BekaNotificationManager {
     }
 
     fun upsertLocalNotificationRecord(context: Context, record: PushNotificationRecord) {
-        if (record.id.isBlank() || isSyntheticOrTestNotificationId(record.id)) return
+        if (record.id.isBlank() || isSyntheticOrTestNotification(record.id, record.title, record.body)) return
         unDismissNotificationForUser(context, record.id)
         val current = loadLocalNotificationHistory(context).toMutableList()
         val existingIdx = current.indexOfFirst { it.id == record.id }
@@ -362,20 +402,24 @@ object BekaNotificationManager {
         saveLocalNotificationHistoryList(context, current, notify = true)
     }
 
-    private fun mergeCloudAndLocalNotifications(
+    fun mergeCloudAndLocalNotifications(
         context: Context,
         cloudList: List<PushNotificationRecord>
     ): List<PushNotificationRecord> {
-        val localList = loadLocalNotificationHistory(context)
         val byId = LinkedHashMap<String, PushNotificationRecord>()
+        // 1. Cloud-იდან წამოსული რეალური შეტყობინებები წარმოადგენს მთავარ წყაროს
         cloudList.forEach { n ->
-            if (n.id.isNotBlank() && !isSyntheticOrTestNotificationId(n.id)) {
+            if (n.id.isNotBlank() && !isSyntheticOrTestNotification(n.id, n.title, n.body)) {
                 byId[n.id] = n
             }
         }
+        // 2. ლოკალური ისტორიიდან ვამატებთ მხოლოდ FCM ფონურ შეტყობინებებს (fcm_*)
+        val localList = loadLocalNotificationHistory(context)
         localList.forEach { local ->
-            if (local.id.isNotBlank() && !isSyntheticOrTestNotificationId(local.id) && !byId.containsKey(local.id)) {
-                byId[local.id] = local
+            if (local.id.isNotBlank() && !isSyntheticOrTestNotification(local.id, local.title, local.body)) {
+                if (local.id.startsWith("fcm_") && !byId.containsKey(local.id)) {
+                    byId[local.id] = local
+                }
             }
         }
         return byId.values.sortedByDescending { it.createdAtMillis }
@@ -383,18 +427,18 @@ object BekaNotificationManager {
 
     /**
      * სინქრონიზაციას უკეთებს Firestore-ის რეალურ შეტყობინებებს და FCM-ით ფონურ რეჟიმში
-     * მიღებულ ჩანაწერებს. თუ ადმინმა შეტყობინება წაშალა Cloud-იდან, ის ასევე იშლება ქეშიდან.
+     * მიღებულ ჩანაწერებს. თუ Cloud-იდან წაშლილია ან ცარიელია, ლოკალური ghost ჩანაწერები იწმინდება.
      */
     fun syncCloudNotificationsToLocal(context: Context, cloudList: List<PushNotificationRecord>): List<PushNotificationRecord> {
-        purgeSyntheticNotificationsIfNeeded(context)
+        purgeSyntheticNotificationsIfNeeded(context, force = true)
         val cloudIds = cloudList.map { it.id }.toSet()
         // ფონურად FCM-ით მოსული ჩანაწერები (fcm_*) შევინარჩუნოთ, ხოლო Cloud-ში წაშლილი notif_* ჩანაწერები ამოვშალოთ
         val retainedFcmOnly = loadLocalNotificationHistory(context).filter { local ->
-            local.id.startsWith("fcm_") && !cloudIds.contains(local.id)
+            local.id.startsWith("fcm_") && !cloudIds.contains(local.id) && !isSyntheticOrTestNotification(local.id, local.title, local.body)
         }
         val byId = LinkedHashMap<String, PushNotificationRecord>()
         cloudList.forEach { n ->
-            if (n.id.isNotBlank() && !isSyntheticOrTestNotificationId(n.id)) {
+            if (n.id.isNotBlank() && !isSyntheticOrTestNotification(n.id, n.title, n.body)) {
                 byId[n.id] = n
             }
         }
@@ -405,6 +449,16 @@ object BekaNotificationManager {
         }
         val reconciled = byId.values.sortedByDescending { it.createdAtMillis }
         saveLocalNotificationHistoryList(context, reconciled, notify = true)
+
+        // მკვდარი ID-ების გასუფთავება read_ids სიიდან
+        val validIds = reconciled.map { it.id }.toSet()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val currentReadIds = (prefs.getString(KEY_READ_IDS, "") ?: "")
+            .split(",")
+            .filter { it.isNotBlank() && validIds.contains(it) }
+        prefs.edit().putString(KEY_READ_IDS, currentReadIds.joinToString(",")).apply()
+
+        notifyStateChanged()
         return reconciled
     }
 

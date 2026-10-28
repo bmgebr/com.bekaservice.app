@@ -51,7 +51,8 @@ fun ProfileAndAuthScreen(
     products: List<ProductItem> = emptyList(),
     onProductClick: (ProductItem) -> Unit = {},
     onToggleFavorite: (ProductItem) -> Unit = {},
-    onAddToCart: (ProductItem) -> Unit = {}
+    onAddToCart: (ProductItem) -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -164,8 +165,8 @@ fun ProfileAndAuthScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppThemeColorAdapter.adaptPageBackground(Color(0xFF0D0F12)))
-            .padding(14.dp),
+            .padding(horizontal = 14.dp),
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {

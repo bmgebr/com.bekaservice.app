@@ -684,11 +684,16 @@ fun UserNotificationsScreen(
     onBack: () -> Unit,
     isLoading: Boolean = false,
     errorMessage: String? = null,
-    onRetry: () -> Unit = {}
+    onRetry: () -> Unit = {},
+    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
     val context = LocalContext.current
     val version = BekaNotificationManager.stateVersion.intValue
     var selectedFilter by remember { mutableStateOf("all") }
+
+    LaunchedEffect(Unit) {
+        BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(context, force = true)
+    }
 
     val allVisibleNotifications = remember(cloudNotifications, version) {
         BekaNotificationManager.getVisibleUserNotifications(context, cloudNotifications)
@@ -721,7 +726,7 @@ fun UserNotificationsScreen(
             .fillMaxSize()
             .padding(horizontal = 14.dp)
             .testTag("user_notifications_screen"),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. ჰედერი და ყველას წაკითხულად მონიშვნის ღილაკი
@@ -1176,7 +1181,8 @@ fun UserNotificationsScreen(
 // ==============================================================================
 @Composable
 fun AppUpdateScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
     val context = LocalContext.current
     val firestoreRepo = remember {
@@ -1258,7 +1264,7 @@ fun AppUpdateScreen(
             .fillMaxSize()
             .padding(horizontal = 14.dp)
             .testTag("app_update_screen"),
-        contentPadding = PaddingValues(vertical = 12.dp),
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. სათაური: "აპლიკაციის განახლება"

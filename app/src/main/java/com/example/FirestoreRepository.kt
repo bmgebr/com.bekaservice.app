@@ -1469,13 +1469,79 @@ class FirestoreRepository(val db: FirebaseFirestore) {
         }
     }
 
+    private fun parseDocTimestampMillis(doc: DocumentSnapshot, field: String): Long? {
+        return try {
+            val raw = doc.get(field) ?: return null
+            when (raw) {
+                is com.google.firebase.Timestamp -> raw.toDate().time
+                is java.util.Date -> raw.time
+                is Number -> raw.toLong()
+                is String -> raw.toLongOrNull() ?: try {
+                    java.time.Instant.parse(raw).toEpochMilli()
+                } catch (_: Exception) {
+                    null
+                }
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun getBroadcastNotifications(): Result<List<PushNotificationRecord>> {
+        return try {
+            val snapshot = db.collection("notifications").limit(100).get().await()
+            val items = snapshot.documents.mapNotNull { doc ->
+                try {
+                    val id = (doc.getString("id") ?: doc.id).trim()
+                    val title = (doc.getString("title") ?: (doc.get("title") as? String))?.trim() ?: return@mapNotNull null
+                    val body = (doc.getString("body") ?: (doc.get("body") as? String))?.trim() ?: return@mapNotNull null
+                    if (id.isBlank() || title.isBlank() || body.isBlank() ||
+                        BekaNotificationManager.isSyntheticOrTestNotification(id, title, body)
+                    ) {
+                        return@mapNotNull null
+                    }
+                    val type = doc.getString("type") ?: (doc.get("type") as? String) ?: "announcement"
+                    val targetProductId = doc.getLong("targetProductId")?.toInt()
+                        ?: (doc.get("targetProductId") as? Number)?.toInt() ?: 0
+                    val targetTab = doc.getLong("targetTab")?.toInt()
+                        ?: (doc.get("targetTab") as? Number)?.toInt() ?: 0
+                    val senderEmail = doc.getString("senderEmail") ?: ""
+                    val audience = doc.getString("audience") ?: "all"
+                    val status = doc.getString("status") ?: "submitted"
+                    val createdAtMillis = parseDocTimestampMillis(doc, "createdAt") ?: System.currentTimeMillis()
+                    val updatedAtMillis = parseDocTimestampMillis(doc, "updatedAt") ?: 0L
+                    PushNotificationRecord(
+                        id = id,
+                        title = title,
+                        body = body,
+                        type = type,
+                        targetProductId = targetProductId,
+                        targetTab = targetTab,
+                        senderEmail = senderEmail,
+                        createdAtMillis = createdAtMillis,
+                        updatedAtMillis = updatedAtMillis,
+                        audience = audience,
+                        status = status
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("BekaPush", "Skipping unparseable notification doc: ${doc.id}", e)
+                    null
+                }
+            }.sortedByDescending { it.createdAtMillis }
+            Result.success(items)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "notifications")
+            Result.failure(e)
+        }
+    }
+
     fun listenToBroadcastNotifications(
         onError: (String) -> Unit = {},
         onNotificationsUpdated: (List<PushNotificationRecord>) -> Unit
     ): ListenerRegistration {
         return db.collection("notifications")
-            .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
-            .limit(50)
+            .limit(100)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     handleFirestoreError(error, OperationType.LIST, "notifications")
@@ -1484,43 +1550,43 @@ class FirestoreRepository(val db: FirebaseFirestore) {
                 }
                 if (snapshot != null) {
                     val items = snapshot.documents.mapNotNull { doc ->
-                        val id = (doc.getString("id") ?: doc.id).trim()
-                        if (id.isBlank() || BekaNotificationManager.isSyntheticOrTestNotificationId(id)) {
-                            return@mapNotNull null
+                        try {
+                            val id = (doc.getString("id") ?: doc.id).trim()
+                            val title = (doc.getString("title") ?: (doc.get("title") as? String))?.trim() ?: return@mapNotNull null
+                            val body = (doc.getString("body") ?: (doc.get("body") as? String))?.trim() ?: return@mapNotNull null
+                            if (id.isBlank() || title.isBlank() || body.isBlank() ||
+                                BekaNotificationManager.isSyntheticOrTestNotification(id, title, body)
+                            ) {
+                                return@mapNotNull null
+                            }
+                            val type = doc.getString("type") ?: (doc.get("type") as? String) ?: "announcement"
+                            val targetProductId = doc.getLong("targetProductId")?.toInt()
+                                ?: (doc.get("targetProductId") as? Number)?.toInt() ?: 0
+                            val targetTab = doc.getLong("targetTab")?.toInt()
+                                ?: (doc.get("targetTab") as? Number)?.toInt() ?: 0
+                            val senderEmail = doc.getString("senderEmail") ?: ""
+                            val audience = doc.getString("audience") ?: "all"
+                            val status = doc.getString("status") ?: "submitted"
+                            val createdAtMillis = parseDocTimestampMillis(doc, "createdAt") ?: System.currentTimeMillis()
+                            val updatedAtMillis = parseDocTimestampMillis(doc, "updatedAt") ?: 0L
+                            PushNotificationRecord(
+                                id = id,
+                                title = title,
+                                body = body,
+                                type = type,
+                                targetProductId = targetProductId,
+                                targetTab = targetTab,
+                                senderEmail = senderEmail,
+                                createdAtMillis = createdAtMillis,
+                                updatedAtMillis = updatedAtMillis,
+                                audience = audience,
+                                status = status
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.w("BekaPush", "Skipping unparseable notification doc: ${doc.id}", e)
+                            null
                         }
-                        val title = doc.getString("title")?.trim() ?: return@mapNotNull null
-                        val body = doc.getString("body")?.trim() ?: return@mapNotNull null
-                        if (title.isBlank() || body.isBlank()) return@mapNotNull null
-                        val type = doc.getString("type") ?: "announcement"
-                        val targetProductId = doc.getLong("targetProductId")?.toInt() ?: 0
-                        val targetTab = doc.getLong("targetTab")?.toInt() ?: 0
-                        val senderEmail = doc.getString("senderEmail") ?: ""
-                        val audience = doc.getString("audience") ?: "all"
-                        val status = doc.getString("status") ?: "submitted"
-                        val createdAtTs = doc.getTimestamp(
-                            "createdAt",
-                            com.google.firebase.firestore.DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        )
-                        val updatedAtTs = doc.getTimestamp(
-                            "updatedAt",
-                            com.google.firebase.firestore.DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        )
-                        val createdAtMillis = createdAtTs?.toDate()?.time ?: System.currentTimeMillis()
-                        val updatedAtMillis = updatedAtTs?.toDate()?.time ?: 0L
-                        PushNotificationRecord(
-                            id = id,
-                            title = title,
-                            body = body,
-                            type = type,
-                            targetProductId = targetProductId,
-                            targetTab = targetTab,
-                            senderEmail = senderEmail,
-                            createdAtMillis = createdAtMillis,
-                            updatedAtMillis = updatedAtMillis,
-                            audience = audience,
-                            status = status
-                        )
-                    }
+                    }.sortedByDescending { it.createdAtMillis }
                     onNotificationsUpdated(items)
                 }
             }
