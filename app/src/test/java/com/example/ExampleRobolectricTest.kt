@@ -1409,6 +1409,330 @@ class ExampleRobolectricTest {
     assertEquals(photoBounds.height, techBounds.height)
     assertEquals(photoBounds.width, techBounds.width, 1.0f)
   }
+
+  @Test
+  fun `audit test 1 - AI diagnostics and AI assistant accurately diagnose screen, charging, and camera symptoms without unrelated catalog spam`() {
+    val catalog = ProductRepository.getAllProducts()
+
+    // Case A: „ეკრანი არ ირთვება“
+    val screenUserMsg = DiagnosticMessage(role = "user", text = "ეკრანი არ ირთვება")
+    val screenDiag = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = screenUserMsg,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+    assertNotNull(screenDiag.structuredSection)
+    // Must NOT pitch a specific iPhone 15 Pro Max screen product when no model was mentioned
+    assertTrue(
+      "„ეკრანი არ ირთვება“ without model must not push unrelated catalog products",
+      screenDiag.recommendedProductIds.isEmpty()
+    )
+    // Must distinguish total power-off vs black screen with device running, and suggest safe checks
+    val combinedScreenText = screenDiag.text + " " +
+      screenDiag.structuredSection!!.hypotheses.joinToString(" ") { it.title + " " + it.supportingEvidence } + " " +
+      screenDiag.structuredSection!!.nextDiagnosticTest + " " +
+      screenDiag.structuredSection!!.followUpQuestion
+    assertTrue("Must mention display/OLED/backlight possibility", combinedScreenText.contains("OLED") || combinedScreenText.contains("განათებ") || combinedScreenText.contains("ეკრან"))
+    assertTrue("Must mention checking vibration/sound/calls or charging", combinedScreenText.contains("ვიბრაცი") || combinedScreenText.contains("ხმა") || combinedScreenText.contains("დამტენ"))
+    assertTrue("Must include a clarifying follow-up question", screenDiag.structuredSection!!.followUpQuestion.isNotBlank() || screenDiag.text.contains("?"))
+
+    val assistantScreenReply = GeminiDiagnosticService.generateLocalDiagnostic("ეკრანი არ ირთვება", catalog)
+    assertTrue(assistantScreenReply.contains("ეკრანი არ ირთვება"))
+    assertTrue(assistantScreenReply.contains("ვიბრაცი") || assistantScreenReply.contains("Force Restart"))
+    assertTrue(GeminiDiagnosticService.findRelevantProducts("ეკრანი არ ირთვება", catalog).isEmpty())
+
+    // Case B: „ტელეფონი არ იტენება“
+    val chargingUserMsg = DiagnosticMessage(role = "user", text = "ტელეფონი არ იტენება")
+    val chargingDiag = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = chargingUserMsg,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+    assertNotNull(chargingDiag.structuredSection)
+    val combinedChargingText = chargingDiag.text + " " +
+      chargingDiag.structuredSection!!.hypotheses.joinToString(" ") { it.title + " " + it.supportingEvidence } + " " +
+      chargingDiag.structuredSection!!.nextDiagnosticTest
+    assertTrue("Must consider cable and adapter", combinedChargingText.contains("კაბელ") && combinedChargingText.contains("ადაპტერ"))
+    assertTrue("Must consider charging port dust/wear", combinedChargingText.contains("პორტ") && (combinedChargingText.contains("მტვერ") || combinedChargingText.contains("ნადებ") || combinedChargingText.contains("კონტაქტ")))
+    assertTrue("Must consider battery or charging IC as a possible cause", combinedChargingText.contains("ელემენტ") || combinedChargingText.contains("კონტროლერ") || combinedChargingText.contains("PMIC"))
+    assertTrue("„ტელეფონი არ იტენება“ without model must not push unrelated catalog products", chargingDiag.recommendedProductIds.isEmpty())
+
+    // Verify GeminiDiagnosticService never mistakes „ტელეფონი არ იტენება“ for shop phone number/address!
+    val assistantChargingReply = GeminiDiagnosticService.generateLocalDiagnostic("ტელეფონი არ იტენება", catalog)
+    assertFalse(
+      "„ტელეფონი არ იტენება“ must NOT return shop contact info",
+      assistantChargingReply.contains("საკონტაქტო მონაცემები")
+    )
+    assertTrue(assistantChargingReply.contains("კაბელ") && assistantChargingReply.contains("ადაპტერ") && assistantChargingReply.contains("პორტ"))
+
+    // Case C: „კამერა არ ფოკუსირდება“
+    val cameraUserMsg = DiagnosticMessage(role = "user", text = "კამერა არ ფოკუსირდება")
+    val cameraDiag = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = cameraUserMsg,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+    assertNotNull(cameraDiag.structuredSection)
+    val combinedCameraText = cameraDiag.text + " " +
+      cameraDiag.structuredSection!!.hypotheses.joinToString(" ") { it.title + " " + it.supportingEvidence } + " " +
+      cameraDiag.structuredSection!!.nextDiagnosticTest
+    assertTrue("Must mention lens cleanliness/cover", combinedCameraText.contains("ლინზ") || combinedCameraText.contains("შუშ"))
+    assertTrue("Must mention OIS/AF mechanism", combinedCameraText.contains("OIS") || combinedCameraText.contains("ავტოფოკუს"))
+    assertTrue("Must suggest checking 0.5x / 1x / 2x modes", combinedCameraText.contains("0.5x") && combinedCameraText.contains("1x"))
+    // Must NOT blame the battery for camera focus!
+    assertFalse(
+      "Camera focus diagnosis must NOT blame battery degradation",
+      cameraDiag.structuredSection!!.hypotheses.any { it.title.contains("ელემენტ") || it.title.contains("ბატარე") }
+    )
+
+    val assistantCameraReply = GeminiDiagnosticService.generateLocalDiagnostic("კამერა არ ფოკუსირდება", catalog)
+    assertTrue(assistantCameraReply.contains("0.5x") && assistantCameraReply.contains("OIS"))
+  }
+
+  @Test
+  fun `audit test 2 - zero response duplication, deduplicated hypotheses, rapid double-tap protection, error state handling, and stale session isolation`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    DiagnosticsSessionRepository.clearAllSessions(context)
+    val catalog = ProductRepository.getAllProducts().take(8)
+    var holderRef: DiagnosticsWorkspaceStateHolder? = null
+
+    try {
+      composeTestRule.setContent {
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        val holder = androidx.compose.runtime.remember {
+          DiagnosticsWorkspaceStateHolder(context = context, coroutineScope = scope)
+        }
+        holderRef = holder
+        RepairProTheme(darkTheme = true) {
+          DiagnosticsWorkspaceScreen(
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 0.dp, bottom = 0.dp),
+            onProductClick = {},
+            products = catalog,
+            externalStateHolder = holder
+          )
+        }
+      }
+      composeTestRule.waitForIdle()
+
+      // 1. Verify parser deduplicates identical hypotheses, deduplicates product IDs, and prevents nextDiagnosticTest duplication in summaryText
+      val duplicateJson = """
+        {
+          "summaryText": "ეკრანის ანალიზი დასრულდა.\n\n**შემდეგი რეკომენდებული სადიაგნოსტიკო ნაბიჯი:** შეაერთეთ დამტენზე 15 წუთით.",
+          "deviceIdentification": "iPhone 13",
+          "visualInspectionFindings": "",
+          "hypotheses": [
+            {
+              "title": "OLED მატრიცის დაზიანება",
+              "confidence": "HIGH",
+              "supportingEvidence": "სიმპტომი 1",
+              "verificationOrDisproof": "შემოწმება 1"
+            },
+            {
+              "title": "oled მატრიცის დაზიანება",
+              "confidence": "HIGH",
+              "supportingEvidence": "დუბლირებული",
+              "verificationOrDisproof": "დუბლირებული"
+            }
+          ],
+          "nextDiagnosticTest": "შეაერთეთ დამტენზე 15 წუთით.",
+          "expectedFindings": "ჩაირთვება",
+          "followUpQuestion": "დავარდნის შემდეგ დაეწყო?",
+          "requiredTools": "",
+          "safetyConsiderations": "",
+          "recommendedProductIds": [1, 1, 2, 2]
+        }
+      """.trimIndent()
+
+      val sampleUserMsg = DiagnosticMessage(role = "user", text = "iPhone 13 ეკრანი არ ირთვება")
+      val parsedMsg = BekaMultimodalDiagnosticsEngine.parseStructuredDiagnosticMessage(
+        rawResponse = duplicateJson,
+        mode = DiagnosticUserMode.STANDARD,
+        catalogProducts = catalog,
+        currentMessage = sampleUserMsg
+      )
+      assertEquals("Duplicate hypotheses must be deduplicated", 1, parsedMsg.structuredSection!!.hypotheses.size)
+      assertEquals("Duplicate product IDs must be deduplicated", listOf(1, 2), parsedMsg.recommendedProductIds)
+      assertFalse(
+        "summaryText must not repeat nextDiagnosticTest block",
+        parsedMsg.text.contains("შემდეგი რეკომენდებული სადიაგნოსტიკო ნაბიჯი")
+      )
+      assertEquals("დავარდნის შემდეგ დაეწყო?", parsedMsg.structuredSection!!.followUpQuestion)
+
+      // 2. Verify malformed JSON throws IllegalArgumentException when strictJsonValidation is enabled
+      var malformedThrew = false
+      try {
+        BekaMultimodalDiagnosticsEngine.parseStructuredDiagnosticMessage(
+          rawResponse = "not a json object at all",
+          mode = DiagnosticUserMode.STANDARD,
+          catalogProducts = catalog,
+          currentMessage = sampleUserMsg,
+          strictJsonValidation = true
+        )
+      } catch (e: IllegalArgumentException) {
+        malformedThrew = true
+      }
+      assertTrue("Malformed JSON must throw IllegalArgumentException", malformedThrew)
+
+      // 3. Test rapid double-tap protection and single response per turn
+      var analyzerCallCount = 0
+      BekaMultimodalDiagnosticsEngine.customAnalyzerOverride = { _, userMsg, mode, _ ->
+        analyzerCallCount++
+        kotlinx.coroutines.delay(150)
+        BekaMultimodalDiagnosticsEngine.EngineResponse(
+          assistantMessage = DiagnosticMessage(
+            role = "assistant",
+            text = "ერთადერთი უნიკალური პასუხი: ${userMsg.text}",
+            mode = mode,
+            structuredSection = StructuredDiagnosticSection(
+              observedSymptoms = userMsg.text,
+              deviceIdentification = "Samsung Galaxy S23",
+              hypotheses = listOf(
+                DiagnosticHypothesis(
+                  title = "დამტენის პორტის დაბინძურება",
+                  confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                  supportingEvidence = "კაბელი არ ჯდება მჭიდროდ",
+                  verificationOrDisproof = "პორტის დათვალიერება"
+                )
+              ),
+              nextDiagnosticTest = "სცადეთ სხვა კაბელი და ადაპტერი.",
+              followUpQuestion = "ჩნდება თუ არა დატენვის ნიშანი?"
+            )
+          ),
+          usedLiveModel = true
+        )
+      }
+
+      composeTestRule.runOnIdle {
+        // Rapidly invoke sendMessage 3 times in a row
+        holderRef!!.sendMessage(overrideText = "Samsung S23 ტელეფონი არ იტენება", catalogProducts = catalog)
+        holderRef!!.sendMessage(overrideText = "Samsung S23 ტელეფონი არ იტენება", catalogProducts = catalog)
+        holderRef!!.sendMessage(overrideText = "Samsung S23 ტელეფონი არ იტენება", catalogProducts = catalog)
+      }
+
+      composeTestRule.waitUntil(timeoutMillis = 10000L) {
+        !holderRef!!.isAnalyzing && holderRef!!.messages.size == 2
+      }
+      composeTestRule.waitForIdle()
+
+      assertEquals("Rapid triple send must only execute analyzer once", 1, analyzerCallCount)
+      assertEquals("Conversation must contain exactly 1 user message and 1 assistant message", 2, holderRef!!.messages.size)
+      assertEquals(1, holderRef!!.messages.count { it.isUser })
+      assertEquals(1, holderRef!!.messages.count { !it.isUser })
+
+      // 4. Test Stale Async Request Cancellation when starting a New Session ("ახალი")
+      BekaMultimodalDiagnosticsEngine.customAnalyzerOverride = { _, _, mode, _ ->
+        kotlinx.coroutines.delay(500)
+        BekaMultimodalDiagnosticsEngine.EngineResponse(
+          assistantMessage = DiagnosticMessage(
+            role = "assistant",
+            text = "STALE_RESPONSE_FROM_OLD_SESSION",
+            mode = mode
+          ),
+          usedLiveModel = true
+        )
+      }
+
+      composeTestRule.runOnIdle {
+        holderRef!!.sendMessage(overrideText = "ძველი სესიის კითხვა", catalogProducts = catalog)
+      }
+      assertTrue("StateHolder should be analyzing immediately after send", holderRef!!.isAnalyzing)
+
+      // User clicks "ახალი" (startNewSession) BEFORE the 500ms request finishes
+      composeTestRule.runOnIdle {
+        holderRef!!.startNewSession()
+      }
+      composeTestRule.waitForIdle()
+      assertFalse("isAnalyzing must immediately reset on startNewSession", holderRef!!.isAnalyzing)
+      assertTrue("New session messages must be empty", holderRef!!.messages.isEmpty())
+
+      // Wait past 500ms and verify the stale response NEVER appears in the new session
+      Thread.sleep(600)
+      composeTestRule.waitForIdle()
+      assertTrue(
+        "Stale response from cancelled session must NEVER be added to new session",
+        holderRef!!.messages.none { it.text.contains("STALE_RESPONSE_FROM_OLD_SESSION") }
+      )
+
+      // 5. Test Engine Error State (must show error banner, restore inputText, and NEVER append a fake diagnosis)
+      BekaMultimodalDiagnosticsEngine.customAnalyzerOverride = { _, _, _, _ ->
+        throw RuntimeException("Simulated network timeout")
+      }
+
+      composeTestRule.runOnIdle {
+        holderRef!!.sendMessage(overrideText = "კამერა არ ფოკუსირდება", catalogProducts = catalog)
+      }
+      composeTestRule.waitUntil(timeoutMillis = 10000L) {
+        !holderRef!!.isAnalyzing
+      }
+      composeTestRule.waitForIdle()
+
+      assertTrue("No fake assistant diagnosis may be added on error", holderRef!!.messages.isEmpty())
+      assertNotNull("Error message banner must be set on failure", holderRef!!.errorMessage)
+      assertEquals("Failed user text must be restored to composer for retry", "კამერა არ ფოკუსირდება", holderRef!!.inputText)
+      composeTestRule.onNodeWithTag("diag_retry_banner").assertIsDisplayed()
+    } finally {
+      BekaMultimodalDiagnosticsEngine.customAnalyzerOverride = null
+    }
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `audit test 3 - AiAssistantScreen and DiagnosticsWorkspaceScreen composers remain visible, keyboard-aware, and support multi-line input and sending`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    val catalog = ProductRepository.getAllProducts().take(10)
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        // Render AiAssistantScreen with simulated bottom inset (e.g., keyboard/IME height of 300.dp)
+        AiAssistantScreen(
+          products = catalog,
+          onProductClick = {},
+          onAddToCart = {},
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 64.dp, bottom = 300.dp)
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Verify AiAssistantScreen root, chat list, composer row, input, and send button are all displayed above the 300.dp bottom inset
+    val rootNode = composeTestRule.onNodeWithTag("ai_assistant_root").assertIsDisplayed()
+    val composerNode = composeTestRule.onNodeWithTag("ai_assistant_composer_row").assertIsDisplayed()
+    val inputNode = composeTestRule.onNodeWithTag("ai_assistant_input").assertIsDisplayed()
+    val sendBtnNode = composeTestRule.onNodeWithTag("ai_assistant_send_button").assertIsDisplayed()
+
+    val rootBounds = rootNode.fetchSemanticsNode().boundsInRoot
+    val composerBounds = composerNode.fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "AiAssistantScreen composer must remain fully visible inside the inset-adjusted root container",
+      composerBounds.bottom <= rootBounds.bottom + 2.0f && composerBounds.top >= rootBounds.top
+    )
+
+    // 2. Focus empty field, type multi-line Georgian symptom text, and verify input and send button remain visible
+    inputNode.performClick()
+    val multilineSymptom = "ტელეფონი არ იტენება\nსხვა კაბელიც ვცადე\nდა პორტი სუფთაა"
+    inputNode.performTextReplacement(multilineSymptom)
+    composeTestRule.waitForIdle()
+
+    inputNode.assertIsDisplayed()
+    sendBtnNode.assertIsDisplayed()
+
+    // 3. Send message while keyboard is open and verify response is added cleanly without hiding composer
+    sendBtnNode.performClick()
+    composeTestRule.waitUntil(timeoutMillis = 10000L) {
+      composeTestRule.onAllNodes(
+        androidx.compose.ui.test.hasText("დიაგნოსტიკური ანალიზი: ტელეფონი არ იტენება", substring = true)
+      ).fetchSemanticsNodes().isNotEmpty()
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("ai_assistant_composer_row").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("ai_assistant_input").assertIsDisplayed()
+  }
 }
+
 
 

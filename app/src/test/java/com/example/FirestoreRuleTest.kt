@@ -85,6 +85,29 @@ class FirestoreRuleTest {
         }
     }
 
+    private fun provisionAdminDocument(adminUid: String) {
+        val deleteUrl = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins/$adminUid")
+        try {
+            val delConn = (deleteUrl.openConnection() as java.net.HttpURLConnection).apply {
+                requestMethod = "DELETE"
+                setRequestProperty("Authorization", "Bearer owner")
+            }
+            delConn.responseCode
+        } catch (_: Exception) {}
+
+        val url = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins?documentId=$adminUid")
+        val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Authorization", "Bearer owner")
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            doOutput = true
+        }
+        val body = """{"fields":{"email":{"stringValue":"beqa1994@gmail.com"},"role":{"stringValue":"super_admin"},"enabled":{"booleanValue":true}}}"""
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val code = conn.responseCode
+        assertTrue("Provisioning admin doc failed with HTTP $code", code in 200..299)
+    }
+
     @Test
     fun testSaveAndUpdateUserProfileAndCreateOrderSucceeds() = runBlocking {
         val uid = signInTestUser("beqa.test@bekaservice.ge")
@@ -270,29 +293,7 @@ class FirestoreRuleTest {
 
         // Provision /admins/{adminUid} with enabled = true via Emulator REST API (bypassing client rules using Bearer owner)
         withContext(Dispatchers.IO) {
-            val url = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins?documentId=$adminUid")
-            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Authorization", "Bearer owner")
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                doOutput = true
-            }
-            val body = """{"fields":{"email":{"stringValue":"beqa1994@gmail.com"},"role":{"stringValue":"super_admin"},"enabled":{"booleanValue":true}}}"""
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = conn.responseCode
-            if (code == 409) {
-                val patchUrl = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins/$adminUid")
-                val patchConn = (patchUrl.openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "PATCH"
-                    setRequestProperty("Authorization", "Bearer owner")
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    doOutput = true
-                }
-                patchConn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                assertTrue(patchConn.responseCode in 200..299)
-            } else {
-                assertTrue("Provisioning admin doc failed with HTTP $code", code in 200..299)
-            }
+            provisionAdminDocument(adminUid)
         }
 
         assertTrue("Current user must be verified as admin", repository.checkIsCurrentUserAdmin())
@@ -456,28 +457,7 @@ class FirestoreRuleTest {
         // 5. Provision verified admin and verify admin CAN send and delete broadcast notifications
         val adminUid = signInTestUser("admin.push@bekaservice.ge")
         withContext(Dispatchers.IO) {
-            val url = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins?documentId=$adminUid")
-            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Authorization", "Bearer owner")
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                doOutput = true
-            }
-            val body = """{"fields":{"email":{"stringValue":"beqa1994@gmail.com"},"role":{"stringValue":"super_admin"},"enabled":{"booleanValue":true}}}"""
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode == 409) {
-                val patchUrl = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins/$adminUid")
-                val patchConn = (patchUrl.openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "PATCH"
-                    setRequestProperty("Authorization", "Bearer owner")
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    doOutput = true
-                }
-                patchConn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                assertTrue(patchConn.responseCode in 200..299)
-            } else {
-                assertTrue(conn.responseCode in 200..299)
-            }
+            provisionAdminDocument(adminUid)
         }
 
         val adminSendRes = withTimeout(5000L) {
@@ -616,28 +596,7 @@ class FirestoreRuleTest {
         // 4. Provision admin and save app_config/updates + send & update notification targeting Tab 7
         val adminUid = signInTestUser("admin.update@bekaservice.ge")
         withContext(Dispatchers.IO) {
-            val url = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins?documentId=$adminUid")
-            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Authorization", "Bearer owner")
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                doOutput = true
-            }
-            val body = """{"fields":{"email":{"stringValue":"beqa1994@gmail.com"},"role":{"stringValue":"super_admin"},"enabled":{"booleanValue":true}}}"""
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (conn.responseCode == 409) {
-                val patchUrl = java.net.URL("http://127.0.0.1:8085/v1/projects/demo-no-project/databases/$databaseId/documents/admins/$adminUid")
-                val patchConn = (patchUrl.openConnection() as java.net.HttpURLConnection).apply {
-                    requestMethod = "PATCH"
-                    setRequestProperty("Authorization", "Bearer owner")
-                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    doOutput = true
-                }
-                patchConn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                assertTrue(patchConn.responseCode in 200..299)
-            } else {
-                assertTrue(conn.responseCode in 200..299)
-            }
+            provisionAdminDocument(adminUid)
         }
 
         val adminSaveUpdate = withTimeout(5000L) {

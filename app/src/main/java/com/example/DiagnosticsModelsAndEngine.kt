@@ -126,7 +126,8 @@ data class StructuredDiagnosticSection(
     val nextDiagnosticTest: String = "",
     val expectedFindings: String = "",
     val requiredTools: String = "",
-    val safetyConsiderations: String = ""
+    val safetyConsiderations: String = "",
+    val followUpQuestion: String = ""
 )
 
 data class DiagnosticMessage(
@@ -383,6 +384,16 @@ object BekaMultimodalDiagnosticsEngine {
     @Volatile
     private var firebaseAiEndpointUnavailable = false
 
+    // Optional test/diagnostic override hook for deterministic verification of API errors,
+    // malformed responses, and out-of-order async concurrency without fake fallback masking.
+    @Volatile
+    var customAnalyzerOverride: (suspend (
+        List<DiagnosticMessage>,
+        DiagnosticMessage,
+        DiagnosticUserMode,
+        List<ProductItem>
+    ) -> EngineResponse)? = null
+
     data class EngineResponse(
         val assistantMessage: DiagnosticMessage,
         val usedLiveModel: Boolean
@@ -392,9 +403,9 @@ object BekaMultimodalDiagnosticsEngine {
         val modeSpecificRules = when (mode) {
             DiagnosticUserMode.STANDARD -> """
 რეჟიმი: სტანდარტული (მომხმარებლის რეჟიმი).
-- ისაუბრე ბუნებრივად, ჭკვიანურად, პროფესიონალურად და გასაგები ქართული ენით.
-- არ გამოიყენო რობოტული ფრაზები (მაგ. "ანალიზი მომზადებულია (სტანდარტული რეჟიმი...)"). პირდაპირ უპასუხე მომხმარებლის კითხვას!
-- შესთავაზე უსაფრთხო, პრაქტიკული შემოწმებები სახლის პირობებში და აუხსენი, როდის სჯობს სერვის-ცენტრში მიტანა.
+- ისაუბრე ბუნებრივად, პროფესიონალურად და გასაგები ქართული ენით.
+- არ გამოიყენო რობოტული შაბლონები. პირდაპირ უპასუხე მომხმარებლის კითხვას!
+- შესთავაზე უსაფრთხო, პრაქტიკული შემოწმებები სახლის პირობებში (მარტივიდან რთულისკენ) და მკაფიოდ აუხსენი, როდის არის საჭირო სერვის-ცენტრის ჩარევა.
 """.trimIndent()
 
             DiagnosticUserMode.TECHNICIAN -> """
@@ -405,34 +416,39 @@ object BekaMultimodalDiagnosticsEngine {
         }
 
         return """
-შენ ხარ BEKASERVICE-ის უფროსი მულტიმოდალური AI ინჟინერი და ჭკვიანი ტექნიკური ასისტენტი.
-შენი ამოცანაა:
-1. ზუსტად გაიგო მომხმარებლის ნებისმიერი კითხვა ქართულ ენაზე:
-   - თუ კითხვა ეხება ტელეფონის ან ტექნიკის პრობლემას/სიმპტომს ან ატვირთულ ფოტოს — ჩაატარე პროფესიონალური, მტკიცებულებებზე დაფუძნებული დიაგნოსტიკა.
-   - თუ კითხვა ეხება BEKASERVICE-ის კატალოგის პროდუქტს ან პროგრამულ სერვისს — მიაწოდე ზუსტი ინფორმაცია კატალოგიდან და მიუთითე შესაბამისი ID `recommendedProductIds`-ში.
-   - თუ კითხვა ზოგადია (მაგ: რჩევა ტელეფონის შერჩევაზე, ტექნოლოგიური შეკითხვა, შედარება, მისალმება) — უპასუხე ჭკვიანურად, ამომწურავად და მეგობრულად, ხოლო `isDiagnosticCase` დააყენე `false`-ზე.
-2. მრავალეტაპიანი საუბრის (Multi-Turn) კონტექსტის შენარჩუნება (კრიტიკული!):
-   - როდესაც მომხმარებელი სვამს გაგრძელების კითხვას (მაგ: "რა შეიძლება იყოს მიზეზი?", "როგორ შევამოწმო ეს?", "და შემდეგ რა შევამოწმო?", "საშიშია?", "მონაცემები წამეშლება?", "სერვისში მიტანა აუცილებელია?"), უპასუხე კონკრეტულად ამ კითხვაზე წინა შეტყობინებებში უკვე განხილული ტელეფონისა და სიმპტომის კონტექსტში!
-   - არასდროს თავიდან არ მოსთხოვო მოდელის ან სიმპტომის გამეორება, თუ ეს უკვე ნახსენებია.
-   - ტექნიკური დიაგნოსტიკისას არასდროს შესთავაზო უადგილო ციფრული პროგრამული სერვისები (მაგ: Canva, CapCut, Adobe, Windows, Office), თუ მომხმარებელს ეს კონკრეტულად არ მოუთხოვია!
-3. არასდროს გამოიყენო ყალბი პროცენტები (მაგ. "99.5% სიზუსტე").
-4. ჰიპოთეზებისთვის გამოიყენე მხოლოდ ეს 4 მტკიცებულების დონე:
-   - "დადასტურებულია მოწოდებული მტკიცებულებით"
+შენ ხარ BEKASERVICE-ის უფროსი მულტიმოდალური AI ინჟინერი და ფრთხილი, მტკიცებულებებზე დაფუძნებული მობილური ტექნიკოსი.
+შენი მუშაობის 10 უმკაცრესი წესი:
+1. პირველ რიგში უპასუხე მომხმარებლის კონკრეტულ კითხვას ან აღწერილ სიმპტომს ზუსტად და არსებითად.
+2. მკაფიოდ გაყავი ერთმანეთისგან:
+   - სიმპტომი (რასაც მომხმარებელი აღწერს ან ფოტოზე ჩანს: `observedSymptoms`),
+   - შესაძლო მიზეზი (`hypotheses`),
+   - დადასტურებული ფაქტი.
+3. არ გამოიგონო პრობლემები, რომლებიც მომხმარებელს არ უხსენებია და ფოტოზე არ ჩანს.
+4. არ შესთავაზო მომხმარებელს კატალოგის პროდუქტი ან პროგრამული სერვისი (`recommendedProductIds`), თუ ის პირდაპირ არ უკავშირდება დასმულ პრობლემას და მოწყობილობის მოდელს.
+5. როცა ინფორმაცია საკმარისი არ არის ზუსტი დიაგნოზისთვის, დასვი კონკრეტული დამაზუსტებელი კითხვა (`followUpQuestion`).
+6. ჩამოთვალე ყველაზე სავარაუდო მიზეზები პრიორიტეტის მიხედვით (`hypotheses`) და ახსენი, რა ნიშნით შეიძლება მათი გარჩევა (`verificationOrDisproof`).
+7. შესთავაზე მომხმარებელს უსაფრთხო პირველადი შემოწმების ნაბიჯები მარტივიდან რთულისკენ (`nextDiagnosticTest`).
+8. მიუთითე, როდის არის საჭირო სერვის-ცენტრის პროფესიონალური ჩარევა და რა რისკებია გასათვალისწინებელი (`safetyConsiderations`).
+9. არასოდეს წარმოადგინო სავარაუდო მიზეზი დადასტურებულ დაზიანებად! ჰიპოთეზებისთვის გამოიყენე მხოლოდ ეს 4 დონე:
+   - "დადასტურებულია მოწოდებული მტკიცებულებით" (მხოლოდ მაშინ, როცა ფოტოზე ან მრავალფაქტორიანი ტესტით უტყუარად ჩანს!)
    - "მაღალი ალბათობით სავარაუდო"
    - "შესაძლებელი"
    - "ჯერ არ არის დადგენილი"
-5. ვრცელი და რთული აღწერების სრული გააზრება (Deep Multi-Symptom Comprehension):
-   - როდესაც მომხმარებელი გიზიარებს ვრცელ ისტორიას, აღწერს მოვლენათა ქრონოლოგიას ან ასახელებს რამდენიმე სიმპტომს ერთად (მაგალითად: დაუვარდა + ეკრანი გაუშავდა + მაგრამ ვიბრაცია მუშაობს და კომპიუტერი ცნობს; ან სისველე + დამტენზე შეერთება; ან მეხსიერება გაივსო + ლოგოზე იჭედება):
-   - სრულყოფილად გააანალიზე ყველა ნახსენები ფაქტორი ერთად!
-   - მკაფიოდ გამოყავი: რა არის უვნებელი და მუშა (მაგ: დედაპლატა, პროცესორი, მეხსიერება და სისტემა 100% ცოცხალია, პირადი მონაცემები შენახულია), რა არის დაზიანებული (OLED მატრიცა/შლეიფი), რა რისკებია (მოკლე ჩართვა, მეხსიერების ჩიპის კორუფცია) და რა არის ზუსტი ეტაპობრივი გადაწყვეტა!
+10. არასოდეს ამტკიცო, რომ აპმა ჩაატარა შიდა აპარატურული სკანირება, სენსორული გაზომვა ან ამპერმეტრის ტესტი, თუ ეს რეალურად არ მომხდარა.
+
+დუბლირების აკრძალვა:
+- `summaryText` უნდა იყოს ლაკონური, პირდაპირი შეფასება და პასუხი კითხვაზე. არ გაიმეორო `summaryText`-ში სიტყვასიტყვით იგივე პუნქტები, რაც უკვე ჩაწერილია `hypotheses`, `nextDiagnosticTest` ან `safetyConsiderations` ველებში!
+
+მრავალეტაპიანი საუბრის (Multi-Turn) კონტექსტის შენარჩუნება:
+- როდესაც მომხმარებელი სვამს გაგრძელების კითხვას, უპასუხე კონკრეტულად ამ კითხვაზე მიმდინარე სესიაში განხილული ტელეფონისა და სიმპტომის კონტექსტში.
 
 $modeSpecificRules
 
 უპასუხე მხოლოდ სუფთა JSON ობიექტით:
 {
   "isDiagnosticCase": true,
-  "summaryText": "პირდაპირი, ჭკვიანური და პროფესიონალური პასუხი მომხმარებლის კითხვაზე ქართულად",
-  "observedSymptoms": "დაფიქსირებული სიმპტომები (თუ დიაგნოსტიკაა)",
+  "summaryText": "პირდაპირი, ზუსტი და არადუბლირებული პასუხი მომხმარებლის კითხვაზე ქართულად",
+  "observedSymptoms": "დაფიქსირებული სიმპტომები",
   "deviceIdentification": "დადასტურებული მოდელი ან ცარიელი სტრიქონი",
   "visualInspectionFindings": "ფოტოს ვიზუალური ანალიზი (ან ცარიელი სტრიქონი თუ ფოტო არ არის)",
   "hypotheses": [
@@ -440,19 +456,45 @@ $modeSpecificRules
       "title": "სავარაუდო მიზეზის დასახელება",
       "confidence": "დადასტურებულია მოწოდებული მტკიცებულებით | მაღალი ალბათობით სავარაუდო | შესაძლებელი | ჯერ არ არის დადგენილი",
       "supportingEvidence": "რა ფაქტი/სიმპტომი მიუთითებს ამაზე",
-      "verificationOrDisproof": "რა შემოწმება დაადასტურებს ან გამორიცხავს ამ ვერსიას"
+      "verificationOrDisproof": "რა შემოწმება განასხვავებს, დაადასტურებს ან გამორიცხავს ამ ვერსიას"
     }
   ],
-  "nextDiagnosticTest": "კონკრეტული შემდეგი სადიაგნოსტიკო ნაბიჯი/ტესტი",
+  "nextDiagnosticTest": "კონკრეტული უსაფრთხო შემდეგი სადიაგნოსტიკო ნაბიჯი მარტივიდან რთულისკენ",
   "expectedFindings": "რას ნიშნავს ტესტის შედეგი",
   "requiredTools": "საჭირო ხელსაწყოები ან რეჟიმი",
-  "safetyConsiderations": "უსაფრთხოების და მონაცემთა დაცვის გაფრთხილება",
+  "safetyConsiderations": "უსაფრთხოების, მონაცემთა დაცვის და სერვის-ცენტრში მიმართვის რეკომენდაცია",
+  "followUpQuestion": "კონკრეტული დამაზუსტებელი კითხვა მომხმარებელს (თუ საჭიროა დაზუსტება)",
   "recommendedProductIds": []
 }
 
 BEKASERVICE-ის LIVE კატალოგი:
 $catalogSummary
 """.trimIndent()
+    }
+
+    /**
+     * Deduplicates and caps conversation history so the model receives clean, chronological
+     * context without repeated messages or cross-session leakage.
+     */
+    internal fun sanitizeConversationHistory(
+        conversationHistory: List<DiagnosticMessage>,
+        currentUserMessage: DiagnosticMessage,
+        maxTurns: Int = 10
+    ): List<DiagnosticMessage> {
+        val withoutCurrent = conversationHistory.filterNot {
+            it.id == currentUserMessage.id || it.isError || (it.text.isBlank() && it.attachments.isEmpty())
+        }
+        val deduplicated = mutableListOf<DiagnosticMessage>()
+        for (msg in withoutCurrent) {
+            val prev = deduplicated.lastOrNull()
+            if (prev != null && prev.role == msg.role && prev.text.trim() == msg.text.trim() &&
+                prev.attachments.map { it.id } == msg.attachments.map { it.id }
+            ) {
+                continue
+            }
+            deduplicated.add(msg)
+        }
+        return deduplicated.takeLast(maxTurns)
     }
 
     suspend fun analyzeTurn(
@@ -462,6 +504,27 @@ $catalogSummary
         catalogProducts: List<ProductItem>
     ): EngineResponse = withContext(Dispatchers.IO) {
         val fullCatalog = if (catalogProducts.isNotEmpty()) catalogProducts else ProductRepository.getAllProducts()
+        val cleanHistory = sanitizeConversationHistory(conversationHistory, currentUserMessage)
+
+        // Allow unit/Robolectric tests to inject custom responses or simulate API/JSON errors
+        val overrideHook = customAnalyzerOverride
+        if (overrideHook != null) {
+            return@withContext overrideHook.invoke(cleanHistory, currentUserMessage, mode, fullCatalog)
+        }
+
+        // Guard against blank input with no attachments
+        if (currentUserMessage.text.isBlank() && currentUserMessage.attachments.isEmpty()) {
+            return@withContext EngineResponse(
+                assistantMessage = DiagnosticMessage(
+                    role = "assistant",
+                    text = "შეტყობინება ცარიელია. გთხოვთ აღწეროთ ტელეფონის სიმპტომი ან ატვირთოთ ფოტო.",
+                    mode = mode,
+                    isError = true
+                ),
+                usedLiveModel = false
+            )
+        }
+
         val catalogSummary = fullCatalog.take(60).joinToString("\n") {
             "ID:${it.id} | ${it.title} | ${it.category} | ${it.price} | ${it.shortDescription.take(80)}"
         }
@@ -470,7 +533,7 @@ $catalogSummary
         // 1. Try Direct Gemini REST API first if a valid GEMINI_API_KEY is configured (fastest path)
         val restResult = tryRestMultimodal(
             systemPrompt = systemPrompt,
-            history = conversationHistory,
+            history = cleanHistory,
             currentMessage = currentUserMessage,
             mode = mode,
             catalogProducts = fullCatalog
@@ -483,7 +546,7 @@ $catalogSummary
         if (!firebaseAiEndpointUnavailable || currentUserMessage.attachments.isNotEmpty()) {
             val firebaseResult = tryFirebaseAiMultimodal(
                 systemPrompt = systemPrompt,
-                history = conversationHistory,
+                history = cleanHistory,
                 currentMessage = currentUserMessage,
                 mode = mode,
                 catalogProducts = fullCatalog
@@ -493,9 +556,9 @@ $catalogSummary
             }
         }
 
-        // 3. Instant, intelligent, ChatGPT/Gemini-grade expert analysis & catalog engine (< 50ms)
+        // 3. Evidence-based, multi-turn context-aware technical diagnostic engine
         val fallbackMessage = generateContextAwareDiagnosticResponse(
-            history = conversationHistory,
+            history = cleanHistory,
             currentMessage = currentUserMessage,
             mode = mode,
             catalogProducts = fullCatalog
@@ -526,11 +589,11 @@ $catalogSummary
                 }
                 val fullPrompt = buildString {
                     if (historyContextText.isNotBlank()) {
-                        appendLine("წინა საუბრის კონტექსტი:")
+                        appendLine("წინა საუბრის კონტექსტი (მიმდინარე სესია):")
                         appendLine(historyContextText)
                         appendLine("---")
                     }
-                    appendLine("მომხმარებლის შეტყობინება (${mode.labelKa} რეჟიმი):")
+                    appendLine("მომხმარებლის მიმდინარე შეტყობინება (${mode.labelKa} რეჟიმი):")
                     appendLine(currentMessage.text.ifBlank { "გთხოვ გააანალიზო ატვირთული ფოტო და დასვა დიაგნოზი." })
                 }
                 text(fullPrompt)
@@ -554,7 +617,7 @@ $catalogSummary
             }
         } catch (e: Exception) {
             firebaseAiEndpointUnavailable = true
-            Log.d("BekaMultimodalEngine", "Fast fallback activated (Firebase AI unavailable: ${e.message})")
+            Log.d("BekaMultimodalEngine", "Fast fallback activated (Firebase AI unavailable)")
             null
         }
     }
@@ -576,11 +639,20 @@ $catalogSummary
         }
 
         val contentsArray = JSONArray()
+        var lastRole: String? = null
         for (turn in history.takeLast(8)) {
             if (turn.id == currentMessage.id) continue
             val role = if (turn.isUser) "user" else "model"
-            val parts = JSONArray().put(JSONObject().put("text", turn.text))
-            contentsArray.put(JSONObject().put("role", role).put("parts", parts))
+            if (role == lastRole && contentsArray.length() > 0) {
+                // Merge consecutive same-role messages to keep valid alternating user/model structure
+                val prevObj = contentsArray.optJSONObject(contentsArray.length() - 1)
+                val prevParts = prevObj?.optJSONArray("parts")
+                prevParts?.put(JSONObject().put("text", turn.text))
+            } else {
+                val parts = JSONArray().put(JSONObject().put("text", turn.text))
+                contentsArray.put(JSONObject().put("role", role).put("parts", parts))
+                lastRole = role
+            }
         }
 
         val currentParts = JSONArray()
@@ -607,7 +679,7 @@ $catalogSummary
             put(
                 "generationConfig",
                 JSONObject()
-                    .put("temperature", 0.3)
+                    .put("temperature", 0.25)
                     .put("responseMimeType", "application/json")
             )
         }
@@ -643,7 +715,7 @@ $catalogSummary
                     }
                 }
             } catch (e: Exception) {
-                Log.d("BekaMultimodalEngine", "REST model $modelName failed: ${e.message}")
+                Log.d("BekaMultimodalEngine", "REST model $modelName failed")
             }
         }
         return null
@@ -662,37 +734,54 @@ $catalogSummary
         rawResponse: String,
         mode: DiagnosticUserMode,
         catalogProducts: List<ProductItem>,
-        currentMessage: DiagnosticMessage
+        currentMessage: DiagnosticMessage,
+        strictJsonValidation: Boolean = false
     ): DiagnosticMessage {
-        val cleanedJson = rawResponse
+        val trimmedRaw = rawResponse.trim()
+        if (trimmedRaw.isBlank()) {
+            throw IllegalArgumentException("AI response is empty")
+        }
+
+        val cleanedJson = trimmedRaw
             .removePrefix("```json")
             .removePrefix("```")
             .removeSuffix("```")
             .trim()
 
+        val looksLikeJson = cleanedJson.startsWith("{") || cleanedJson.startsWith("[")
+
         return try {
             val obj = JSONObject(cleanedJson)
             val isDiagnosticCase = obj.optBoolean("isDiagnosticCase", true)
-            val summaryText = obj.optString("summaryText", "").ifBlank {
-                rawResponse.trim()
+            val rawSummary = obj.optString("summaryText", "").trim()
+            if (rawSummary.isBlank() && strictJsonValidation) {
+                throw IllegalArgumentException("Missing summaryText in diagnostic JSON")
             }
-            val observedSymptoms = obj.optString("observedSymptoms", "")
-            val deviceId = obj.optString("deviceIdentification", "")
-            val visualFindings = obj.optString("visualInspectionFindings", "")
+            val observedSymptoms = obj.optString("observedSymptoms", "").trim()
+            val deviceId = obj.optString("deviceIdentification", "").trim()
+            val visualFindings = obj.optString("visualInspectionFindings", "").trim()
+            val nextTest = obj.optString("nextDiagnosticTest", "").trim()
+            val expectedFindings = obj.optString("expectedFindings", "").trim()
+            val requiredTools = obj.optString("requiredTools", "").trim()
+            val safetyConsiderations = obj.optString("safetyConsiderations", "").trim()
+            val followUpQuestion = obj.optString("followUpQuestion", "").trim()
 
             val hypothesesList = mutableListOf<DiagnosticHypothesis>()
+            val seenTitles = mutableSetOf<String>()
             val hypArray = obj.optJSONArray("hypotheses")
             if (hypArray != null) {
                 for (i in 0 until hypArray.length()) {
                     val item = hypArray.optJSONObject(i) ?: continue
                     val title = item.optString("title", "").trim()
                     if (title.isBlank()) continue
+                    val normTitle = title.lowercase()
+                    if (!seenTitles.add(normTitle)) continue // Deduplicate identical hypotheses
                     hypothesesList.add(
                         DiagnosticHypothesis(
                             title = title,
                             confidence = EvidenceConfidenceLevel.fromIdOrLabel(item.optString("confidence")),
-                            supportingEvidence = item.optString("supportingEvidence", ""),
-                            verificationOrDisproof = item.optString("verificationOrDisproof", "")
+                            supportingEvidence = item.optString("supportingEvidence", "").trim(),
+                            verificationOrDisproof = item.optString("verificationOrDisproof", "").trim()
                         )
                     )
                 }
@@ -709,16 +798,31 @@ $catalogSummary
                 }
             }
 
-            val section = if (isDiagnosticCase && (hypothesesList.isNotEmpty() || visualFindings.isNotBlank())) {
+            // Prevent duplicating nextDiagnosticTest or safetyConsiderations inside summaryText
+            var deduplicatedSummary = rawSummary.ifBlank {
+                hypothesesList.firstOrNull()?.title ?: "დიაგნოსტიკური შეფასება მომზადებულია."
+            }
+            if (nextTest.isNotBlank() && deduplicatedSummary.contains(nextTest) && deduplicatedSummary.length > nextTest.length + 15) {
+                deduplicatedSummary = deduplicatedSummary
+                    .replace("**შემდეგი რეკომენდებული სადიაგნოსტიკო ნაბიჯი:**", "")
+                    .replace("შემდეგი რეკომენდებული სადიაგნოსტიკო ნაბიჯი:", "")
+                    .replace("**შემდეგი სადიაგნოსტიკო ნაბიჯი:**", "")
+                    .replace("შემდეგი სადიაგნოსტიკო ნაბიჯი:", "")
+                    .replace(nextTest, "")
+                    .trim()
+            }
+
+            val section = if (isDiagnosticCase && (hypothesesList.isNotEmpty() || visualFindings.isNotBlank() || nextTest.isNotBlank())) {
                 StructuredDiagnosticSection(
                     observedSymptoms = observedSymptoms.ifBlank { currentMessage.text },
                     deviceIdentification = deviceId,
                     visualInspectionFindings = visualFindings,
                     hypotheses = hypothesesList,
-                    nextDiagnosticTest = obj.optString("nextDiagnosticTest", ""),
-                    expectedFindings = obj.optString("expectedFindings", ""),
-                    requiredTools = obj.optString("requiredTools", ""),
-                    safetyConsiderations = obj.optString("safetyConsiderations", "")
+                    nextDiagnosticTest = nextTest,
+                    expectedFindings = expectedFindings,
+                    requiredTools = requiredTools,
+                    safetyConsiderations = safetyConsiderations,
+                    followUpQuestion = followUpQuestion
                 )
             } else {
                 null
@@ -726,15 +830,18 @@ $catalogSummary
 
             DiagnosticMessage(
                 role = "assistant",
-                text = summaryText,
+                text = deduplicatedSummary,
                 mode = mode,
                 structuredSection = section,
                 recommendedProductIds = recIds.distinct().take(3)
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (strictJsonValidation || looksLikeJson) {
+                throw IllegalArgumentException("Malformed AI diagnostic JSON response: ${e.message}", e)
+            }
             DiagnosticMessage(
                 role = "assistant",
-                text = rawResponse.trim(),
+                text = trimmedRaw,
                 mode = mode,
                 structuredSection = null,
                 recommendedProductIds = emptyList()
@@ -883,91 +990,69 @@ $catalogSummary
             isTestResultUpdate = isTestResultUpdate
         )
 
-        // Build intelligent, direct, contextual response
+        // Build intelligent, direct, contextual response (without duplicating structured section cards)
         val naturalResponseText = when {
             isSummaryRequest -> {
                 val userTurnsCount = fullConversation.count { it.isUser }
                 "📋 **დიაგნოსტიკის სესიის შეჯამება ($activeDeviceLabel - $userTurnsCount შეტყობინების მიხედვით):**\n\n" +
                     "• **მთავარი დასკვნა:** ${domainTuple.domainTitle}\n" +
-                    "• **წამყვანი მიზეზი:** ${domainTuple.hypotheses.firstOrNull()?.title ?: "საჭიროებს დაზუსტებას"}\n" +
-                    "• **რეკომენდებული მოქმედება:** ${domainTuple.nextTest}"
+                    "• **წამყვანი სავარაუდო მიზეზი:** ${domainTuple.hypotheses.firstOrNull()?.title ?: "საჭიროებს დაზუსტებას"}"
             }
             isSimpleRequest -> {
                 "💡 **მარტივი და გასაგები ახსნა ($activeDeviceLabel):**\n\n" +
-                    "${domainTuple.simpleExplanation}\n\n" +
-                    "👉 **რა გააკეთოთ ახლა:** ${domainTuple.nextTest}"
+                    domainTuple.simpleExplanation
             }
             isDetailRequest -> {
                 "🔬 **გაღრმავებული ტექნიკური ანალიზი ($activeDeviceLabel):**\n\n" +
-                    "${domainTuple.deepTechnicalExplanation}\n\n" +
-                    "• **გაზომვისა და დიაგნოსტიკის შემდეგი ეტაპი:** ${domainTuple.nextTest}"
+                    domainTuple.deepTechnicalExplanation
             }
             isNextTestRequest -> {
                 "🧪 **შემდეგი სადიაგნოსტიკო შემოწმება ($activeDeviceLabel):**\n\n" +
-                    "${domainTuple.nextTest}\n\n" +
-                    "📌 **შედეგის ინტერპრეტაცია:** ${domainTuple.expectedFindings}\n\n" +
-                    "მომწერეთ რა რეაქცია ექნება ტელეფონს ამ ნაბიჯის შემდეგ და გავაგრძელოთ."
+                    "შეასრულეთ ქვემოთ მოცემული შემოწმების ნაბიჯი და მომწერეთ ტელეფონის რეაქცია, რათა გამოვრიცხოთ მეორეხარისხოვანი ვერსიები."
             }
             isTestResultUpdate -> {
-                "✅ **ტესტის შედეგი მიღებულია და გაანალიზებულია:**\n\n" +
-                    "თქვენ მიერ მოწოდებული ახალი მონაცემების (`\"${latestText.take(120)}\"`) გათვალისწინებით, დიაგნოზი დაზუსტდა: **${domainTuple.domainTitle}** ($activeDeviceLabel).\n\n" +
-                    "${domainTuple.directExplanation}"
+                "✅ **ტესტის შედეგი გათვალისწინებულია ($activeDeviceLabel):**\n\n" +
+                    "თქვენ მიერ მოწოდებული ახალი ინფორმაციის (`\"${latestText.take(120)}\"`) მიხედვით დიაგნოზი დაზუსტდა: **${domainTuple.domainTitle}**.\n\n" +
+                    domainTuple.directExplanation
             }
             isReasonRequest -> {
-                val hyp1 = domainTuple.hypotheses.getOrNull(0)
-                val hyp2 = domainTuple.hypotheses.getOrNull(1)
-                "🔍 **სავარაუდო გამომწვევი მიზეზები ($activeDeviceLabel):**\n\n" +
-                    "თქვენ მიერ აღწერილი პრობლემის (**${domainTuple.domainTitle}**) ანალიზით, ძირითადი გამომწვევი მიზეზებია:\n\n" +
-                    "1. **${hyp1?.title ?: "აპარატურული ცვეთა ან დაზიანება"}**\n" +
-                    "   • ${hyp1?.supportingEvidence ?: "მიუთითებს აღნიშნულ სიმპტომზე"}\n" +
-                    (if (hyp2 != null) "2. **${hyp2.title}**\n   • ${hyp2.supportingEvidence}\n\n" else "\n") +
-                    "💡 **მნიშვნელოვანია:** დედაპლატა და თქვენი პირადი მონაცემები სრულიად უვნებელია. პრობლემა ლოკალიზებულია კონკრეტულ კვანძში.\n\n" +
-                    "👉 **შემოწმებისთვის:** ${domainTuple.nextTest}"
+                "🔍 **სავარაუდო გამომწვევი მიზეზების ანალიზი ($activeDeviceLabel):**\n\n" +
+                    "აღწერილი სიმპტომის (**${domainTuple.domainTitle}**) მიხედვით, ქვემოთ პრიორიტეტის მიხედვით მოცემულია ყველაზე სავარაუდო მიზეზები და მათი ერთმანეთისგან გარჩევის გზები."
             }
             isVerificationRequest -> {
-                "🔬 **როგორ შევამოწმოთ ეს ზუსტად ($activeDeviceLabel):**\n\n" +
-                    "1. **ძირითადი ტესტი:** ${domainTuple.nextTest}\n" +
-                    "2. **რას მივაქციოთ ყურადღება:** ${domainTuple.expectedFindings}\n" +
-                    "3. **საჭირო საშუალება:** ${domainTuple.tools}\n\n" +
-                    "ჩაატარეთ ეს მარტივი შემოწმება და მომწერეთ შედეგი — ზუსტად გეტყვით შემდგომ ნაბიჯს!"
+                "🔬 **როგორ გადავამოწმოთ მიზეზი უსაფრთხოდ ($activeDeviceLabel):**\n\n" +
+                    "მიჰყევით ქვემოთ მოცემულ შემოწმების ინსტრუქციას მარტივიდან რთულისკენ და დააკვირდით მოსალოდნელ ნიშნებს."
             }
             isSafetyRequest -> {
-                "⚠️ **უსაფრთხოების რისკები და რეკომენდაცია ($activeDeviceLabel):**\n\n" +
-                    "${domainTuple.safety}\n\n" +
-                    "• **რისკის შეფასება:** " +
-                    (if (domainTuple.domainTitle.contains("ელემენტ") || domainTuple.domainTitle.contains("წყალ"))
-                        "მაღალია — მოარიდეთ დამტენს და დაუყოვნებლივ გამორთეთ მოწყობილობა!"
+                "⚠️ **უსაფრთხოების შეფასება და რეკომენდაცია ($activeDeviceLabel):**\n\n" +
+                    (if (domainTuple.domainTitle.contains("ელემენტ") || domainTuple.domainTitle.contains("წყალ") || domainTuple.domainTitle.contains("სითხ"))
+                        "რისკის დონე მაღალია — მოარიდეთ მოწყობილობა დამტენს და გაეცანით ქვემოთ მოცემულ უსაფრთხოების წესებს."
                     else
-                        "ზომიერი — დედაპლატას საფრთხე არ ემუქრება, თუმცა დროული შეკეთება თავიდან აგაცილებთ კვანძის საბოლოო გათიშვას.")
+                        "რისკის დონე ზომიერია — დედაპლატას და პირად მონაცემებს უშუალო საფრთხე არ ემუქრება, თუმცა გაითვალისწინეთ ქვემოთ მოცემული გაფრთხილება.")
             }
             isServiceCenterRequest -> {
-                "📍 **სერვის-ცენტრში მიტანა თუ სახლში შემოწმება ($activeDeviceLabel):**\n\n" +
-                    "• **პირველადი ნაბიჯი:** სახლის პირობებში შეგიძლიათ სცადოთ: ${domainTuple.nextTest}\n" +
-                    "• **სერვისული ჩარევა:** თუ ტესტის შემდეგ პრობლემა არ გვარდება, საჭიროა კვანძის შეცვლა ან მიკრო-შლეიფის აღდგენა სპეციალური აღჭურვილობით.\n" +
-                    "• **BEKASERVICE-ში:** დიაგნოსტიკა სრულიად უფასოა! შეგიძლიათ მოაბრძანოთ სერვის-ცენტრში (ახალციხე, მერაბ კოსტავას ქ. N10) ან გამოაგზავნოთ საკურიერო სერვისით."
+                "📍 **სახლში შემოწმება vs სერვის-ცენტრის ჩარევა ($activeDeviceLabel):**\n\n" +
+                    "პირველ ეტაპზე შეგიძლიათ უსაფრთხოდ ჩაატაროთ ქვემოთ მითითებული პირველადი ტესტი. თუ ხარვეზი შენარჩუნდა, საჭიროა პროფესიონალური აპარატურული დიაგნოსტიკა **BEKASERVICE**-ში (ქ. ახალციხე, კოსტავას N10)."
             }
             isDataLossRequest -> {
-                "🔒 **პირადი მონაცემების (ფოტოები, კონტაქტები, ჩათები) უსაფრთხოება ($activeDeviceLabel):**\n\n" +
-                    "✅ **თქვენი მონაცემები სრულიად უსაფრთხოდაა!**\n\n" +
+                "🔒 **პირადი მონაცემების (ფოტოები, კონტაქტები, ფაილები) უსაფრთხოება ($activeDeviceLabel):**\n\n" +
                     (if (domainTuple.domainTitle.contains("Bootloop") || domainTuple.domainTitle.contains("ჩატვირთვ"))
-                        "სისტემური ჩატვირთვის შეფერხების დროსაც კი BEKASERVICE-ში ვიყენებთ Retain User Data მეთოდს, რათა არ წაიშალოს თქვენი ფაილები."
+                        "სისტემური ჩატვირთვის შეფერხების დროს მთავარი წესია არ აირჩიოთ 'Factory Reset / Wipe Data'. BEKASERVICE-ში ვიყენებთ Retain User Data რეჟიმს მონაცემების შესანარჩუნებლად."
                     else
-                        "აპარატურული ნაწილების (ეკრანი, ელემენტი, დამტენის პორტი, კამერა) შეკეთებისას ტელეფონის მეხსიერების ჩიპი (NAND ფლეშ-მეხსიერება) ხელუხლებელი რჩება და არაფერი არ იშლება.")
+                        "პერიფერიული კვანძების (ეკრანი, ელემენტი, დამტენის პორტი, კამერა) შემოწმებისა და შეკეთებისას მეხსიერების ჩიპი ხელუხლებელი რჩება და მონაცემები არ იშლება.")
             }
             isSelfRecoveryRequest -> {
-                "ℹ️ **თავისით გასწორების ალბათობა ($activeDeviceLabel):**\n\n" +
-                    "აპარატურული ხარვეზები (${domainTuple.domainTitle}) სამწუხაროდ თავისით არ სწორდება, რადგან საქმე გვაქვს ფიზიკური კონტაქტის, შლეიფის ან კვანძის ცვეთასთან. დროებითი ჩაქრობა ან ციმციმის გაჩერება ხშირად მატყუარაა და მცირე შერყევისას კვლავ მეორდება."
+                "ℹ️ **თავისით გამოსწორების ალბათობა ($activeDeviceLabel):**\n\n" +
+                    "თუ ხარვეზი ფიზიკურ კონტაქტს, შლეიფს ან კვანძის ცვეთას უკავშირდება (${domainTuple.domainTitle}), ის თავისით მუდმივად არ სწორდება — დროულად შეამოწმეთ ქვემოთ მოცემული მეთოდით."
             }
             isComponentVsBoardRequest -> {
-                "🔍 **ეკრანის/კვანძის ბრალია თუ დედაპლატის ($activeDeviceLabel)?**\n\n" +
-                    "• **როგორ განვასხვავოთ:** თუ ტელეფონი ჩართვისას ვიბრირებს, ზარებს იღებს, კომპიუტერთან შეერთებისას ისმის ხმა — **დედაპლატა და პროცესორი 100%-ით ჯანმრთელია**!\n" +
-                    "• ხარვეზი ლოკალიზებულია მხოლოდ თავად პერიფერიულ ნაწილში (${domainTuple.domainTitle})."
+                "🔍 **კვანძის ხარვეზია თუ დედაპლატის ($activeDeviceLabel)?**\n\n" +
+                    "თუ ტელეფონი რეაგირებს ზარზე, ვიბრაციაზე ან კომპიუტერთან USB შეერთებაზე, დედაპლატა და პროცესორი მუშა მდგომარეობაშია, ხოლო პრობლემა ლოკალიზებულია შესაბამის მოდულში (${domainTuple.domainTitle})."
             }
             isPriceRequest -> {
-                "💰 **სავარაუდო ღირებულება და პირობები ($activeDeviceLabel):**\n\n" +
-                    "• **დიაგნოსტიკა:** BEKASERVICE-ში დიაგნოსტიკა **სრულიად უფასოა**!\n" +
-                    "• **შეკეთების ვარიანტები:** ხელმისაწვდომია როგორც ორიგინალი (Service Pack / Refurbished), ისე უმაღლესი ხარისხის ანალოგები ოფიციალური გარანტიით.\n" +
-                    "• ზუსტი ღირებულების სანახავად იხილეთ ქვემოთ მოცემული ბარათები ან მოგვწერეთ WhatsApp-ში (+995 598 23 33 32)."
+                "💰 **დიაგნოსტიკისა და შეკეთების პირობები ($activeDeviceLabel):**\n\n" +
+                    "• **პირველადი დიაგნოსტიკა:** BEKASERVICE-ში შემოწმება უფასოა.\n" +
+                    "• ზუსტი ღირებულება დამოკიდებულია იმაზე, მხოლოდ წმენდა/კონტაქტის აღდგენაა საჭირო თუ დეტალის შეცვლა (WhatsApp: +995 598 23 33 32)."
             }
             else -> {
                 domainTuple.directExplanation
@@ -977,7 +1062,7 @@ $catalogSummary
         val matchedProducts = findRelevantProductsForDiagnosis(
             query = "$latestText ${domainTuple.domainTitle} $detectedDevice",
             catalogProducts = catalogProducts
-        )
+        ).distinct()
 
         val observedClean = fullConversation
             .filter { it.isUser }
@@ -985,6 +1070,8 @@ $catalogSummary
             .takeLast(3)
             .joinToString(" → ")
             .ifBlank { "ატვირთულია ფოტო-მასალა ვიზუალური შეფასებისთვის" }
+
+        val deduplicatedHypotheses = domainTuple.hypotheses.distinctBy { it.title.trim().lowercase() }
 
         return DiagnosticMessage(
             role = "assistant",
@@ -994,36 +1081,45 @@ $catalogSummary
                 observedSymptoms = observedClean,
                 deviceIdentification = if (hasKnownDevice) detectedDevice else "",
                 visualInspectionFindings = visualFindingText,
-                hypotheses = domainTuple.hypotheses,
+                hypotheses = deduplicatedHypotheses,
                 nextDiagnosticTest = domainTuple.nextTest,
                 expectedFindings = domainTuple.expectedFindings,
                 requiredTools = domainTuple.tools,
-                safetyConsiderations = domainTuple.safety
+                safetyConsiderations = domainTuple.safety,
+                followUpQuestion = domainTuple.followUpQuestion
             ),
             recommendedProductIds = matchedProducts
         )
     }
 
     /**
-     * Handles catalog product inquiries (ChatGPT, Gemini, Canva, CapCut, Adobe, Windows, Office, etc.)
-     * and general conversational/tech questions naturally like ChatGPT / Gemini.
+     * Handles explicit catalog product inquiries (ChatGPT, Gemini, Canva, CapCut, Adobe, Windows, Office, etc.)
+     * and general non-diagnostic questions WITHOUT intercepting hardware symptom queries.
      */
     private fun tryBuildCatalogOrGeneralResponse(
         latestQuery: String,
         lowerLatest: String,
         catalogProducts: List<ProductItem>
     ): DiagnosticMessage? {
-        val isHardwareSymptom = lowerLatest.contains("ეკრან") && (lowerLatest.contains("გატყდ") || lowerLatest.contains("ბზარ") || lowerLatest.contains("ზოლ") || lowerLatest.contains("ლაქ") || lowerLatest.contains("შავ") || lowerLatest.contains("არ ანათებს")) ||
-            lowerLatest.contains("ლოგოზე") || lowerLatest.contains("bootloop") ||
-            lowerLatest.contains("არ ირთვება") || lowerLatest.contains("აღარ ირთვება") ||
-            lowerLatest.contains("არ იტენება") || lowerLatest.contains("პორტ") && (lowerLatest.contains("ირყევა") || lowerLatest.contains("ცხელდება") || lowerLatest.contains("არ")) ||
-            lowerLatest.contains("წყალ") || lowerLatest.contains("დასველ") || lowerLatest.contains("სითხ") ||
-            lowerLatest.contains("გაბერ") || lowerLatest.contains("მალე ჯდება") ||
-            lowerLatest.contains("დამივარდა") || lowerLatest.contains("ჩამივარდა") ||
-            lowerLatest.contains("ხმა არ") || lowerLatest.contains("ჩახლეჩილ") ||
-            lowerLatest.contains("კამერა არ") || lowerLatest.contains("ფოკუს") ||
+        val isHardwareSymptom = lowerLatest.contains("არ ირთვება") || lowerLatest.contains("აღარ ირთვება") ||
+            lowerLatest.contains("არ იტენება") || lowerLatest.contains("აღარ იტენება") ||
+            lowerLatest.contains("არ ფოკუსირდება") || lowerLatest.contains("ფოკუს") ||
+            lowerLatest.contains("არ მუშაობს") || lowerLatest.contains("არ რეაგირებს") ||
+            lowerLatest.contains("არ ანათებს") || lowerLatest.contains("ჩაქრა") || lowerLatest.contains("ჩაბნელ") ||
+            lowerLatest.contains("გაშავდა") || lowerLatest.contains("შავი ეკრან") ||
+            lowerLatest.contains("გატყდ") || lowerLatest.contains("ბზარ") || lowerLatest.contains("ზოლ") || lowerLatest.contains("ლაქ") ||
+            lowerLatest.contains("ციმციმებს") || lowerLatest.contains("სენსორ") ||
+            lowerLatest.contains("ლოგოზე") || lowerLatest.contains("bootloop") || lowerLatest.contains("რესტარტ") ||
+            lowerLatest.contains("წყალ") || lowerLatest.contains("დასველ") || lowerLatest.contains("სითხ") || lowerLatest.contains("ნესტ") ||
+            lowerLatest.contains("გაბერ") || lowerLatest.contains("მალე ჯდება") || lowerLatest.contains("ცხელდება") || lowerLatest.contains("ითიშება") ||
+            lowerLatest.contains("დამივარდა") || lowerLatest.contains("ჩამივარდა") || lowerLatest.contains("დავარდ") ||
+            lowerLatest.contains("ხმა არ") || lowerLatest.contains("ჩახლეჩილ") || lowerLatest.contains("დინამიკ") || lowerLatest.contains("მიკროფონ") ||
+            lowerLatest.contains("კამერ") || lowerLatest.contains("ბუნდოვან") || lowerLatest.contains("კანკალ") ||
+            lowerLatest.contains("პორტ") || lowerLatest.contains("დამტენ") || lowerLatest.contains("კაბელ") ||
             lowerLatest.contains("0.00a") || lowerLatest.contains("edl") || lowerLatest.contains("9008") ||
-            lowerLatest.contains("dfu") || lowerLatest.contains("recovery") || lowerLatest.contains("fastboot")
+            lowerLatest.contains("dfu") || lowerLatest.contains("recovery") || lowerLatest.contains("fastboot") ||
+            lowerLatest.contains("ჭედავს") || lowerLatest.contains("ნელა მუშაობს") || lowerLatest.contains("პრობლემა") ||
+            lowerLatest.contains("სჭირს") || lowerLatest.contains("ჭირს") || lowerLatest.contains("დაზიან") || lowerLatest.contains("გაფუჭ")
 
         if (isHardwareSymptom) return null
 
@@ -1058,14 +1154,14 @@ $catalogSummary
                     role = "assistant",
                     text = detailsText,
                     structuredSection = null,
-                    recommendedProductIds = matched.take(2).map { it.id }
+                    recommendedProductIds = matched.take(2).map { it.id }.distinct()
                 )
             }
         }
 
-        // 2. Check if user is asking for the price/availability of a specific part or service in catalog
+        // 2. Check if user is explicitly asking for the price/availability of a specific part or service in catalog
         val asksPriceOrAvailability = lowerLatest.contains("რა ღირს") || lowerLatest.contains("ფასი") ||
-            lowerLatest.contains("გაქვთ") || lowerLatest.contains("მინდა") || lowerLatest.contains("ყიდვა") ||
+            lowerLatest.contains("გაქვთ") || lowerLatest.contains("ყიდვა") ||
             lowerLatest.contains("შეცვლა რა ჯდება")
         if (asksPriceOrAvailability) {
             val matched = GeminiDiagnosticService.findRelevantProducts(latestQuery, catalogProducts)
@@ -1091,7 +1187,7 @@ $catalogSummary
                     role = "assistant",
                     text = reply,
                     structuredSection = null,
-                    recommendedProductIds = topItems.map { it.id }
+                    recommendedProductIds = topItems.map { it.id }.distinct()
                 )
             }
         }
@@ -1132,7 +1228,7 @@ $catalogSummary
             )
         }
 
-        // General tech questions (e.g. OLED vs LCD, buying advice, checking used iPhone, eSIM, storage tips)
+        // General tech questions (e.g. OLED vs LCD, buying advice, checking used iPhone)
         if (lowerLatest.contains("განსხვავება") && (lowerLatest.contains("oled") || lowerLatest.contains("lcd") || lowerLatest.contains("ორიგინალ"))) {
             return DiagnosticMessage(
                 role = "assistant",
@@ -1142,11 +1238,11 @@ $catalogSummary
                     "3. **Incell / IPS LCD:** ბიუჯეტური ვარიანტი უკანა განათებით (Backlight). არის ოდნავ უფრო სქელი, მოიხმარს მეტ ელემენტს და შავი ფერი არ არის აბსოლუტურად ღრმა.\n\n" +
                     "**BEKASERVICE**-ში ვიყენებთ მაღალი კლასის OLED მატრიცებს True Tone-ის გადაპროგრამებითა და 6-თვიანი გარანტიით.",
                 structuredSection = null,
-                recommendedProductIds = GeminiDiagnosticService.findRelevantProducts("ეკრანი", catalogProducts).take(2).map { it.id }
+                recommendedProductIds = emptyList()
             )
         }
 
-        if (lowerLatest.contains("ყიდვის წინ") || lowerLatest.contains("მეორადი") || lowerLatest.contains("როგორ შევამოწმო")) {
+        if (lowerLatest.contains("ყიდვის წინ") || lowerLatest.contains("მეორადი") || lowerLatest.contains("როგორ შევამოწმო მეორადი")) {
             return DiagnosticMessage(
                 role = "assistant",
                 text = "🔍 **მეორადი სმარტფონის (iPhone / Android) ყიდვის წინ შესამოწმებელი მთავარი პუნქტები:**\n\n" +
@@ -1157,27 +1253,6 @@ $catalogSummary
                     "5. **ელემენტის რესურსი:** დააკვირდით ხომ არ იკლებს პროცენტი ნახტომისებურად 2–3 წუთიანი ვიდეოს გადაღებისას.\n\n" +
                     "სურვილის შემთხვევაში შეგიძლიათ მოიტანოთ ტელეფონი **BEKASERVICE**-ში სრულ კომპიუტერულ და აპარატურულ შემოწმებაზე!",
                 structuredSection = null
-            )
-        }
-
-        // Check if the query matches any product in catalog even without explicit "რა ღირს"
-        val directCatalogMatches = GeminiDiagnosticService.findRelevantProducts(latestQuery, catalogProducts)
-        val isLikelyDiagnosis = lowerLatest.contains("რატომ") || lowerLatest.contains("როგორ") ||
-            lowerLatest.contains("პრობლემა") || lowerLatest.contains("ჭირს") || lowerLatest.contains("სჭირს") ||
-            lowerLatest.contains("გაფუჭ") || lowerLatest.contains("დაზიან") || lowerLatest.contains("ჩერდება") ||
-            lowerLatest.contains("ითიშება") || lowerLatest.contains("ცხელდება") || lowerLatest.contains("ჭედავს")
-
-        if (directCatalogMatches.isNotEmpty() && !isLikelyDiagnosis) {
-            val top = directCatalogMatches.first()
-            return DiagnosticMessage(
-                role = "assistant",
-                text = "✨ **${top.title}** ხელმისაწვდომია **BEKASERVICE**-ში:\n\n" +
-                    "• **ფასი:** ${top.price}\n" +
-                    (if (top.shortDescription.isNotBlank()) "• **აღწერა:** ${top.shortDescription}\n" else "") +
-                    (if (top.warranty.isNotBlank()) "• **გარანტია / ვადა:** ${top.duration.ifBlank { top.warranty }}\n\n" else "\n") +
-                    "იხილეთ ქვემოთ მოცემული ბარათი დეტალური პარამეტრებისა და შეკვეთისთვის!",
-                structuredSection = null,
-                recommendedProductIds = directCatalogMatches.take(2).map { it.id }
             )
         }
 
@@ -1193,12 +1268,13 @@ $catalogSummary
         val nextTest: String,
         val expectedFindings: String,
         val tools: String,
-        val safety: String
+        val safety: String,
+        val followUpQuestion: String = ""
     )
 
     /**
-     * Classifies the symptom accurately (prioritizing specific symptoms like Bootloop/Logo Hang
-     * BEFORE generic "doesn't turn on/charge" phrases!) and builds rich, accurate explanations.
+     * Classifies the symptom accurately (prioritizing specific component symptoms and preventing
+     * false positives like "Google Pixel" matching FRP lock or camera issues matching battery).
      */
     private fun classifyAndBuildTechnicalDiagnosis(
         queryText: String,
@@ -1208,7 +1284,7 @@ $catalogSummary
         hasPhoto: Boolean,
         isTestResultUpdate: Boolean
     ): DomainDiagnosisTuple {
-        // 1. BOOTLOOP / STUCK ON LOGO / RECOVERY / FASTBOOT / DFU (Checked FIRST so "ჩერდება ლოგოზე და აღარ ირთვება ბოლომდე" matches here!)
+        // 1. BOOTLOOP / STUCK ON LOGO / RECOVERY / FASTBOOT / DFU
         val isBootOrLogoHang = queryText.contains("ლოგო") || queryText.contains("bootloop") ||
             queryText.contains("რესტარტ") || queryText.contains("recovery") || queryText.contains("dfu") ||
             queryText.contains("fastboot") || queryText.contains("ჩართვისას ჩერდება") ||
@@ -1219,41 +1295,49 @@ $catalogSummary
         val isEdlOrHardBrick = queryText.contains("9008") || queryText.contains("edl") ||
             queryText.contains("firehose") || queryText.contains("brom") || queryText.contains("აგური")
 
-        // 3. WATER / LIQUID DAMAGE
-        val isWaterDamage = queryText.contains("წყალ") || queryText.contains("სითხ") ||
-            queryText.contains("დასველ") || queryText.contains("ნესტ") || queryText.contains("ჩავარდა წყალში")
+        // 3. WATER / LIQUID DAMAGE (unless user is only mentioning moisture check during charging port diagnosis)
+        val isWaterDamage = (queryText.contains("წყალ") || queryText.contains("სითხ") ||
+            queryText.contains("დასველ") || queryText.contains("ნესტ") || queryText.contains("ჩავარდა წყალში")) &&
+            !queryText.contains("კამერა არ ფოკუსირდება")
 
-        // 4. DISPLAY / SCREEN / TOUCH / GREEN LINE / BLACK SCREEN WITH VIBRATION
-        val isDisplayIssue = queryText.contains("ეკრან") || queryText.contains("ზოლ") ||
-            queryText.contains("მწვანე") || queryText.contains("ლაქ") || queryText.contains("ბზარ") ||
-            queryText.contains("სენსორ") || queryText.contains("ჩაბნელ") || queryText.contains("არ ანათებს") ||
-            queryText.contains("გამოსახულება") || queryText.contains("ციმციმებს")
+        // 4. CAMERA / FOCUS / AUDIO / SPEAKER / MICROPHONE / FACE ID (Checked BEFORE battery/lock so camera/focus is never misclassified)
+        val isCameraOrAudioExplicit = queryText.contains("კამერ") || queryText.contains("ფოკუს") ||
+            queryText.contains("ლინზ") || queryText.contains("ბუნდოვან") || queryText.contains("ois") ||
+            queryText.contains("დინამიკ") || queryText.contains("მიკროფონ") ||
+            queryText.contains("face id") || queryText.contains("touch id") ||
+            (queryText.contains("ხმა") && !queryText.contains("ეკრან") && !queryText.contains("შავ"))
 
-        // 5. BATTERY / OVERHEATING / SWOLLEN / FAST DRAIN
+        // 5. DISPLAY / SCREEN / TOUCH / GREEN LINE / BLACK SCREEN ("ეკრანი არ ირთვება", "ეკრანი გაშავდა", etc.)
+        val isDisplayIssue = queryText.contains("ეკრან") || queryText.contains("დისპლე") ||
+            queryText.contains("ზოლ") || queryText.contains("მწვანე") || queryText.contains("ლაქ") ||
+            queryText.contains("ბზარ") || queryText.contains("სენსორ") || queryText.contains("ჩაბნელ") ||
+            queryText.contains("არ ანათებს") || queryText.contains("გამოსახულება") || queryText.contains("ციმციმებს")
+
+        // 6. CHARGING PORT / NOT CHARGING / POWER ("ტელეფონი არ იტენება", "დამტენი", "პორტი", "კაბელი")
+        val isChargingOrPower = queryText.contains("არ იტენება") || queryText.contains("აღარ იტენება") ||
+            queryText.contains("დატენვ") || queryText.contains("დამტენ") ||
+            queryText.contains("პორტ") || queryText.contains("კაბელ") || queryText.contains("ადაპტერ") ||
+            queryText.contains("0.00a") || queryText.contains("ამპერ") ||
+            queryText.contains("საერთოდ არ ირთვება") || queryText.contains("ჩაქრა") || queryText.contains("არ ირთვება")
+
+        // 7. BATTERY / OVERHEATING / SWOLLEN / FAST DRAIN
         val isBatteryOrThermal = queryText.contains("ელემენტ") || queryText.contains("ბატარე") ||
             queryText.contains("მალე ჯდება") || queryText.contains("გაბერ") ||
-            (queryText.contains("ცხელდება") && !queryText.contains("პორტ")) ||
+            (queryText.contains("ცხელდება") && !queryText.contains("პორტ") && !queryText.contains("დატენ")) ||
             queryText.contains("პროცენტ") || queryText.contains("ითიშება 20") || queryText.contains("ითიშება 15")
 
-        // 6. CHARGING PORT / NOT CHARGING / DEAD POWER
-        val isChargingOrPower = queryText.contains("არ იტენება") || queryText.contains("დამტენ") ||
-            queryText.contains("პორტ") || queryText.contains("კაბელ") || queryText.contains("0.00a") ||
-            queryText.contains("ამპერ") || queryText.contains("საერთოდ არ ირთვება") ||
-            queryText.contains("ჩაქრა") || queryText.contains("არ ირთვება")
-
-        // 7. ACCOUNT LOCKS (FRP / iCloud) & NETWORK / SIM / BASEBAND
+        // 8. ACCOUNT LOCKS (FRP / iCloud) & NETWORK / SIM / BASEBAND (Never match bare "google" from "Google Pixel")
         val isLockOrNetwork = queryText.contains("frp") || queryText.contains("icloud") ||
-            queryText.contains("apple id") || queryText.contains("google") || queryText.contains("ბლოკ") ||
-            queryText.contains("sim") || queryText.contains("ქსელ") || queryText.contains("no service") ||
-            queryText.contains("imei") || queryText.contains("baseband") || queryText.contains("კოდ")
+            queryText.contains("apple id") || queryText.contains("google account") ||
+            queryText.contains("გუგლ აქაუნთ") ||
+            (queryText.contains("google") && (queryText.contains("ბლოკ") || queryText.contains("ანგარიშ") || queryText.contains("პაროლ"))) ||
+            queryText.contains("ბლოკ") || queryText.contains("sim") || queryText.contains("ქსელ") ||
+            queryText.contains("no service") || queryText.contains("imei") || queryText.contains("baseband") || queryText.contains("კოდ")
 
-        // 8. AUDIO / SPEAKER / MICROPHONE / CAMERA / FACE ID / WIFI
-        val isAudioCameraSensor = queryText.contains("ხმა") || queryText.contains("დინამიკ") ||
-            queryText.contains("მიკროფონ") || queryText.contains("კამერ") || queryText.contains("ფოკუს") ||
-            queryText.contains("face id") || queryText.contains("touch id") ||
-            queryText.contains("wifi") || queryText.contains("ვაიფაი") || queryText.contains("bluetooth")
+        // 9. WIFI / BLUETOOTH
+        val isWirelessSensor = queryText.contains("wifi") || queryText.contains("ვაიფაი") || queryText.contains("bluetooth")
 
-        // 9. SLOW PERFORMANCE / STORAGE / FREEZING
+        // 10. SLOW PERFORMANCE / STORAGE / FREEZING
         val isSlowOrStorage = queryText.contains("ჭედავს") || queryText.contains("ნელა") ||
             queryText.contains("მეხსიერება") || queryText.contains("მაგდებს") || queryText.contains("გაჭედა")
 
@@ -1261,12 +1345,13 @@ $catalogSummary
             isBootOrLogoHang -> buildBootFirmwareDiagnosis(mode, queryText, deviceName)
             isEdlOrHardBrick -> buildEdlHardBrickDiagnosis(mode, deviceName)
             isWaterDamage -> buildWaterDamageDiagnosis(mode, queryText, deviceName)
+            isCameraOrAudioExplicit -> buildAudioCameraDiagnosis(mode, queryText, deviceName)
             isDisplayIssue -> buildDisplayDiagnosis(mode, queryText, deviceName, hasPhoto)
+            isChargingOrPower -> buildPowerChargingDiagnosis(mode, queryText, deviceName, isTestResultUpdate)
             isBatteryOrThermal -> buildBatteryThermalDiagnosis(mode, queryText, deviceName)
             isLockOrNetwork -> buildLockNetworkDiagnosis(mode, queryText, deviceName)
-            isAudioCameraSensor -> buildAudioCameraDiagnosis(mode, queryText, deviceName)
+            isWirelessSensor -> buildAudioCameraDiagnosis(mode, queryText, deviceName)
             isSlowOrStorage -> buildPerformanceStorageDiagnosis(mode, deviceName)
-            isChargingOrPower -> buildPowerChargingDiagnosis(mode, queryText, deviceName, isTestResultUpdate)
             else -> buildSmartGeneralDiagnosis(mode, queryText, fullHistoryText, deviceName, hasPhoto)
         }
     }
@@ -1280,101 +1365,72 @@ $catalogSummary
 
         val simpleExp = if (hasStorageFullIssue) {
             "💾⚙️ **მეხსიერების გადავსებით გამოწვეული სისტემური Bootloop ($deviceName):**\n\n" +
-            "როდესაც შიდა მეხსიერება 100%-ით ივსება, ოპერაციული სისტემა ვეღარ ქმნის დროებით სისტემურ Cache და Swap ფაილებს, რის გამოც ჩატვირთვის ციკლი წყდება და ტელეფონი რჩება ლოგოზე.\n" +
-            "• **კრიტიკული გაფრთხილება:** არ გააკეთოთ 'Wipe Data / Factory Reset' Recovery მენიუდან! ეს სამუდამოდ წაშლის ყველა თქვენს ფოტოსა და პირად მონაცემს.\n" +
-            "• **BEKASERVICE-ის გადაწყვეტა:** სპეციალური საინჟინრო ხელსაწყოებით (Recovery Log / RAM Dump / Retain User Data რეჟიმი) სისტემის სტაბილიზაცია და პირადი მონაცემების მაქსიმალური შენარჩუნება.\n" +
-            "• **შესრულების დრო:** 25-35 წუთი ადგილზევე ბექასერვისში."
+                "როდესაც შიდა მეხსიერება 100%-ით ივსება, ოპერაციული სისტემა ვეღარ ქმნის დროებით სისტემურ Cache და Swap ფაილებს, რის გამოც ჩატვირთვის ციკლი წყდება და ტელეფონი რჩება ლოგოზე."
         } else {
-            "როდესაც ტელეფონი ჩართვისას ჩერდება ლოგოზე და მთავარ ეკრანზე აღარ გადადის (Bootloop), ეს ნიშნავს, რომ ტელეფონის ეკრანი და კვების ღილაკი მუშაობს, მაგრამ ოპერაციული სისტემა ვერ ასრულებს ჩატვირთვას. ამის 3 ყველაზე ხშირი მიზეზია:\n" +
-            "1. **სისტემური პროგრამის ხარვეზი ან მეხსიერების გადავსება** (განსაკუთრებით თუ ტელეფონში თავისუფალი ადგილი აღარ იყო ან განახლება გაწყდა).\n" +
-            "2. **დასუსტებული ელემენტი** — ჩატვირთვის ბოლო ფაზაში ტელეფონს სჭირდება მაქსიმალური ენერგია; თუ ელემენტი სუსტია, ტელეფონი ითიშება ან თავიდან იტვირთება.\n" +
-            "3. **დაზიანებული დამხმარე შლეიფი** (მაგალითად, ზედა დინამიკის/Face ID შლეიფი სისველის ან დავარდნის შემდეგ)."
+            "⚙️ **ლოგოზე გაჭედვა / ჩატვირთვის შეფერხება ($deviceName):**\n\n" +
+                "როდესაც ტელეფონი ჩართვისას ჩერდება ლოგოზე და მთავარ ეკრანზე აღარ გადადის (Bootloop), ეს ნიშნავს, რომ ეკრანი და პირველადი კვება ირთვება, მაგრამ ოპერაციული სისტემა ვერ ასრულებს ჩატვირთვას (სისტემური დანაყოფის ხარვეზის, გადავსებული მეხსიერების, დასუსტებული ელემენტის ან დამხმარე შლეიფის გამო)."
         }
 
         val deepTechExp = if (hasStorageFullIssue) {
-            "Userdata Exhaustion Bootloop ($deviceName): F2FS/EXT4 ფაილური სისტემა ვეღარ ასრულებს ჟურნალირებას (Zero Inodes/Sectors free). Init პროცესი ვერ წერს /data/dalvik-cache-ს და ბირთვი აინიცირებს SIGABRT რესტარტს. გადაწყვეტა: Fastboot/ADB sideload ramdisk, ქეშის გაწმენდა და სისტემის აღდგენა მონაცემების შენარჩუნებით."
+            "Userdata Exhaustion Bootloop ($deviceName): F2FS/EXT4 ფაილური სისტემა ვეღარ ასრულებს ჟურნალირებას (Zero Inodes/Sectors free). Init პროცესი ვერ წერს /data/dalvik-cache-ს და ბირთვი აინიცირებს SIGABRT რესტარტს."
         } else {
-            "Bootloop / Logo Hang ($deviceName) მიუთითებს იმაზე, რომ პირველადი ჩამტვირთავი (BootROM / iBoot / Little Kernel) ინიციალიზდება და რთავს დისპლეის კვებას, მაგრამ ჩატვირთვა წყდება Kernel/System ინიციალიზაციის ან I2C პერიფერიის გამოკითხვის ეტაპზე:\n" +
-            "1. **Firmware / File System Corruption:** გადავსებული Userdata დანაყოფი ან შეწყვეტილი OTA განახლება ბლოკავს ფაილური სისტემის დამაუნთებას.\n" +
-            "2. **I2C Bus Hang (პერიფერიული შლეიფი):** დაზიანებული ზედა სენსორის (Proximity/Flood Illuminator/Earpiece flex) ან თერმისტორის ხაზი იწვევს Kernel Panic-ს და ციკლურ რესტარტს ყოველ 30–180 წამში.\n" +
-            "3. **VBAT Voltage Drop:** ჩატვირთვის პიკზე (>1.5A) მაღალი შიდა წინაღობის მქონე ელემენტზე ძაბვა ვარდება UVLO ზღვარს ქვემოთ."
+            "Bootloop / Logo Hang ($deviceName): პირველადი ჩამტვირთავი (BootROM / iBoot / Little Kernel) ინიციალიზდება და რთავს დისპლეის კვებას, მაგრამ ჩატვირთვა წყდება Kernel/System ინიციალიზაციის, I2C პერიფერიის გამოკითხვის ან VBAT ძაბვის ვარდნის გამო."
         }
 
-        return if (mode == DiagnosticUserMode.TECHNICIAN) {
-            DomainDiagnosisTuple(
-                domainTitle = "ჩატვირთვის ციკლის შეფერხება (Bootloop / Logo Hang)",
-                directExplanation = deepTechExp,
-                simpleExplanation = simpleExp,
-                deepTechnicalExplanation = deepTechExp,
-                hypotheses = listOf(
-                    DiagnosticHypothesis(
-                        title = "სისტემური დანაყოფის (Firmware / Userdata) ხარვეზი ან მეხსიერების გადავსება",
-                        confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                        supportingEvidence = "მოწყობილობა რთავს ეკრანს, აჩვენებს ლოგოს, მაგრამ ვერ ტვირთავს OS-ს ($queryText)",
-                        verificationOrDisproof = "Recovery / Fastboot / DFU რეჟიმში გადაყვანა და Retain User Data რეჟიმით პროგრამული განახლების/ლოგის შემოწმება"
-                    ),
-                    DiagnosticHypothesis(
-                        title = "პერიფერიული შლეიფის (ზედა სენსორი / ჩართვის ღილაკი) ან დასუსტებული ელემენტის ხარვეზი",
-                        confidence = EvidenceConfidenceLevel.POSSIBLE,
-                        supportingEvidence = "I2C ხაზის დამოკლება ან ჩატვირთვის პიკზე ძაბვის ვარდნა ხშირად აჩერებს ტელეფონს ლოგოზე",
-                        verificationOrDisproof = "ზედა სენსორის შლეიფის დროებით ჩახსნა და ლაბორატორიულ კვების ბლოკზე ჩატვირთვის დენის დაკვირვება"
-                    )
+        return DomainDiagnosisTuple(
+            domainTitle = "ლოგოზე გაჭედვა / სისტემური ჩატვირთვის შეფერხება (Bootloop)",
+            directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) deepTechExp else simpleExp,
+            simpleExplanation = simpleExp,
+            deepTechnicalExplanation = deepTechExp,
+            hypotheses = listOf(
+                DiagnosticHypothesis(
+                    title = "სისტემური პროგრამის (Firmware / Userdata) ხარვეზი ან მეხსიერების გადავსება",
+                    confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                    supportingEvidence = "ტელეფონი რთავს ეკრანს და აჩვენებს ლოგოს, მაგრამ ბოლომდე ვერ ტვირთავს სისტემას",
+                    verificationOrDisproof = "Recovery / DFU რეჟიმში სტაბილურობის შემოწმება და Retain User Data განახლება"
                 ),
-                nextTest = "გადაიყვანეთ ტელეფონი Recovery / Fastboot რეჟიმში და დააკვირდით: სერვისულ ეკრანზე სტაბილურად ჩერდება თუ იქაც თავისით ითიშება/რესტარტდება?",
-                expectedFindings = "თუ Recovery-ში სტაბილურად დგას — კვება და ელემენტი მწყობრშია (მიზეზი პროგრამულია ან I2C შლეიფი); თუ Recovery-შიც ითიშება — შეამოწმეთ ელემენტი და ჩართვის ღილაკი.",
-                tools = "PC USB კაბელი, 3uTools / Fastboot / Odin / მიკროსკოპი და ლაბორატორიული ბლოკი",
-                safety = "მონაცემების შესანარჩუნებლად პირველ ეტაპზე არ გამოიყენოთ Full Erase / Factory Reset — ჯერ სცადეთ სისტემის აღდგენა მონაცემების შენარჩუნებით (Retain User Data)."
-            )
-        } else {
-            DomainDiagnosisTuple(
-                domainTitle = "ლოგოზე გაჭედვა / სისტემური ჩატვირთვის შეფერხება (Bootloop)",
-                directExplanation = simpleExp,
-                simpleExplanation = simpleExp,
-                deepTechnicalExplanation = deepTechExp,
-                hypotheses = listOf(
-                    DiagnosticHypothesis(
-                        title = "სისტემური პროგრამის (Firmware) ხარვეზი ან მეხსიერების გადავსება",
-                        confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                        supportingEvidence = "ტელეფონი ირთვება, აჩვენებს ლოგოს, მაგრამ ბოლომდე ვერ იტვირთება",
-                        verificationOrDisproof = "იძულებითი გადატვირთვა (Force Restart) ან სერვისში პროგრამული აღდგენა"
-                    ),
-                    DiagnosticHypothesis(
-                        title = "ელემენტის სისუსტე ჩატვირთვის დროს ან შიდა შლეიფის კონტაქტი",
-                        confidence = EvidenceConfidenceLevel.POSSIBLE,
-                        supportingEvidence = "დავარდნის, სისველის ან დაძველებული ელემენტის დროს ტელეფონს არ ჰყოფნის სიმძლავრე ჩასართავად",
-                        verificationOrDisproof = "ორიგინალ დამტენზე შეერთებულ მდგომარეობაში ჩართვის შემოწმება"
-                    )
-                ),
-                nextTest = "შეაერთეთ ტელეფონი დამტენზე 10 წუთით და სცადეთ იძულებითი გადატვირთვა (ჩართვის და ხმის დაწევის ღილაკებზე ერთდროულად დაჭერა 10–15 წამით). დააკვირდით: ლოგო უწყვეტად ანათებს თუ ტელეფონი ყოველ რამდენიმე წამში ქრება და თავიდან აჩვენებს ლოგოს?",
-                expectedFindings = "თუ დამტენზე შეერთებისას ჩაირთო — მიზეზი ელემენტია; თუ ისევ ლოგოზე ჩერდება — საჭიროა პროგრამული აღდგენა სერვისში.",
-                tools = "ორიგინალი დამტენი კაბელი და ადაპტერი",
-                safety = "თუ ტელეფონში გაქვთ მნიშვნელოვანი ფოტოები, არ აირჩიოთ 'Factory Reset / Wipe Data' — ბექასერვისში შესაძლებელია სისტემის აღდგენა მონაცემების მაქსიმალური დაცვით."
-            )
-        }
+                DiagnosticHypothesis(
+                    title = "ელემენტის ძაბვის ვარდნა ჩატვირთვის პიკზე ან პერიფერიული შლეიფის (I2C) კონფლიქტი",
+                    confidence = EvidenceConfidenceLevel.POSSIBLE,
+                    supportingEvidence = "დავარდნის, სისველის ან დაძველებული ელემენტის დროს ტელეფონი რესტარტდება ჩატვირთვისას",
+                    verificationOrDisproof = "ორიგინალ დამტენზე შეერთებულ მდგომარეობაში ჩართვისა და ზედა შლეიფის იზოლაციის ტესტი"
+                )
+            ),
+            nextTest = if (mode == DiagnosticUserMode.TECHNICIAN) {
+                "გადაიყვანეთ ტელეფონი Recovery / Fastboot რეჟიმში და დააკვირდით: სერვისულ ეკრანზე სტაბილურად ჩერდება თუ იქაც თავისით ითიშება/რესტარტდება?"
+            } else {
+                "შეაერთეთ ტელეფონი გამართულ დამტენზე 10 წუთით და სცადეთ იძულებითი გადატვირთვა (Force Restart: ჩართვის და ხმის დაწევის ღილაკებზე დაჭერა 10–15 წამით)."
+            },
+            expectedFindings = "თუ დამტენზე შეერთებისას ჩაირთო — სავარაუდოა ელემენტის სისუსტე; თუ ისევ ლოგოზე ჩერდება — საჭიროა სერვისული პროგრამული აღდგენა.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB კაბელი, Recovery/DFU/Fastboot, ლაბორატორიული ბლოკი" else "გამართული დამტენი კაბელი და ადაპტერი",
+            safety = "თუ ტელეფონში გაქვთ მნიშვნელოვანი ფოტოები და ფაილები, არ აირჩიოთ 'Factory Reset / Wipe Data' — სერვის-ცენტრში შესაძლებელია სისტემის აღდგენა მონაცემების შენარჩუნებით.",
+            followUpQuestion = "რის შემდეგ დაეწყო ლოგოზე გაჭედვა (განახლება, მეხსიერების გავსება, დავარდნა) და რამდენ ხანში ერთხელ რესტარტდება?"
+        )
     }
 
     private fun buildEdlHardBrickDiagnosis(
         mode: DiagnosticUserMode,
         deviceName: String
     ): DomainDiagnosisTuple {
-        val exp = "მოწყობილობა ($deviceName) გადასულია ავარიული ჩატვირთვის რეჟიმში (**Qualcomm HS-USB QDLoader 9008 / MTK BROM**). ამ მდგომარეობაში ეკრანი სრულიად შავია, მაგრამ კომპიუტერთან USB შეერთებისას Device Manager-ში ჩანს პორტი. აღდგენისთვის საჭიროა ოფიციალური სერვერული (Auth) პროგრამირება."
+        val exp = "მოწყობილობა ($deviceName) გადასულია ავარიული ჩატვირთვის რეჟიმში (**Qualcomm HS-USB QDLoader 9008 / MTK BROM**). ამ მდგომარეობაში ეკრანი შავია, ხოლო კომპიუტერთან USB შეერთებისას ჩანს სერვისული პორტი."
         return DomainDiagnosisTuple(
-            domainTitle = "ავარიული ჩატვირთვის რეჟიმი (EDL 9008 / BROM Hard-Brick)",
+            domainTitle = "ავარიული ჩატვირთვის რეჟიმი (EDL 9008 / BROM)",
             directExplanation = exp,
             simpleExplanation = exp,
-            deepTechnicalExplanation = exp + " სრულდება Firehose/DA ავტორიზაცია და Boot/Rawprogram სექტორების აღდგენა.",
+            deepTechnicalExplanation = exp + " საჭიროა Firehose/DA ავტორიზაცია და Boot სექტორების სერვერული აღდგენა.",
             hypotheses = listOf(
                 DiagnosticHypothesis(
                     title = "Bootloader / XBL სექტორის დაზიანება წარუმატებელი განახლების ან ფლეშირების შემდეგ",
-                    confidence = EvidenceConfidenceLevel.CONFIRMED_BY_EVIDENCE,
-                    supportingEvidence = "ფიქსირდება EDL 9008 / Auth რეჟიმი",
-                    verificationOrDisproof = "სერვერული Auth ფლეშირება და UFS/eMMC ჯანმრთელობის შემოწმება"
+                    confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                    supportingEvidence = "ფიქსირდება EDL 9008 / Auth რეჟიმის სიმპტომი",
+                    verificationOrDisproof = "კომპიუტერის Device Manager-ში პორტის სტაბილურობისა და UFS/eMMC კვანძის შემოწმება"
                 )
             ),
             nextTest = "შეაერთეთ ტელეფონი კომპიუტერზე USB კაბელით და შეამოწმეთ ჩანს თუ არა პორტი სტაბილურად გათიშვის გარეშე.",
-            expectedFindings = "სტაბილური 9008 პორტის შემთხვევაში სისტემა აღდგება 15–20 წუთში ბექასერვისში (ან დისტანციურად USB-ით).",
+            expectedFindings = "სტაბილური 9008 პორტის შემთხვევაში სისტემა აღდგება სერვერული ავტორიზაციით სერვის-ცენტრში.",
             tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB, Auth Server Tool, Testpoint პინცეტი" else "კომპიუტერი და USB კაბელი",
-            safety = "არ სცადოთ არათავსებადი Loader-ების ჩაწერა, რათა არ დაზიანდეს IMEI/NVRAM კალიბრაციის სექტორი."
+            safety = "არ სცადოთ არათავსებადი ფაილების ჩაწერა, რათა არ დაზიანდეს IMEI/NVRAM კალიბრაციის სექტორი.",
+            followUpQuestion = "ჩანს თუ არა ტელეფონი კომპიუტერის Device Manager-ში შეერთებისას?"
         )
     }
 
@@ -1387,18 +1443,12 @@ $catalogSummary
 
         val simpleExp = if (hasConnectedCharger) {
             "💧⚠️ **კრიტიკული გაფრთხილება: სითხის მოხვედრა და დამტენზე შეერთება ($deviceName)!**\n\n" +
-            "სითხის მოხვედრის შემდეგ დამტენზე შეერთება ყველაზე სახიფათო ნაბიჯია: დენის მიწოდება სველ კონტაქტებზე იწვევს მყისიერ ელექტროლიზს, დამტენის პორტისა და PMIC/Hydra კვების კონტროლერის მოკლე ჩართვას (Short circuit).\n" +
-            "• **დაუყოვნებელი მოქმედება:** გამორთეთ დამტენიდან ახლავე! არ სცადოთ ტელეფონის ჩართვა ან დატენვა.\n" +
-            "• **BEKASERVICE-ის გამოსავალი:** ტელეფონის დაუყოვნებელი გახსნა, ელემენტის გათიშვა, დედაპლატის ულტრაბგერითი ქიმიური წმენდა 99%+ იზოპროპილით და მოკლე ჩართვების ლოკალიზება თერმო-კამერით."
+                "სითხის მოხვედრის შემდეგ მოწყობილობის დამტენზე შეერთება იწვევს სველ კონტაქტებზე ელექტროლიზს და მოკლე ჩართვის მაღალ რისკს. აუცილებელია მოწყობილობის დაუყოვნებლივ გათიშვა კვებიდან."
         } else {
-            "💧 **წყლის ან სითხის მოხვედრა ($deviceName) საჭიროებს დაუყოვნებლივ რეაგირებას!**\n\n" +
-            "ყველაზე დიდი საფრთხეა არა თავად წყალი, არამედ წყლისა და ელექტროენერგიის შეხება — როცა სველ კონტაქტებში დენი გადის, რამდენიმე წუთში იწყება ლითონის კონტაქტების დაჟანგვა (ელექტროქიმიური კოროზია) და მოკლე ჩართვა."
+            "💧 **წყლის ან სითხის მოხვედრა ($deviceName) საჭიროებს დაუყოვნებლივ სიფრთხილეს!**\n\n" +
+                "მთავარი რისკია სითხისა და ელექტროენერგიის კონტაქტი, რაც იწვევს შიდა კონექტორების ელექტროქიმიურ კოროზიას (დაჟანგვას) და მოკლე ჩართვას."
         }
-        val techExp = if (hasConnectedCharger) {
-            "სითხის ინგრესია + VBUS 5V/9V ენერგომომარაგება ($deviceName): მაღალი რისკი OVP (Over-Voltage Protection) მოსფეტის, PMIC VDD_MAIN და Type-C CC1/CC2 ხაზების დაწვის. საჭიროა ულტრაბგერითი წმენდა და თერმოვიზორული დიაგნოსტიკა."
-        } else {
-            "სითხის ინგრესია ($deviceName): პირველ რიგში ზიანდება Type-C/Lightning პორტი, ქვედა სუბ-პლატა, დისპლეის FPC კონექტორის ანოდის ხაზი და VBAT/VDD_MAIN კონდენსატორები."
-        }
+        val techExp = "სითხის ინგრესია ($deviceName): პირველ რიგში ზიანდება Type-C/Lightning პორტი, ქვედა სუბ-პლატა, დისპლეის FPC კონექტორის ანოდის ხაზი და VBAT/VDD_MAIN კვების კვანძები."
 
         return DomainDiagnosisTuple(
             domainTitle = "სითხის ზემოქმედება და შიდა კონტაქტების კოროზიის რისკი",
@@ -1407,26 +1457,27 @@ $catalogSummary
             deepTechnicalExplanation = techExp,
             hypotheses = listOf(
                 DiagnosticHypothesis(
-                    title = "დამტენის პორტის, ქვედა პლატის და ეკრანის შლეიფის კონტაქტების დაჟანგვა",
+                    title = "დამტენის პორტის, ქვედა პლატის და ეკრანის შლეიფის კონტაქტების ელექტროქიმიური დაჟანგვა",
                     confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                    supportingEvidence = "დაფიქსირებულია წყალთან/სითხესთან კონტაქტი ($queryText)",
-                    verificationOrDisproof = "ტელეფონის გახსნა, ელემენტის გათიშვა და მიკროსკოპული/ულტრაბგერითი წმენდა"
+                    supportingEvidence = "აღწერილია წყალთან ან სითხესთან კონტაქტი",
+                    verificationOrDisproof = "სერვისში ტელეფონის გახსნა, ელემენტის გათიშვა და მიკროსკოპული/ულტრაბგერითი წმენდა"
                 ),
                 DiagnosticHypothesis(
-                    title = "მთავარი კვების ხაზის ან აუდიო/კამერის კვანძის მოკლე ჩართვა",
+                    title = "კვების ხაზის (PMIC / VBUS) მოკლე ჩართვა სისველის ფონზე",
                     confidence = EvidenceConfidenceLevel.POSSIBLE,
-                    supportingEvidence = "სითხე რჩება დამცავი ეკრანების (Shields) ქვეშ და იწვევს დენის გაჟონვას",
-                    verificationOrDisproof = "დედაპლატის გაჟონვის დენის შემოწმება ლაბორატორიულ კვების ბლოკზე"
+                    supportingEvidence = "სითხის შეღწევა დამცავი ეკრანების ქვეშ იწვევს დენის გაჟონვას",
+                    verificationOrDisproof = "დედაპლატის დიაგნოსტიკა გაშრობისა და ქიმიური წმენდის შემდეგ"
                 )
             ),
             nextTest = if (mode == DiagnosticUserMode.TECHNICIAN) {
                 "დაუყოვნებლივ გათიშეთ ელემენტის კონექტორი, დაათვალიერეთ FPC კონექტორები მიკროსკოპით და გაწმინდეთ 99%+ იზოპროპილის სპირტით."
             } else {
-                "გამორთეთ ტელეფონი ახლავე, არ შეაერთოთ დამტენზე (მაშინაც კი, თუ ჯდება!) და ამოიღეთ SIM ბარათის ჩარჩო. დააკვირდით ხომ არ თბება კორპუსი გამორთულზე."
+                "გამორთეთ ტელეფონი ახლავე, არ შეაერთოთ დამტენზე, ამოიღეთ SIM ბარათის ჩარჩო და დააკვირდით ხომ არ თბება კორპუსი გამორთულ მდგომარეობაში."
             },
-            expectedFindings = "თუ ტელეფონი დროულად გაიწმინდება სერვისში დაჟანგვის დაწყებამდე, ნაწილების შეცვლა ხშირად საჭირო აღარ ხდება.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მიკროსკოპი, ულტრაბგერითი აბაზანა, იზოპროპილის სპირტი, DC ბლოკი" else "მხოლოდ გამორთვა და სერვისში დროული მიტანა",
-            safety = "არ ჩადოთ ტელეფონი ბრინჯში (მტვერი აზიანებს პორტს), არ გააშროთ ცხელი ფენით და კატეგორიულად არ შეაერთოთ დამტენზე!"
+            expectedFindings = "თუ ტელეფონი დროულად გაიწმინდება სერვის-ცენტრში დაჟანგვის გავრცელებამდე, კვანძების დაზიანების რისკი მკვეთრად მცირდება.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მიკროსკოპი, ულტრაბგერითი აბაზანა, იზოპროპილის სპირტი, DC ბლოკი" else "მხოლოდ გამორთვა და სერვის-ცენტრში დროული მიტანა",
+            safety = "არ ჩადოთ ტელეფონი ბრინჯში, არ გააშროთ ცხელი ფენით და კატეგორიულად არ შეაერთოთ დამტენზე სერვისულ გაწმენდამდე!",
+            followUpQuestion = "რამდენი ხნის წინ მოხვდა სითხე ტელეფონში და ხომ არ შეგიერთებიათ მას შემდეგ დამტენზე?"
         )
     }
 
@@ -1436,57 +1487,96 @@ $catalogSummary
         deviceName: String,
         hasPhoto: Boolean
     ): DomainDiagnosisTuple {
-        val hasDropAndVibrationAlive = (queryText.contains("ვარდნ") || queryText.contains("დამივარდა") || queryText.contains("დავარდა") || queryText.contains("დარტყმ")) &&
-            (queryText.contains("ვიბრაცი") || queryText.contains("ვიბრირებს") || queryText.contains("ხმა") || queryText.contains("კომპიუტერ") || queryText.contains("ზარი"))
+        val hasLifeSigns = queryText.contains("ვიბრაცი") || queryText.contains("ვიბრირებს") ||
+            queryText.contains("ხმა") || queryText.contains("კომპიუტერ") || queryText.contains("ზარი") || queryText.contains("რეკავს")
+        val hasDrop = queryText.contains("ვარდნ") || queryText.contains("დამივარდა") || queryText.contains("დავარდა") || queryText.contains("დარტყმ")
+        val hasDropAndVibrationAlive = hasDrop && hasLifeSigns
         val hasGreenOrVerticalLines = queryText.contains("ზოლ") || queryText.contains("მწვანე") || queryText.contains("ვარდისფერ")
         val hasBlackSpots = queryText.contains("ლაქ") || queryText.contains("მელნ")
-        val isBlackScreen = queryText.contains("შავ") || queryText.contains("არ ანათებს") || queryText.contains("ჩაბნელ")
+        val isBlackOrNotTurningOn = queryText.contains("შავ") || queryText.contains("არ ანათებს") ||
+            queryText.contains("ჩაბნელ") || queryText.contains("არ ირთვება") ||
+            queryText.contains("აღარ ირთვება") || queryText.contains("ჩაქრა") || queryText.contains("გამოსახულება არ")
 
         val simpleExp = when {
-            hasDropAndVibrationAlive -> "📱 **სრული კომპლექსური ანალიზი ($deviceName): დედაპლატა 100% ცოცხალია, დაზიანებულია მხოლოდ OLED მატრიცა!**\n\nვიბრაცია, ხმოვანი სიგნალი ან კომპიუტერთან კავშირი უტყუარად ადასტურებს, რომ ტელეფონის პროცესორი, მეხსიერება (UFS/eMMC), კვების კონტროლერი და ოპერაციული სისტემა სრულ მწყობრშია. თქვენი ყველა პირადი ფოტო და მონაცემი სრულად უსაფრთხოდაა! დარტყმის შედეგად დაზიანდა მხოლოდ ორგანული OLED მატრიცის შიდა შრე ან შლეიფის მიერთება, რის გამოც ეკრანზე გამოსახულება აღარ გამოდის. BEKASERVICE-ში ახალი ორიგინალი დისპლეის მონტაჟი სრულდება 25–35 წუთში."
-            hasGreenOrVerticalLines -> "📱 **ეკრანზე გაჩენილი მწვანე/ფერადი ზოლი ($deviceName)** ნიშნავს, რომ დაზიანებულია OLED ეკრანის შიდა მატრიცა ან მისი მიკრო-შლეიფი (ხშირად ჩნდება დავარდნის ან კუთხეზე მცირე დაწოლის შემდეგ). თავად ტელეფონის პლატა და თქვენი მონაცემები სრულიად უვნებელია."
-            hasBlackSpots -> "📱 **ეკრანზე შავი ლაქა ($deviceName)** მიუთითებს შიდა OLED/LCD პიქსელების ფიზიკურ დაზიანებაზე (დეჰერმეტიზაციაზე). დროთა განმავლობაში ეს ლაქა შეიძლება გაიზარდოს და სენსორმაც შეწყვიტოს რეაგირება."
-            isBlackScreen -> "📱 **ეკრანი ჩაბნელებულია ($deviceName):** პირველ რიგში უნდა გაირკვეს, მხოლოდ ეკრანი ჩაქრა (ტელეფონი კი ჩართულია და ზარს იღებს) თუ თავად ტელეფონია სრულად გათიშული."
-            else -> "📱 **ეკრანის ან სენსორის ხარვეზი ($deviceName):** სიმპტომები მიუთითებს დისპლეის მოდულის, სენსორული შრის ან ეკრანის კონექტორის დაზიანებაზე."
+            hasDropAndVibrationAlive ->
+                "📱 **ეკრანის გათიშვა ჩართულ ტელეფონზე ($deviceName):**\n\n" +
+                    "რადგან ტელეფონს აქვს ხმა, ვიბრაცია ან კომპიუტერთან რეაქცია, ეს ადასტურებს, რომ ტელეფონი ჩართულია (კვების სისტემა, დედაპლატა და მეხსიერება მუშაობს), ხოლო პრობლემა ლოკალიზებულია დისპლეის მოდულში ან მის შლეიფში."
+            hasGreenOrVerticalLines ->
+                "📱 **ეკრანზე გაჩენილი ზოლები ($deviceName):**\n\n" +
+                    "ფერადი ან ვერტიკალური ზოლები მიუთითებს OLED/LCD ეკრანის მატრიცის ან მისი მიკრო-შლეიფის დაზიანებაზე (ხშირად ვლინდება დავარდნის ან მექანიკური დაწოლის შემდეგ)."
+            hasBlackSpots ->
+                "📱 **ეკრანზე შავი ლაქა ($deviceName):**\n\n" +
+                    "მუქი ლაქა მიუთითებს შიდა OLED/LCD პიქსელების ფიზიკურ დაზიანებაზე. დროთა განმავლობაში ლაქა შეიძლება გაიზარდოს და სენსორმაც შეწყვიტოს რეაგირება."
+            isBlackOrNotTurningOn ->
+                "📱 **ეკრანი არ ირთვება / შავი ეკრანის დიაგნოსტიკა ($deviceName):**\n\n" +
+                    "როდესაც ეკრანი არ ირთვება (შავია), პირველ რიგში უნდა გაიმიჯნოს ორი მდგომარეობა:\n" +
+                    "1. **მხოლოდ გამოსახულებაა გამქრალი (შავი ეკრანი):** ტელეფონი რეალურად ჩართულია (აქვს ვიბრაცია, ხმა ან რეაგირებს დამტენზე), მაგრამ დისპლეის მოდული/შლეიფი ან განათების წრედი არ აჩვენებს გამოსახულებას.\n" +
+                    "2. **ტელეფონი სრულად გათიშულია (კვების პრობლემა):** ღრმად დამჯდარი ელემენტი, დამუხტვის კვანძის ხარვეზი ან სისტემური გაჭედვა (Freeze)."
+            else ->
+                "📱 **ეკრანის ან სენსორის ხარვეზი ($deviceName):**\n\n" +
+                    "აღწერილი სიმპტომი უკავშირდება დისპლეის მატრიცას, სენსორულ შრეს (Touch) ან ეკრანის კონექტორის კონტაქტს. ზუსტი მიზეზის დასადგენად საჭიროა პირველადი გადამოწმება."
         }
 
         val techExp = if (hasDropAndVibrationAlive) {
-            "OLED მატრიცის დაზიანება ცოცხალ დედაპლატაზე ($deviceName): Haptic/Audio/USB ენერგომოხმარება ადასტურებს PMIC VDD_MAIN და PMU Secondary rails ნორმას. დაზიანება ლოკალიზებულია DSI/MIPI ხაზზე, OLED ELVDD/ELVSS ბუსტერზე ან COF/COP მატრიცის მიკრო-ბზარზე."
+            "OLED/LCD გამოსახულების არქონა ცოცხალ პლატაზე ($deviceName): Haptic/Audio/USB აქტივობა ადასტურებს PMIC VDD_MAIN ნორმას. შესამოწმებელია დისპლეის FPC კონექტორი, OLED ELVDD/ELVSS (ან LCD Backlight Boost) და თავად დისპლეის მატრიცა."
         } else {
-            "დისპლეის ქვესისტემის დიაგნოსტიკა ($deviceName): გასამიჯნია OLED/LCD მატრიცის COF/COP ბონდინგის დაზიანება, FPC კონექტორის კონტაქტი და დისპლეის კვების წრედი (ELVDD/ELVSS ან Backlight Anode/Boost)."
+            "შავი ეკრანის / დისპლეის დიაგნოსტიკა ($deviceName): პირველ ეტაპზე იმიჯნება Power State (ღებულობს თუ არა მოწყობილობა დამუხტვის დენს და რეაგირებს თუ არა Force Restart-ზე) და Display Subsystem (OLED/LCD მატრიცა, FPC შლეიფი, განათების/კვების წრედი)."
+        }
+
+        val hypotheses = if (isBlackOrNotTurningOn && !hasDropAndVibrationAlive) {
+            listOf(
+                DiagnosticHypothesis(
+                    title = "დისპლეის მოდულის (OLED/LCD), შლეიფის ან განათების კვანძის ხარვეზი (შავი ეკრანი ჩართულ ტელეფონზე)",
+                    confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                    supportingEvidence = "ეკრანი არ ირთვება / გამოსახულება არ გამოდის ($queryText)",
+                    verificationOrDisproof = "თუ ზარის, დამტენის შეერთების ან გადამრთველის დროს ისმის ხმა/ვიბრაცია — ტელეფონი ჩართულია და მიზეზი ეკრანის კვანძშია"
+                ),
+                DiagnosticHypothesis(
+                    title = "სისტემური გაჭედვა ( Hang ) ან კვების/ელემენტის ღრმა განმუხტვა",
+                    confidence = EvidenceConfidenceLevel.POSSIBLE,
+                    supportingEvidence = "სრულიად შავი ეკრანი ასევე შეიძლება გამოიწვიოს სისტემის გაჭედვამ ან კვების გათიშვამ",
+                    verificationOrDisproof = "დამტენზე 15 წუთით შეერთება და იძულებითი გადატვირთვის (Force Restart) ცდა"
+                )
+            )
+        } else {
+            listOf(
+                DiagnosticHypothesis(
+                    title = if (hasDropAndVibrationAlive) "ჩართულ ტელეფონზე OLED/LCD ეკრანის მატრიცის ან შლეიფის ხარვეზი" else "OLED / LCD ეკრანის მატრიცის ან შლეიფის სავარაუდო დაზიანება",
+                    confidence = if (hasPhoto && (hasGreenOrVerticalLines || hasBlackSpots)) EvidenceConfidenceLevel.CONFIRMED_BY_EVIDENCE else EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                    supportingEvidence = "დაფიქსირებულია ეკრანის სიმპტომი ($queryText)",
+                    verificationOrDisproof = "სერვისში სატესტო (Known-Good) ეკრანის მიერთებით და კონექტორის შემოწმებით ზუსტდება"
+                ),
+                DiagnosticHypothesis(
+                    title = "დისპლეის კონექტორის (FPC) კონტაქტის ან ეკრანის კვების წრედის ხარვეზი",
+                    confidence = EvidenceConfidenceLevel.POSSIBLE,
+                    supportingEvidence = "დავარდნის ან ტენიანობის შემდეგ შესაძლებელია შლეიფის კონტაქტის დარღვევა",
+                    verificationOrDisproof = "კონექტორის ვიზუალური/მიკროსკოპული ინსპექცია სერვის-ცენტრში"
+                )
+            )
         }
 
         return DomainDiagnosisTuple(
             domainTitle = when {
-                hasDropAndVibrationAlive -> "OLED მატრიცის დაზიანება (დედაპლატა სრულ მწყობრშია)"
-                hasGreenOrVerticalLines -> "OLED დისპლეის მატრიცის / შლეიფის დაზიანება"
+                hasDropAndVibrationAlive -> "დისპლეის მატრიცის / შლეიფის ხარვეზი (ტელეფონი ჩართულია)"
+                isBlackOrNotTurningOn -> "ეკრანი არ ირთვება: შავი ეკრანისა და კვების მდგომარეობის დიაგნოსტიკა"
+                hasGreenOrVerticalLines -> "OLED დისპლეის მატრიცის / შლეიფის ხარვეზი"
                 else -> "დისპლეის მოდულის ან გამოსახულების კვანძის ხარვეზი"
             },
             directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) techExp else simpleExp,
             simpleExplanation = simpleExp,
             deepTechnicalExplanation = techExp,
-            hypotheses = listOf(
-                DiagnosticHypothesis(
-                    title = if (hasDropAndVibrationAlive) "დედაპლატა ცოცხალია: დაზიანებულია მხოლოდ OLED მატრიცა ან შლეიფი" else "OLED / LCD ეკრანის მატრიცის ან COF შლეიფის ფიზიკური დაზიანება",
-                    confidence = if (hasDropAndVibrationAlive || hasPhoto || hasGreenOrVerticalLines || hasBlackSpots) EvidenceConfidenceLevel.CONFIRMED_BY_EVIDENCE else EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                    supportingEvidence = "დაფიქსირებულია ეკრანის ვიზუალური/სენსორული სიმპტომი ($queryText)",
-                    verificationOrDisproof = "სერვისში სატესტო (Known-Good) ეკრანის მიერთებით ზუსტად დასტურდება 5 წუთში"
-                ),
-                DiagnosticHypothesis(
-                    title = "დისპლეის FPC კონექტორის ან კვების ფილტრის ხარვეზი",
-                    confidence = EvidenceConfidenceLevel.POSSIBLE,
-                    supportingEvidence = "ვარდნის შემდეგ შესაძლებელია კონექტორის ამოვარდნა ან პინის მიკრობზარი",
-                    verificationOrDisproof = "კონექტორის მიკროსკოპული დათვალიერება და დიოდური გაზომვა"
-                )
-            ),
+            hypotheses = hypotheses,
             nextTest = if (mode == DiagnosticUserMode.TECHNICIAN) {
-                "შეამოწმეთ სატესტო ეკრანით და გაზომეთ დისპლეის FPC კონექტორზე კვებისა და MIPI ხაზები დიოდურ რეჟიმში."
+                "შეაერთეთ USB ამპერმეტრზე კვების მოხმარების შესაფასებლად, სცადეთ Force Restart და შეამოწმეთ გამოსახულება სატესტო ეკრანით."
             } else {
-                "დარეკეთ თქვენს ნომერზე სხვა ტელეფონიდან ან ჩართეთ უხმო რეჟიმის გადამრთველი/დამტენი: ისმის თუ არა ზარი ან იგრძნობა ვიბრაცია?"
+                "1) შეაერთეთ ტელეფონი გამართულ დამტენზე 10–15 წუთით და დააკვირდით, აქვს თუ არა ხმა ან ვიბრაცია;\n" +
+                    "2) სცადეთ იძულებითი გადატვირთვა (Force Restart: ჩართვისა და ხმის დაწევის ღილაკებზე ერთდროულად დაჭერა 10–15 წამით);\n" +
+                    "3) დარეკეთ თქვენს ნომერზე სხვა ტელეფონიდან — გადის თუ არა ზარი?"
             },
-            expectedFindings = "თუ ტელეფონი რეკავს ან ვიბრირებს — დედაპლატა და მონაცემები უსაფრთხოდაა და საჭიროა მხოლოდ ეკრანის შეცვლა.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "სატესტო ეკრანი, მულტიმეტრი, True Tone პროგრამატორი" else "სხვა ტელეფონი ზარის შესამოწმებლად",
-            safety = "თუ შუშა გაბზარულია, მოერიდეთ ეკრანზე ძლიერ დაწოლას, რათა შუშის ნამსხვრევებმა არ დააზიანოს შიდა შლეიფი ან Face ID სენსორი."
+            expectedFindings = "თუ Force Restart-ის შემდეგ ჩაირთო — მიზეზი პროგრამული გაჭედვა იყო; თუ ზარი გადის ან ტელეფონი ვიბრირებს, მაგრამ ეკრანი შავი რჩება — კვება მუშაობს და საჭიროა ეკრანის/შლეიფის შემოწმება სერვის-ცენტრში.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "USB ამპერმეტრი, სატესტო ეკრანი, მულტიმეტრი" else "გამართული დამტენი და მეორე ტელეფონი ზარის შესამოწმებლად",
+            safety = "თუ ეკრანის შუშა გაბზარულია, მოერიდეთ მასზე ძლიერ დაწოლას; თუ ტელეფონი დასველდა, არ შეაერთოთ დამტენზე და მიმართეთ სერვის-ცენტრს.",
+            followUpQuestion = "აქვს თუ არა ტელეფონს ხმა, ვიბრაცია ან რეაქცია დამტენზე შეერთებისას, და ხომ არ დავარდნილა ან დასველებულა ბოლო დროს?"
         )
     }
 
@@ -1497,36 +1587,39 @@ $catalogSummary
     ): DomainDiagnosisTuple {
         val isSwollen = queryText.contains("გაბერ") || queryText.contains("აიწია")
         val simpleExp = if (isSwollen) {
-            "⚠️ **ყურადღება: გაბერილი ელემენტი ($deviceName) საჭიროებს სასწრაფო შეცვლას!**\n\nგაბერილი ელემენტი შიგნიდან აწვება ეკრანს და შეიძლება გატეხოს მატრიცა ან დააზიანოს შლეიფები. დროებით არ დატენოთ ტელეფონი."
+            "⚠️ **ყურადღება: სავარაუდოდ გაბერილი ელემენტი ($deviceName) საჭიროებს სწრაფ შემოწმებას!**\n\n" +
+                "ამობურცული ეკრანი ან უკანა ხუფი მიუთითებს ელემენტის ფიზიკურ დეფორმაციაზე, რაც შიგნიდან აწვება ეკრანს. უსაფრთხოებისთვის დროებით შეწყვიტეთ დატენვა."
         } else {
-            "🔋 **ელემენტის სწრაფი დაჯდომა ან გაცხელება ($deviceName):**\n\nროდესაც ტელეფონი სწრაფად კარგავს პროცენტებს, ითიშება 15–20%-ზე ან ცხელდება დატვირთვის დროს, ეს უმეტესად გამოწვეულია ლითიუმ-იონური ელემენტის ქიმიური ცვეთით (500+ დამუხტვის ციკლის შემდეგ). ახალი ორიგინალი ელემენტის ჩაყენება 15–20 წუთში სრულად აგვარებს ამ პრობლემას."
+            "🔋 **ელემენტის სწრაფი დაჯდომა ან გაცხელება ($deviceName):**\n\n" +
+                "სწრაფი განმუხტვა, დაბალ პროცენტზე მოულოდნელი გათიშვა ან გაცხელება უმეტესად უკავშირდება ელემენტის ქიმიურ ცვეთას, ფონურ პროგრამულ დატვირთვას ან კვების წრედში მომატებულ მოხმარებას."
         }
 
-        val techExp = "ენერგომოხმარების და ელემენტის დიაგნოსტიკა ($deviceName): გასამიჯნია ელემენტის შიდა წინაღობის (ESR) ზრდა და დედაპლატაზე მეორადი კვების ხაზის გაჟონვა (Sleep current > 15mA)."
+        val techExp = "ენერგომოხმარების და ელემენტის დიაგნოსტიკა ($deviceName): გასამიჯნია ელემენტის შიდა წინაღობის (ESR) ზრდა და დედაპლატაზე მეორადი კვების ხაზის გაჟონვა (Sleep current)."
 
         return DomainDiagnosisTuple(
-            domainTitle = if (isSwollen) "ელემენტის ფიზიკური დეფორმაცია (გაბერვა)" else "ელემენტის ქიმიური ცვეთა ან მომატებული ენერგომოხმარება",
+            domainTitle = if (isSwollen) "ელემენტის ფიზიკური დეფორმაციის (გაბერვის) რისკი" else "ელემენტის ქიმიური ცვეთა ან მომატებული ენერგომოხმარება",
             directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) techExp else simpleExp,
             simpleExplanation = simpleExp,
             deepTechnicalExplanation = techExp,
             hypotheses = listOf(
                 DiagnosticHypothesis(
-                    title = "ლითიუმ-იონური ელემენტის რესურსის ამოწურვა (Health < 80% / მაღალი შიდა წინაღობა)",
-                    confidence = if (isSwollen) EvidenceConfidenceLevel.CONFIRMED_BY_EVIDENCE else EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                    supportingEvidence = "სწრაფი განმუხტვა, პროცენტების ვარდნა ან გაბერვა ($queryText)",
-                    verificationOrDisproof = "ელემენტის ციკლების შემოწმება და ახალი 0-ციკლიანი ელემენტით ტესტირება"
+                    title = "ლითიუმ-იონური ელემენტის რესურსის შემცირება (Health < 80% / მომატებული შიდა წინაღობა)",
+                    confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                    supportingEvidence = "სწრაფი განმუხტვა, პროცენტების ვარდნა ან კორპუსის ამობურცვა ($queryText)",
+                    verificationOrDisproof = "პარამეტრებში Battery Health-ის/ციკლების ნახვა და სერვისში ელემენტის ტესტირება"
                 ),
                 DiagnosticHypothesis(
-                    title = "დედაპლატაზე ფონური დენის მოხმარება (Leakage)",
+                    title = "ფონური პროგრამული აქტივობა ან კვების წრედის მომატებული მოხმარება",
                     confidence = EvidenceConfidenceLevel.POSSIBLE,
-                    supportingEvidence = "თუ ტელეფონი ცხელდება მაშინაც, როცა ეკრანი ჩამქრალია და არ იყენებთ",
-                    verificationOrDisproof = "მოსვენებულ რეჟიმში (Sleep Mode) დენის მოხმარების შემოწმება ლაბორატორიულ ბლოკზე"
+                    supportingEvidence = "თუ ტელეფონი თბება და იცლება მაშინაც, როცა ეკრანი ჩამქრალია",
+                    verificationOrDisproof = "მოსვენებულ რეჟიმში (Airplane Mode ღამით) პროცენტის კლების შემოწმება"
                 )
             ),
-            nextTest = "დააკვირდით: ტელეფონი მალე ჯდება მხოლოდ მაშინ, როცა აქტიურად იყენებთ (ეკრანი ჩართულია), თუ ღამით დადებულ მდგომარეობაშიც 25–40%-ით იცლება?",
-            expectedFindings = "თუ მხოლოდ გამოყენებისას ჯდება მალე — 100%-ით ელემენტის ბრალია; თუ უმოქმედო მდგომარეობაშიც ცხელდება და იცლება — შევამოწმებთ კვების წრედსაც.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "ლაბორატორიული ბლოკი, თერმოკამერა, BMS პროგრამატორი" else "პარამეტრები → Battery Health / Usage",
-            safety = if (isSwollen) "არ დააწვეთ ამობურცულ ეკრანს და არ დატოვოთ დამტენზე!" else "გამოიყენეთ მხოლოდ ორიგინალი/სერტიფიცირებული დამტენი ადაპტერი."
+            nextTest = "შეამოწმეთ Settings → Battery (ელემენტის მდგომარეობა და რომელი აპლიკაცია მოიხმარს ყველაზე მეტ ენერგიას) და დააკვირდით, იცლება თუ არა ტელეფონი უმოქმედო მდგომარეობაშიც.",
+            expectedFindings = "თუ Battery Health დაბალია ან ტელეფონი მხოლოდ დატვირთვისას ითიშება — სავარაუდოა ელემენტის ცვეთა; თუ გამორთულ ეკრანზეც ცხელდება — საჭიროა კვების წრედის დიაგნოსტიკა სერვისში.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "ლაბორატორიული ბლოკი, თერმოკამერა" else "პარამეტრები → Battery Health / Usage",
+            safety = if (isSwollen) "არ დააწვეთ ამობურცულ ეკრანს და არ დატოვოთ ტელეფონი დამტენზე!" else "გამოიყენეთ მხოლოდ გამართული, სერტიფიცირებული დამტენი ადაპტერი.",
+            followUpQuestion = "რამდენია ელემენტის მაჩვენებელი (Battery Health), თუ ჩანს პარამეტრებში, და ხომ არ ითიშება ტელეფონი 15–20%-ზე?"
         )
     }
 
@@ -1536,41 +1629,54 @@ $catalogSummary
         deviceName: String,
         isTestResultUpdate: Boolean
     ): DomainDiagnosisTuple {
-        val simpleExp = "🔌 **დამუხტვის ან ჩართვის პრობლემა ($deviceName):**\n\n" +
-            "თუ ტელეფონი დამტენზე შეერთებისას არ რეაგირებს ან კაბელი ირყევა, შემთხვევათა უმრავლესობაში მიზეზია:\n" +
-            "1. **დამტენის პორტში დაპრესილი მტვერი ან კონტაქტების ცვეთა** (განსაკუთრებით თუ კაბელი ბოლომდე მყარად არ ჯდება).\n" +
-            "2. **დაზიანებული კაბელი/ადაპტერი ან ღრმად დამჯდარი ელემენტი**.\n" +
-            "3. **დამუხტვის კონტროლერი (Charging IC)** — თუ ტელეფონი არაორიგინალ ან მანქანის დამტენზე დაზიანდა."
+        val triedAnotherCable = queryText.contains("სხვა კაბელ") || queryText.contains("სხვა დამტენ") || isTestResultUpdate
 
-        val techExp = "დამუხტვისა და კვების ჯაჭვის დიაგნოსტიკა ($deviceName): შესამოწმებელია VBUS 5V/9V შემოსვლა, CC1/CC2 ან D+/D- კომუნიკაცია, ქვედა სუბ-პლატა და Charging IC / PMIC."
+        val simpleExp = if (triedAnotherCable) {
+            "🔌 **დამუხტვის პრობლემის დაზუსტებული ანალიზი ($deviceName):**\n\n" +
+                "რადგან სხვა კაბელით/ადაპტერითაც არ იტენება, გარე აქსესუარის მიზეზი ნაკლებად სავარაუდოა. ყურადღება გადადის თავად ტელეფონის **დამტენის პორტზე (მტვერი, კონტაქტების ცვეთა, სისველის დაცვა)**, **ღრმად განმუხტულ ელემენტზე** ან **დამუხტვის კონტროლერზე (Charging IC)**."
+        } else {
+            "🔌 **ტელეფონი არ იტენება — შესაძლო მიზეზების ანალიზი ($deviceName):**\n\n" +
+                "როდესაც ტელეფონი დამტენზე არ რეაგირებს ან წყვეტებით იტენება, მიზეზი შეიძლება იყოს როგორც მარტივი გარე ფაქტორი (კაბელი, ადაპტერი, პორტში ჩაპრესილი მტვერი, ტენიანობის ან ტემპერატურის დაცვა), ისე შიდა კვანძი (დამტენის პორტის შლეიფი, ელემენტი ან დამუხტვის კვების წრედი). დამატებითი შემოწმების გარეშე ელემენტის ან პლატის დაზიანების წინასწარ მტკიცება არ შეიძლება."
+        }
+
+        val techExp = "დამუხტვის ჯაჭვის დიაგნოსტიკა ($deviceName): ეტაპობრივად მოწმდება კაბელი/ადაპტერი, Type-C/Lightning პორტის კონტაქტები (მტვერი, კოროზია, CC1/CC2/D+/D- ხაზები), სითხის/თერმისტორის ბლოკირება, ელემენტის ძაბვა (VBAT) და Charging IC / PMIC."
 
         return DomainDiagnosisTuple(
-            domainTitle = "დამუხტვის პორტის, ქვედა შლეიფის ან კვების კონტროლერის ხარვეზი",
+            domainTitle = "დამუხტვის სისტემის დიაგნოსტიკა (კაბელი, პორტი, ელემენტი, კვების წრედი)",
             directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) techExp else simpleExp,
             simpleExplanation = simpleExp,
             deepTechnicalExplanation = techExp,
             hypotheses = listOf(
                 DiagnosticHypothesis(
-                    title = "Type-C / Lightning პორტის დაბინძურება, კონტაქტების ცვეთა ან კაბელის ხარვეზი",
+                    title = "დამტენი კაბელის, ადაპტერის ან Type-C / Lightning პორტის დაბინძურება/ცვეთა",
                     confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                    supportingEvidence = "დაფიქსირებულია დამუხტვის ან კვების რეაქციის არქონა ($queryText)",
-                    verificationOrDisproof = "სხვა заведомо მუშა კაბელით შემოწმება და პორტის მიკროსკოპული ინსპექცია"
+                    supportingEvidence = "ყველაზე ხშირი მიზეზი დატენვის შეწყვეტისას არის კაბელის წყვეტა ან პორტში დაპრესილი მტვერი",
+                    verificationOrDisproof = "სხვა заведомо მუშა კაბელისა და ადაპტერის ცდა; შემოწმება, შედის თუ არა კაბელი პორტში მყარად"
                 ),
                 DiagnosticHypothesis(
-                    title = "დამუხტვის ჩიპის (Charging IC) დაზიანება ან ელემენტის ღრმა განმუხტვა",
-                    confidence = if (isTestResultUpdate) EvidenceConfidenceLevel.STRONGLY_SUSPECTED else EvidenceConfidenceLevel.POSSIBLE,
-                    supportingEvidence = "თუ პორტი და კაბელი მწყობრშია, კონტროლერი ვერ ხსნის დამუხტვის არხს",
-                    verificationOrDisproof = "USB ამპერმეტრზე დენის მოხმარების (V/A) გაზომვა"
+                    title = "პორტში სისველის/ტენიანობის დაცვა ან ტემპერატურული შეზღუდვა",
+                    confidence = EvidenceConfidenceLevel.POSSIBLE,
+                    supportingEvidence = "ნესტის ან გადახურების დროს სისტემა უსაფრთხოების მიზნით დროებით ბლოკავს დამუხტვას",
+                    verificationOrDisproof = "ეკრანზე სითხის/ტემპერატურის შეტყობინების შემოწმება და პორტის ბუნებრივი გაშრობა"
+                ),
+                DiagnosticHypothesis(
+                    title = "ელემენტის ღრმა განმუხტვა ან დამუხტვის კონტროლერის (Charging IC / ქვედა შლეიფის) ხარვეზი",
+                    confidence = if (triedAnotherCable) EvidenceConfidenceLevel.STRONGLY_SUSPECTED else EvidenceConfidenceLevel.POSSIBLE,
+                    supportingEvidence = "თუ გამართული კაბელი და სუფთა პორტი გამოირიცხა, შესამოწმებელია ქვედა შლეიფი, ელემენტი და კვების კონტროლერი",
+                    verificationOrDisproof = "სერვის-ცენტრში USB ამპერმეტრით დენის მოხმარებისა და პორტის შლეიფის შემოწმება"
                 )
             ),
             nextTest = if (mode == DiagnosticUserMode.TECHNICIAN) {
-                "შეაერთეთ USB ამპერმეტრზე და მომწერეთ რამდენ ამპერს (A) მოიხმარს (0.00A, 0.15A–0.45A პულსაცია თუ >1.0A) და ხედავს თუ არა კომპიუტერი USB პორტს."
+                "დაათვალიერეთ პორტი მიკროსკოპით (მტვერი/ოქსიდაცია), შეაერთეთ USB ამპერმეტრზე და შეამოწმეთ მოხმარებული დენი (0.00A, 0.15A–0.45A თუ >1.0A) და PC USB კონექტი."
             } else {
-                "სცადეთ სხვა заведомо მუშა კაბელი და ადაპტერი, დატოვეთ 15 წუთი და დააკვირდით: კაბელი პორტში ბოლომდე, წკაპუნით შედის თუ ადვილად ვარდება?"
+                "1) სცადეთ სხვა, заведомо გამართული კაბელი და ადაპტერი სხვა შტეფსელზე;\n" +
+                    "2) ფანრით ფრთხილად ჩახედეთ დამტენის პორტში — ხომ არ არის ჩაპრესილი მტვერი ან ნესტი და შედის თუ არა კაბელი ბოლომდე მყარად;\n" +
+                    "3) დატოვეთ დამტენზე 15–20 წუთით და დააკვირდით, ეხატება თუ არა დატენვის ნიშანი და ხომ არ თბება პორტი."
             },
-            expectedFindings = "თუ კაბელი ბოლომდე არ შედის — პორტის პროფესიონალური წმენდა 10 წუთში მოაგვარებს; თუ კაბელი მყარად ზის და მაინც არ იტენება — საჭიროა პორტის შლეიფის ან კონტროლერის შემოწმება.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "USB V/A ამპერმეტრი, მულტიმეტრი, მიკროსკოპი" else "სხვა დამტენი კაბელი და ადაპტერი",
-            safety = "არ გაწმინდოთ პორტი ნემსით ან ლითონის საგნით — ლითონი ამოკლებს კვების პინებს!"
+            expectedFindings = "თუ სხვა კაბელზე დაიტენა — მიზეზი აქსესუარია; თუ კაბელი ბოლომდე არ შედის — პორტს სჭირდება ფრთხილი წმენდა; თუ გამართულ კაბელზეც რეაქცია არ აქვს — საჭიროა სერვის-ცენტრში პორტისა და კვების წრედის დიაგნოსტიკა.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "USB V/A ამპერმეტრი, მულტიმეტრი, მიკროსკოპი" else "სხვა დამტენი კაბელი, ადაპტერი და ფანარი პორტის დასათვალიერებლად",
+            safety = "არ გაწმინდოთ დამტენის პორტი ნემსით, ქინძისთავით ან ლითონის საგნით (ეს აზიანებს კონტაქტებს და იწვევს დამოკლებას). თუ პორტი სველია ან ცხელდება, მაშინვე გამოაერთეთ დამტენიდან!",
+            followUpQuestion = "სცადეთ თუ არა სხვა კაბელი და ადაპტერი, ეხატება თუ არა ეკრანზე დატენვის ნიშანი და მყარად ზის თუ არა კაბელი პორტში?"
         )
     }
 
@@ -1581,9 +1687,9 @@ $catalogSummary
     ): DomainDiagnosisTuple {
         val isNoService = queryText.contains("no service") || queryText.contains("searching") || queryText.contains("imei") || queryText.contains("baseband")
         val simpleExp = if (isNoService) {
-            "📶 **ქსელის დაკარგვა / 'No Service' ($deviceName):**\n\nეს შეიძლება გამოწვეული იყოს როგორც უცხოურ ოპერატორზე დაბლოკვით (SIM Lock), ისე მოდემის (Baseband) დაზიანებით დავარდნის შემდეგ."
+            "📶 **ქსელის დაკარგვა / 'No Service' ($deviceName):**\n\nეს შეიძლება უკავშირდებოდეს SIM ბარათს, ოპერატორის შეზღუდვას (SIM Lock) ან მოდემის (Baseband) კვანძის ხარვეზს."
         } else {
-            "🔓 **ანგარიშის ან ოპერატორის ბლოკი ($deviceName):**\n\nGoogle FRP, iCloud Activation Lock ან უცხოური ოპერატორის SIM ბლოკი **BEKASERVICE**-ში იხსნება ოფიციალური სერვერული და პროგრამული მეთოდებით, ტელეფონის ყველა ფუნქციის შენარჩუნებით."
+            "🔓 **ანგარიშის ან ოპერატორის ბლოკი ($deviceName):**\n\nGoogle FRP, iCloud Activation Lock ან უცხოური ოპერატორის SIM ბლოკი საჭიროებს მოდელისა და ბლოკირების სტატუსის ზუსტ იდენტიფიკაციას."
         }
         return DomainDiagnosisTuple(
             domainTitle = if (isNoService) "ქსელური რეგისტრაციის ან მოდემის (Baseband) ხარვეზი" else "ანგარიშის / ოპერატორის პროგრამული ბლოკი (FRP / iCloud / SIM Lock)",
@@ -1592,16 +1698,17 @@ $catalogSummary
             deepTechnicalExplanation = simpleExp + " მოწმდება Baseband ვერსია, *#06# IMEI სტატუსი და Security Patch დონე.",
             hypotheses = listOf(
                 DiagnosticHypothesis(
-                    title = if (isNoService) "Baseband მოდემის ან NVRAM კალიბრაციის ხარვეზი" else "Google FRP / iCloud / Carrier SIM ბლოკი",
+                    title = if (isNoService) "SIM ბარათის, ოპერატორის ბლოკის ან Baseband მოდემის ხარვეზი" else "Google FRP / iCloud / Carrier SIM ბლოკი",
                     confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
                     supportingEvidence = "დაფიქსირებულია ბლოკირების ან ქსელის შეზღუდვის სიმპტომი ($queryText)",
-                    verificationOrDisproof = "მოდელის, IMEI-ს და ეკრანზე გამოტანილი შეტყობინების გადამოწმება"
+                    verificationOrDisproof = "მოდელის, IMEI-ს (*#06#) და ეკრანზე გამოტანილი შეტყობინების გადამოწმება"
                 )
             ),
-            nextTest = "აკრიფეთ *#06# (ან შეამოწმეთ Settings → About) და მომწერეთ ტელეფონის ზუსტი მოდელი და ჩანს თუ არა ეკრანზე IMEI კოდი.",
-            expectedFindings = "თუ IMEI ჩანს — ქსელური მოდემი მუშაობს და საკითხი სერვერულად/პროგრამულად გვარდება; თუ IMEI ცარიელია — საჭიროა Baseband კვანძის აღდგენა.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB, სერვერული ავტორიზაცია, NVRAM/Baseband დიაგნოსტიკა" else "ტელეფონის ზუსტი მოდელის და ეკრანის ფოტოს მოწოდება",
-            safety = "მოერიდეთ საეჭვო პროგრამებით დაფლეშვას, რათა არ წაიშალოს ქარხნული ქსელური კალიბრაცია."
+            nextTest = "აკრიფეთ *#06# (ან შეამოწმეთ Settings → About) და დააკვირდით, ჩანს თუ არა ეკრანზე IMEI კოდი.",
+            expectedFindings = "თუ IMEI ჩანს — მოდემი მუშაობს და საკითხი პროგრამულად/სერვერულად მოწმდება; თუ IMEI ცარიელია — საჭიროა Baseband კვანძის აპარატურული დიაგნოსტიკა.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB, სერვერული ავტორიზაცია, NVRAM/Baseband დიაგნოსტიკა" else "ტელეფონის ზუსტი მოდელის და ეკრანის შეტყობინების გადამოწმება",
+            safety = "მოერიდეთ არაოფიციალური პროგრამებით დაფლეშვას, რათა არ წაიშალოს ქარხნული ქსელური კალიბრაცია.",
+            followUpQuestion = "რა წარწერა ჩანს ეკრანზე და რომელი მოდელია ტელეფონი?"
         )
     }
 
@@ -1610,17 +1717,63 @@ $catalogSummary
         queryText: String,
         deviceName: String
     ): DomainDiagnosisTuple {
-        val isCamera = queryText.contains("კამერ") || queryText.contains("ფოკუს")
-        val isFaceId = queryText.contains("face id") || queryText.contains("touch id")
-        val title = when {
-            isFaceId -> "ბიომეტრიული სენსორის (Face ID / Touch ID) ხარვეზი"
-            isCamera -> "კამერის მოდულის ან ოპტიკური სტაბილიზაციის (OIS) ხარვეზი"
-            else -> "აუდიო სისტემის (დინამიკი / მიკროფონი / Audio IC) ხარვეზი"
+        val isCamera = queryText.contains("კამერ") || queryText.contains("ფოკუს") ||
+            queryText.contains("ლინზ") || queryText.contains("ბუნდოვან") || queryText.contains("ois")
+        val isFaceId = queryText.contains("face id") || queryText.contains("touch id") || queryText.contains("ანაბეჭდ")
+
+        if (isCamera) {
+            val simpleExp = "📷 **კამერა არ ფოკუსირდება / გამოსახულების სიმკვეთრის ხარვეზი ($deviceName):**\n\n" +
+                "როდესაც კამერა ვერ იჭერს ფოკუსს ან გამოსახულება ბუნდოვანია, მიზეზი შეიძლება იყოს როგორც გარე ფაქტორი (ლინზის შუშის დაბინძურება, დაკრული დამცავი შუშა ან შიდა დაორთქვლა), ისე პროგრამული ხარვეზი ან თავად კამერის ავტოფოკუსის / ოპტიკური სტაბილიზაციის (OIS) მექანიზმის დაზიანება (განსაკუთრებით დავარდნის ან ვიბრაციის შემდეგ)."
+            val techExp = "კამერის ავტოფოკუსის (VCM / Closed-Loop AF) და OIS ქვესისტემის დიაგნოსტიკა ($deviceName): გასამიჯნია ოპტიკური გზის დაბრკოლება (დამცავი ლინზა, კონდენსატი), პროგრამული ფოკუსის ჩაკეტვა და 1x/2x/3x სენსორის აქტუატორის მექანიკური ხარვეზი."
+
+            return DomainDiagnosisTuple(
+                domainTitle = "კამერის ფოკუსირებისა და ოპტიკური მოდულის დიაგნოსტიკა",
+                directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) techExp else simpleExp,
+                simpleExplanation = simpleExp,
+                deepTechnicalExplanation = techExp,
+                hypotheses = listOf(
+                    DiagnosticHypothesis(
+                        title = "კამერის გარე შუშის დაბინძურება, დაკრული დამცავი ლინზა ან შიდა ნესტი/ნაკაწრი",
+                        confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
+                        supportingEvidence = "დაბინძურებული შუშა ან დამატებითი დამცავი ხშირად უშლის ხელს ლაზერულ/ფაზურ ავტოფოკუსს",
+                        verificationOrDisproof = "კამერის შუშის რბილი ქსოვილით გაწმენდა, დამცავი ლინზის მოხსნა და კარგ განათებაში შემოწმება"
+                    ),
+                    DiagnosticHypothesis(
+                        title = "კამერის ავტოფოკუსის (AF) ან ოპტიკური სტაბილიზატორის (OIS) მექანიზმის ხარვეზი",
+                        confidence = EvidenceConfidenceLevel.POSSIBLE,
+                        supportingEvidence = "დავარდნის ან ვიბრაციის შემდეგ კამერის შიდა ლინზა შეიძლება გაიჭედოს ან დაიწყოს კანკალი",
+                        verificationOrDisproof = "0.5x, 1x და 2x/3x რეჟიმების შედარება — თუ მხოლოდ 1x ვერ ფოკუსირდება ან ისმის ზუზუნი, ხარვეზი მოდულშია"
+                    ),
+                    DiagnosticHypothesis(
+                        title = "კამერის აპლიკაციის ან სისტემური პროგრამის დროებითი შეფერხება",
+                        confidence = EvidenceConfidenceLevel.POSSIBLE,
+                        supportingEvidence = "ფოკუსირების ალგორითმი შეიძლება გაიჭედოს კონკრეტულ აპლიკაციაში",
+                        verificationOrDisproof = "ტელეფონის გადატვირთვა და სტანდარტულ Camera აპლიკაციაში ეკრანზე შეხებით (Tap-to-Focus) შემოწმება"
+                    )
+                ),
+                nextTest = if (mode == DiagnosticUserMode.TECHNICIAN) {
+                    "შეამოწმეთ კამერის შუშა და ლაზერული AF სარკმელი მიკროსკოპით, შემდეგ გატესტეთ 0.5x / 1x / Telephoto რეჟიმები და მოუსმინეთ OIS აქტუატორის ხმაურს."
+                } else {
+                    "1) ფრთხილად გაწმინდეთ კამერის შუშა რბილი (მიკროფიბრის) ქსოვილით და თუ კამერაზე დაკრულია დამცავი შუშა, დროებით მოხსენით;\n" +
+                        "2) გახსენით სტანდარტული კამერის აპლიკაცია, დააჭირეთ ეკრანზე ფოკუსის წერტილს და გადართეთ 0.5x, 1x და 2x/3x რეჟიმებს შორის;\n" +
+                        "3) გადატვირთეთ ტელეფონი და დააკვირდით, ხომ არ კანკალებს გამოსახულება ან ხომ არ ისმის წკაპუნის/ზუზუნის ხმა კამერიდან."
+                },
+                expectedFindings = "თუ გაწმენდის ან დამცავის მოხსნის შემდეგ გასწორდა — მიზეზი გარე დაბრკოლება იყო; თუ 0.5x მკვეთრია, ხოლო 1x (ან 3x) მუდმივად ბუნდოვანია გადატვირთვის შემდეგაც — საჭიროა კამერის მოდულის შემოწმება სერვის-ცენტრში.",
+                tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მიკროსკოპი, სატესტო კამერის მოდული" else "რბილი მიკროფიბრის ქსოვილი და სტანდარტული კამერის აპლიკაცია",
+                safety = "არ დააწვეთ კამერის შუშას ბასრი საგნით და არ გამოიყენოთ აგრესიული სითხეები ლინზის გასაწმენდად. თუ კამერის შუშა გაბზარულია, დროულად მიმართეთ სერვის-ცენტრს, რათა მტვერმა არ დააზიანოს სენსორი.",
+                followUpQuestion = "რომელ კამერაზეა პრობლემა (მთავარ 1x, 0.5x თუ წინა კამერაზე), ხომ არ უყენია დამცავი ლინზა და ხომ არ დავარდნილა ტელეფონი?"
+            )
         }
-        val exp = when {
-            isFaceId -> "🔐 **Face ID / Touch ID ხარვეზი ($deviceName):** ხშირად ვითარდება სითხის მოხვედრის ან ეკრანის შეცვლისას ზედა სენსორის შლეიფის დაზიანების გამო. ბექასერვისში სრულდება TrueDepth კვანძის მიკროსკოპული აღდგენა."
-            isCamera -> "📷 **კამერის ხარვეზი ($deviceName):** თუ კამერა არ ფოკუსირებს, კანკალებს ან შავია, დაზიანებულია ოპტიკური სტაბილიზატორი (OIS) ან კამერის კვების ხაზი."
-            else -> "🔊 **ხმის ან მიკროფონის პრობლემა ($deviceName):** თუ ხმა დაბალია ან ჩახლეჩილია, უმეტესად დაბინძურებულია დამცავი ბადე; თუ ხმა საერთოდ გაქრა ზარის დროს და სპიკერის ღილაკიც არააქტიურია — საჭიროა აუდიო კვანძის შემოწმება."
+
+        val title = if (isFaceId) {
+            "ბიომეტრიული სენსორის (Face ID / Touch ID) ხარვეზი"
+        } else {
+            "აუდიო სისტემის (დინამიკი / მიკროფონი / Audio IC) ხარვეზი"
+        }
+        val exp = if (isFaceId) {
+            "🔐 **Face ID / Touch ID ხარვეზი ($deviceName):** ხშირად უკავშირდება ეკრანის ზედა სენსორის არეალის დაბინძურებას, სითხის მოხვედრას ან შლეიფის კონტაქტს."
+        } else {
+            "🔊 **ხმის ან მიკროფონის პრობლემა ($deviceName):** თუ ხმა დაბალია ან ჩახლეჩილია, უმეტესად დაბინძურებულია დამცავი ბადე; თუ ხმა საერთოდ გაქრა — შესამოწმებელია აუდიო მოდული და შლეიფი."
         }
         return DomainDiagnosisTuple(
             domainTitle = title,
@@ -1632,17 +1785,14 @@ $catalogSummary
                     title = title,
                     confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
                     supportingEvidence = "დაფიქსირებულია შესაბამისი პერიფერიული სიმპტომი ($queryText)",
-                    verificationOrDisproof = "სისტემური ტესტით (დიქტოფონი / კამერის რეჟიმები 0.5x-1x-3x) გადამოწმება"
+                    verificationOrDisproof = "სისტემური ტესტით (დიქტოფონი / სენსორის გასუფთავება) გადამოწმება"
                 )
             ),
-            nextTest = if (isCamera) {
-                "გახსენით კამერა და გადართეთ 0.5x, 1x და 2x/3x რეჟიმებს შორის: ყველა რეჟიმზე აქვს ხარვეზი თუ მხოლოდ ერთ კონკრეტულ ლინზაზე?"
-            } else {
-                "ჩაწერეთ 5-წამიანი ხმა სტანდარტულ დიქტოფონში (Voice Memos): იწერება თუ არა ხმა სუფთად?"
-            },
-            expectedFindings = "ეს ტესტი ზუსტად გვიჩვენებს, გარე გაწმენდა/მოდულის შეცვლაა საჭირო თუ შლეიფის აღდგენა.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მიკროსკოპი, მულტიმეტრი, სატესტო მოდული" else "კამერის / დიქტოფონის აპლიკაცია",
-            safety = "არ გაწმინდოთ დინამიკის ბადე ან კამერის ლინზა სპირტით ან ბასრი ნემსით."
+            nextTest = "ჩაწერეთ 5-წამიანი ხმა სტანდარტულ დიქტოფონში (Voice Memos) და მოუსმინეთ: იწერება და ისმის თუ არა ხმა სუფთად?",
+            expectedFindings = "ეს ტესტი გვიჩვენებს, გარე ბადის გაწმენდაა საჭირო თუ დინამიკის/მიკროფონის მოდულის შემოწმება.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მიკროსკოპი, მულტიმეტრი, სატესტო მოდული" else "დიქტოფონის აპლიკაცია",
+            safety = "არ გაწმინდოთ დინამიკის ბადე სპირტით ან ბასრი ნემსით.",
+            followUpQuestion = "რომელ დინამიკზე ან მიკროფონზე შეინიშნება ხარვეზი (ზარის დროს, სპიკერზე თუ ვიდეოს ჩაწერისას)?"
         )
     }
 
@@ -1651,7 +1801,7 @@ $catalogSummary
         deviceName: String
     ): DomainDiagnosisTuple {
         val exp = "⚡ **ტელეფონის შენელება, გაჭედვა ან აპლიკაციებიდან გამოგდება ($deviceName):**\n\n" +
-            "როდესაც სმარტფონის მეხსიერება ივსება 90%-ზე მეტად ან ელემენტის რესურსი ეცემა 80%-ს ქვემოთ, სისტემა ავტომატურად ამცირებს პროცესორის სიხშირეს (Thermal/Power Throttling), რაც იწვევს ჭედვას."
+            "როდესაც სმარტფონის მეხსიერება ივსება 90%-ზე მეტად ან ელემენტის რესურსი მცირდება, სისტემა ამცირებს პროცესორის სიხშირეს (Throttling), რაც იწვევს ჭედვას."
         return DomainDiagnosisTuple(
             domainTitle = "მეხსიერების გადავსება ან პროცესორის სიმძლავრის შეზღუდვა",
             directExplanation = exp,
@@ -1672,9 +1822,10 @@ $catalogSummary
                 )
             ),
             nextTest = "შეამოწმეთ Settings → Storage-ში რამდენი გიგაბაიტია თავისუფალი და გადატვირთეთ ტელეფონი.",
-            expectedFindings = "8–10 GB-ის გათავისუფლება და სისტემური ქეშის გასუფთავება მყისიერად აღადგენს სისწრაფეს.",
+            expectedFindings = "8–10 GB-ის გათავისუფლება და სისტემური ქეშის გასუფთავება აღადგენს სისტემის სისწრაფეს.",
             tools = "პარამეტრების მენიუ (Storage & Battery)",
-            safety = "არ დატოვოთ მეხსიერება ბოლომდე (100%-ით) სავსე — ამან შეიძლება გადატვირთვისას ტელეფონი ლოგოზე გაჭედოს (Bootloop)."
+            safety = "არ დატოვოთ მეხსიერება ბოლომდე (100%-ით) სავსე — ამან შეიძლება გადატვირთვისას ტელეფონი ლოგოზე გაჭედოს (Bootloop).",
+            followUpQuestion = "რამდენი გიგაბაიტია თავისუფალი Settings → Storage-ში?"
         )
     }
 
@@ -1687,12 +1838,10 @@ $catalogSummary
     ): DomainDiagnosisTuple {
         val exp = if (hasPhoto) {
             "📷 **ატვირთული ფოტო და შეტყობინება მიღებულია ($deviceName).**\n\n" +
-                "ზუსტი ტექნიკური დასკვნისთვის მომწერეთ კიდევ ორი დეტალი: რის შემდეგ დაიწყო ეს პრობლემა (დავარდნა, დასველება, განახლება) და როგორ რეაგირებს ტელეფონი ახლა?"
+                "ზუსტი ტექნიკური დასკვნისთვის გთხოვთ დამიზუსტოთ, რის შემდეგ დაიწყო ეს პრობლემა (დავარდნა, დასველება, განახლება) და როგორ რეაგირებს ტელეფონი ახლა."
         } else {
-            "🔍 **გთხოვთ დამიზუსტოთ მცირე დეტალი ზუსტი დიაგნოზისთვის:**\n\n" +
-                "თქვენი შეტყობინების (`\"${queryText.take(90)}\"`) მიხედვით რომ ზუსტად გითხრათ მიზეზი და გადაჭრის გზა, მომწერეთ:\n" +
-                "1. **ტელეფონის ზუსტი მოდელი** (მაგ: iPhone 14 Pro, Samsung S23, Redmi Note 12)\n" +
-                "2. **რა სიმპტომი აქვს** (მაგ: ეკრანი, დატენვა, ლოგოზე გაჭედვა, ბლოკი, ხმა) ან პირდაპირ ატვირთეთ ფოტო!"
+            "🔍 **საჭიროა სიმპტომის დაზუსტება ზუსტი დიაგნოზისთვის:**\n\n" +
+                "თქვენი შეტყობინების (`\"${queryText.take(90)}\"`) საფუძველზე დაუდასტურებელი ვარაუდების გამოსარიცხად, გთხოვთ მომწეროთ ტელეფონის მოდელი და კონკრეტული სიმპტომი."
         }
         return DomainDiagnosisTuple(
             domainTitle = "სადიაგნოსტიკო მონაცემების დაზუსტება",
@@ -1707,10 +1856,11 @@ $catalogSummary
                     verificationOrDisproof = "მოდელისა და სიმპტომის გამოვლენის პირობების დაზუსტება"
                 )
             ),
-            nextTest = "მომწერეთ ტელეფონის მოდელი და რა რეაქცია აქვს ჩართვის ან დამტენზე შეერთების დროს.",
-            expectedFindings = "ამ დეტალების დაზუსტებისთანავე მოგაწვდით ზუსტ მიზეზს და სამოქმედო გეგმას.",
+            nextTest = "მომწერეთ ტელეფონის მოდელი და რა რეაქცია აქვს ჩართვის, დატენვის ან კონკრეტული ფუნქციის გამოყენების დროს.",
+            expectedFindings = "ამ დეტალების დაზუსტებისთანავე მოგაწვდით შესაძლო მიზეზებს და უსაფრთხო შემოწმების გეგმას.",
             tools = if (mode == DiagnosticUserMode.TECHNICIAN) "USB ამპერმეტრი, ვიზუალური ინსპექცია" else "დაკვირვება ან ფოტოს ატვირთვა",
-            safety = "თუ მოწყობილობა დასველდა ან უჩვეულოდ ცხელდება, დროებით გამორთეთ."
+            safety = "თუ მოწყობილობა დასველდა ან უჩვეულოდ ცხელდება, დროებით გამორთეთ.",
+            followUpQuestion = "რომელი მოდელია ტელეფონი და კონკრეტულად რა სიმპტომი აღენიშნება?"
         )
     }
 
@@ -1720,14 +1870,16 @@ $catalogSummary
     ): List<Int> {
         val q = query.lowercase()
         val device = detectDeviceModelFromTranscript(listOf(DiagnosticMessage(role = "user", text = query)))
-        val hasSpecificDevice = device != "მოდელი არ არის მითითებული" && !device.contains("დასაზუსტებელია")
+        val hasSpecificDevice = device != "მოდელი არ არის მითითებული" &&
+            !device.contains("დასაზუსტებელია") &&
+            device !in listOf("Apple iPhone", "Samsung Galaxy", "Xiaomi / Redmi / Poco", "Google Pixel")
 
         val isExplicitSoftwareQuery = listOf(
             "canva", "კანვა", "capcut", "კაპკატ", "adobe", "ადობ", "windows", "ვინდოუს",
             "office", "ოფის", "chatgpt", "gpt", "google ai", "gemini", "claude", "spotify", "youtube"
         ).any { q.contains(it) }
 
-        // Filter hardware spare parts only if they match the detected device or explicit software
+        // Filter hardware spare parts only if they match a specific detected device model or explicit software
         val rawMatched = GeminiDiagnosticService.findRelevantProducts(query, catalogProducts)
         val filtered = rawMatched.filter { prod ->
             val isSoftware = SoftwareCatalogData.isDigitalSoftwareService(prod)
@@ -1741,7 +1893,7 @@ $catalogSummary
             }
         }
         if (filtered.isNotEmpty()) {
-            return filtered.take(2).map { it.id }
+            return filtered.take(2).map { it.id }.distinct()
         }
 
         // If user has a specific device + screen/battery issue, look up matching part in catalog
@@ -1754,7 +1906,7 @@ $catalogSummary
                     ((wantsScreen && prod.category.contains("ეკრან")) || (wantsBattery && prod.category.contains("ელემენტ")))
             }
             if (matchedByDevice.isNotEmpty()) {
-                return matchedByDevice.take(2).map { it.id }
+                return matchedByDevice.take(2).map { it.id }.distinct()
             }
         }
         return emptyList()
@@ -1937,6 +2089,7 @@ object DiagnosticsSessionRepository {
                     .put("expectedFindings", sec.expectedFindings)
                     .put("requiredTools", sec.requiredTools)
                     .put("safetyConsiderations", sec.safetyConsiderations)
+                    .put("followUpQuestion", sec.followUpQuestion)
             }
 
             val recIdsArr = JSONArray()
@@ -2014,11 +2167,12 @@ object DiagnosticsSessionRepository {
                     observedSymptoms = sec.optString("observedSymptoms", ""),
                     deviceIdentification = sec.optString("deviceIdentification", ""),
                     visualInspectionFindings = sec.optString("visualInspectionFindings", ""),
-                    hypotheses = hyps,
+                    hypotheses = hyps.distinctBy { it.title.trim().lowercase() },
                     nextDiagnosticTest = sec.optString("nextDiagnosticTest", ""),
                     expectedFindings = sec.optString("expectedFindings", ""),
                     requiredTools = sec.optString("requiredTools", ""),
-                    safetyConsiderations = sec.optString("safetyConsiderations", "")
+                    safetyConsiderations = sec.optString("safetyConsiderations", ""),
+                    followUpQuestion = sec.optString("followUpQuestion", "")
                 )
             }
 

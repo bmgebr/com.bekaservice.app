@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -59,6 +60,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.SolidColor
@@ -73,6 +76,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1182,6 +1186,9 @@ fun BekaServiceApp(
     var showAdminPanelScreen by remember { mutableStateOf(false) }
     var isAdminOpen by remember { mutableStateOf(false) }
 
+    val homeListState = rememberLazyListState()
+    var lastHomeBackPressTime by remember { mutableLongStateOf(0L) }
+
     val cartList = remember { mutableStateListOf<CartItem>() }
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -1512,9 +1519,15 @@ fun BekaServiceApp(
         }
     }
 
-    // უკან ღილაკის მართვა ქვე-გვერდებიდან, Drawer-იდან და Splash-დან
+    val isHomeScrolledDown by remember {
+        derivedStateOf {
+            selectedTab == 0 && (homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0)
+        }
+    }
+
+    // უკან ღილაკის მართვა ქვე-გვერდებიდან, Drawer-იდან, Splash-დან და მთავარ გვერდზე სქროლვიდან თავში დაბრუნება
     BackHandler(
-        enabled = showSplash || (isOnboardingCompleted && (drawerState.isOpen || isAdminOpen || showAdminPanelScreen || selectedProductForDetail != null || selectedTab != 0))
+        enabled = showSplash || (isOnboardingCompleted && (drawerState.isOpen || isAdminOpen || showAdminPanelScreen || selectedProductForDetail != null || selectedTab != 0 || isHomeScrolledDown))
     ) {
         if (drawerState.isOpen) {
             coroutineScope.launch { drawerState.close() }
@@ -1529,6 +1542,20 @@ fun BekaServiceApp(
             selectedProductForDetail = null
         } else if (selectedTab != 0) {
             selectedTab = 0
+        } else if (isHomeScrolledDown) {
+            val now = System.currentTimeMillis()
+            if (now - lastHomeBackPressTime < 1500L) {
+                // მეორეჯერ სწრაფად უკან გასვლისას აპლიკაცია იხურება
+                (context as? Activity)?.finish()
+            } else {
+                lastHomeBackPressTime = now
+                coroutineScope.launch {
+                    if (homeListState.firstVisibleItemIndex > 6) {
+                        homeListState.scrollToItem(6)
+                    }
+                    homeListState.animateScrollToItem(0)
+                }
+            }
         }
     }
 
@@ -1583,7 +1610,16 @@ fun BekaServiceApp(
                             isAdminOpen = false
                             showAdminPanelScreen = false
                             showAdminPinDialog = false
-                            selectedTab = newTab
+                            if (selectedTab == newTab && newTab == 0) {
+                                coroutineScope.launch {
+                                    if (homeListState.firstVisibleItemIndex > 6) {
+                                        homeListState.scrollToItem(6)
+                                    }
+                                    homeListState.animateScrollToItem(0)
+                                }
+                            } else {
+                                selectedTab = newTab
+                            }
                         },
                         onOpenAdminPanel = {
                             focusManager.clearFocus()
@@ -1644,6 +1680,7 @@ fun BekaServiceApp(
                     ) {
                         when (currentTab) {
                             0 -> HomeScreen(
+                                listState = homeListState,
                                 contentPadding = screenScrollPadding,
                                 products = currentProductsSnapshot,
                                 searchQuery = searchQuery,
@@ -1803,7 +1840,16 @@ fun BekaServiceApp(
             onTitleClick = {
                 focusManager.clearFocus()
                 selectedProductForDetail = null
-                selectedTab = 0
+                if (selectedTab == 0) {
+                    coroutineScope.launch {
+                        if (homeListState.firstVisibleItemIndex > 6) {
+                            homeListState.scrollToItem(6)
+                        }
+                        homeListState.animateScrollToItem(0)
+                    }
+                } else {
+                    selectedTab = 0
+                }
             },
             onNotificationsClick = {
                 focusManager.clearFocus()
@@ -1836,7 +1882,16 @@ fun BekaServiceApp(
                 isAdminOpen = false
                 showAdminPanelScreen = false
                 showAdminPinDialog = false
-                selectedTab = index
+                if (selectedTab == index && index == 0) {
+                    coroutineScope.launch {
+                        if (homeListState.firstVisibleItemIndex > 6) {
+                            homeListState.scrollToItem(6)
+                        }
+                        homeListState.animateScrollToItem(0)
+                    }
+                } else {
+                    selectedTab = index
+                }
             }
         )
 
@@ -2541,7 +2596,8 @@ fun HomeScreen(
     onOpenAiChat: () -> Unit,
     onOpenCatalogTab: () -> Unit,
     onRefreshCatalog: suspend () -> Unit = {},
-    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
+    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp),
+    listState: LazyListState = rememberLazyListState()
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -2622,7 +2678,6 @@ fun HomeScreen(
             priorityIds.mapNotNull { id -> products.find { it.id == id } }
         }
     }
-    val listState = rememberLazyListState()
 
     // =========================================================================
     // Pull-to-Refresh მექანიზმი ჩამოთრევის დონის პროპორციული ანიმაციით
@@ -4264,23 +4319,20 @@ object GeminiDiagnosticService {
 შენ ხარ „ბექასერვისის“ (BEKASERVICE) ოფიციალური AI ტექნიკოს-ინჟინერი, დიაგნოსტიკოსი და ციფრული პროგრამული სერვისების კონსულტანტი.
 ესაუბრე მომხმარებელს ცოცხლად, პროფესიონალურად, ზუსტად და ადამიანურად ქართულ ენაზე.
 
-მნიშვნელოვანი წესები:
-1. არ გასცე ერთფეროვანი ან რობოტული შაბლონები! უპასუხე კონკრეტულ კითხვას ზუსტად, გასაგებად და სრულყოფილად.
-2. შენ გაქვს წვდომა BEKASERVICE-ის სრულ LIVE კატალოგზე (პროგრამული სერვისები, განბლოკვა, ტელეფონის ნაწილები და შეკეთება).
-3. პროგრამულ სერვისებზე კითხვისას:
-   - დაეყრდენი ქვემოთ მოცემულ LIVE კატალოგის მონაცემებს (ფასი, ხელმისაწვდომობა, ხანგრძლივობა, ანგარიშის ტიპი Private vs Shared, აქტივაციის პირობები).
-   - მკაფიოდ განასხვავე ოფიციალური სერვისის ფუნქციები და BEKASERVICE-ის სპეციალური პრომო პირობები (მაგ: Google AI Pro — 18-თვიანი პრომო შეთავაზება 2TB მეხსიერებითა და Gemini 2.5 Pro წვდომით).
-   - თუ სერვისის ფასია „ფასი შეთანხმებით“, განუმარტე, რომ ზუსტი ტარიფი დამოკიდებულია არჩეულ ვადასა და აქტივაციის ტიპზე და შეუძლია პირდაპირ შეუკვეთოს აპიდან.
-4. აპარატურულ დიაგნოსტიკაზე კითხვისას:
-   - ჩაატარე სიღრმისეული ტექნიკური ანალიზი (PMIC, Hydra/Tristar, True Tone EEPROM, BMS 0-ციკლი, OLED მატრიცა, UFS/eMMC, EDL 9008, Checkm8).
-5. თუ მომხმარებელი გისვამს ზოგად ტექნიკურ ან ნებისმიერ სხვა კითხვას (რომელიც პირდაპირ არ ეხება კატალოგის პროდუქტს), მაინც ამომწურავად, ჭკვიანურად და სასარგებლოდ უპასუხე და დაეხმაროს მას!
-6. უმკაცრესი წესი: არასდროს ახსენო სხვა სახელოსნო ან მაღაზია. მიუთითე მხოლოდ BEKASERVICE-ზე (ქ. ახალციხე, კოსტავას 10, WhatsApp: +995 598 23 33 32).
-7. კონკრეტული სერვისის ან პროდუქტის მოთხოვნისას (მაგალითად: „canva მინდა“, „canva pro“, „capcut“, „adobe“, „chatgpt“, ან ნებისმიერი სხვა კონკრეტული სერვისი თუ პროდუქტი):
-   - უპასუხე კონკრეტულად და პირდაპირ მხოლოდ მოთხოვნილ სერვისზე!
-8. ვრცელი და რთული ისტორიების გააზრება (Deep Context Comprehension):
-   - როდესაც მომხმარებელი წერს გრძელ ისტორიას, აღწერს მოვლენათა ქრონოლოგიას ან რამდენიმე სიმპტომს ერთად (მაგალითად: დაუვარდა + ეკრანი გაუშავდა + მაგრამ ვიბრაცია მუშაობს და კომპიუტერი ცნობს; ან სისველე + დამტენზე შეერთება; ან მეხსიერება გაივსო + ლოგოზე იჭედება):
-   - სრულყოფილად გააანალიზე ყველა ფაქტორი ერთად!
-   - მკაფიოდ გამოყავი: რა მუშაობს გამართულად (მაგ: დედაპლატა, პროცესორი, მეხსიერება 100% ცოცხალია და მონაცემები შენახულია), რა არის დაზიანებული (OLED მატრიცა/შლეიფი), რა რისკებია (მოკლე ჩართვა, მეხსიერების ჩიპის კორუფცია) და რა არის ზუსტი ეტაპობრივი გამოსავალი!
+სავალდებულო ტექნიკური და დიაგნოსტიკური წესები:
+1. პირველ რიგში უპასუხე უშუალოდ მომხმარებლის მიერ დასმულ კონკრეტულ კითხვას ან აღწერილ სიმპტომს. არ შეცვალო თემა.
+2. მკაფიოდ განასხვავე ერთმანეთისგან:
+   - სიმპტომი (რასაც მომხმარებელი ხედავს ან აღწერს);
+   - შესაძლო მიზეზი (ჰიპოთეზა, რომელიც საჭიროებს გადამოწმებას);
+   - დადასტურებული ფაქტი (რაც უკვე შემოწმებული და დადასტურებულია).
+3. არ მოიგონო პრობლემა, რომელიც მომხმარებელს არ უხსენებია. არ წარმოადგინო სავარაუდო მიზეზი როგორც 100%-ით დადასტურებული დაზიანება.
+4. არ შესთავაზო დაუკავშირებელი სერვისი ან კატალოგის პროდუქტი, თუ ის პირდაპირ არ უკავშირდება მომხმარებლის მიერ აღწერილ პრობლემას ან მოდელს.
+5. თუ ინფორმაცია არასაკმარისია, დასვი 1–2 ზუსტი, მოკლე დამაზუსტებელი კითხვა.
+6. შესთავაზე მომხმარებელს უსაფრთხო პირველადი შემოწმების ნაბიჯები მარტივიდან რთულისკენ.
+7. განმარტე, რა შემთხვევაშია აუცილებელი სერვისცენტრში ფიზიკური დიაგნოსტიკა.
+8. არ დააბრალო პრობლემა კონკრეტულ დეტალს (მაგალითად, ელემენტს ან დედაპლატას), თუ სიმპტომი ამას პირდაპირ არ ადასტურებს.
+9. არასოდეს განაცხადო, რომ ჩაატარე ტელეფონის სკანირება ან სენსორების გაზომვა, თუ ეს რეალურად არ მომხდარა.
+10. არასდროს ახსენო სხვა სახელოსნო ან მაღაზია — მიუთითე მხოლოდ BEKASERVICE-ზე (ქ. ახალციხე, კოსტავას 10, WhatsApp: +995 598 23 33 32).
 """
 
     private val client = OkHttpClient.Builder()
@@ -4289,6 +4341,61 @@ object GeminiDiagnosticService {
         .writeTimeout(10, TimeUnit.SECONDS)
         .callTimeout(20, TimeUnit.SECONDS)
         .build()
+
+    fun isDiagnosticFaultQuery(qLower: String): Boolean {
+        val q = qLower.lowercase()
+        return q.contains("არ ირთვება") || q.contains("არ იტენება") || q.contains("არ ფოკუსირდება") ||
+                q.contains("არ მუშაობს") || q.contains("არ რეაგირებს") || q.contains("გაშავდა") ||
+                q.contains("ჩაქრა") || q.contains("ციმციმებს") || q.contains("ზოლ") || q.contains("ლაქ") ||
+                q.contains("ბზარ") || q.contains("გატყდა") || q.contains("დამივარდა") || q.contains("დავარდა") ||
+                q.contains("წყალ") || q.contains("სითხ") || q.contains("დასველ") || q.contains("ნესტ") ||
+                q.contains("ცხელდება") || q.contains("ხურდება") || q.contains("ჯდება") || q.contains("ითიშება") ||
+                q.contains("გაბერ") || q.contains("ლოგო") || q.contains("bootloop") || q.contains("რესტარტ") ||
+                q.contains("ფოკუს") || q.contains("ბუნდოვან") || q.contains("კანკალ") || q.contains("ხმა არ") ||
+                q.contains("შხრიალ") || q.contains("პრობლემა") || q.contains("ხარვეზ") || q.contains("დაზიან") ||
+                q.contains("გაფუჭდა")
+    }
+
+    fun extractDeviceFromText(text: String): String? {
+        val q = text.lowercase()
+        return when {
+            q.contains("16 pro max") -> "iPhone 16 Pro Max"
+            q.contains("16 pro") -> "iPhone 16 Pro"
+            q.contains("iphone 16") -> "iPhone 16"
+            q.contains("15 pro max") -> "iPhone 15 Pro Max"
+            q.contains("15 pro") -> "iPhone 15 Pro"
+            q.contains("iphone 15") -> "iPhone 15"
+            q.contains("14 pro max") -> "iPhone 14 Pro Max"
+            q.contains("14 pro") -> "iPhone 14 Pro"
+            q.contains("iphone 14") -> "iPhone 14"
+            q.contains("13 pro max") -> "iPhone 13 Pro Max"
+            q.contains("13 pro") -> "iPhone 13 Pro"
+            q.contains("iphone 13") -> "iPhone 13"
+            q.contains("12 pro") -> "iPhone 12 Pro"
+            q.contains("iphone 12") -> "iPhone 12"
+            q.contains("11 pro") -> "iPhone 11 Pro"
+            q.contains("iphone 11") -> "iPhone 11"
+            q.contains("s25 ultra") -> "Samsung Galaxy S25 Ultra"
+            q.contains("s24 ultra") -> "Samsung Galaxy S24 Ultra"
+            q.contains("s24") -> "Samsung Galaxy S24"
+            q.contains("s23 ultra") -> "Samsung Galaxy S23 Ultra"
+            q.contains("s23") -> "Samsung Galaxy S23"
+            q.contains("s22") -> "Samsung Galaxy S22"
+            q.contains("a55") -> "Samsung Galaxy A55"
+            q.contains("a54") -> "Samsung Galaxy A54"
+            q.contains("a53") -> "Samsung Galaxy A53"
+            q.contains("redmi note 13") -> "Redmi Note 13"
+            q.contains("redmi note 12") -> "Redmi Note 12"
+            q.contains("pixel 9") -> "Google Pixel 9"
+            q.contains("pixel 8") -> "Google Pixel 8"
+            q.contains("pixel 7") -> "Google Pixel 7"
+            q.contains("pixel") -> "Google Pixel"
+            q.contains("samsung") || q.contains("სამსუნგ") -> "Samsung Galaxy"
+            q.contains("iphone") || q.contains("აიფონ") -> "iPhone"
+            q.contains("xiaomi") || q.contains("შაომ") || q.contains("redmi") -> "Xiaomi / Redmi"
+            else -> null
+        }
+    }
 
     private fun buildDynamicCatalogContext(products: List<ProductItem>): String {
         val catalog = if (products.isNotEmpty()) products else ProductRepository.getAllProducts()
@@ -4315,72 +4422,64 @@ object GeminiDiagnosticService {
         if (q.length < 2) return emptyList()
         val catalog = if (products.isNotEmpty()) products else ProductRepository.getAllProducts()
 
-        val isGreetingOrGeneral = q == "გამარჯობა" || q == "სალამი" || q.contains("როგორ ხარ") || 
+        val isGreetingOrGeneral = q == "გამარჯობა" || q == "სალამი" || q.contains("როგორ ხარ") ||
                 q.contains("მადლობა") || q.contains("მისამართ") || q.contains("სად ხართ")
         if (isGreetingOrGeneral) return emptyList()
 
+        // Do NOT push unrelated catalog items when user describes a generic hardware symptom without a specific catalog model/service
+        val isHardwareSymptom = isDiagnosticFaultQuery(q)
+
         // 1. კონკრეტული სერვისის პირდაპირი ზუსტი მოთხოვნა:
-        // Canva - მხოლოდ Canva Pro (არა სხვა მულტიმედია პროდუქტები)!
         if (q.contains("canva") || q.contains("კანვა")) {
             val canva = catalog.find { it.title.contains("Canva", ignoreCase = true) || it.id == 118 }
             if (canva != null) return listOf(canva)
         }
 
-        // CapCut - მხოლოდ CapCut Pro!
         if (q.contains("capcut") || q.contains("კაპკატ")) {
             val capcut = catalog.find { it.title.contains("CapCut", ignoreCase = true) || it.id == 116 }
             if (capcut != null) return listOf(capcut)
         }
 
-        // Adobe - Adobe Creative Cloud!
         if (q.contains("adobe") || q.contains("ადობ") || q.contains("photoshop") || q.contains("ფოტოშოპ") || q.contains("premiere") || q.contains("პრემიერ")) {
             val adobe = catalog.find { it.title.contains("Adobe", ignoreCase = true) || it.id == 117 }
             if (adobe != null) return listOf(adobe)
         }
 
-        // YouTube
         if (q.contains("youtube") || q.contains("იუთუბ")) {
             val yt = catalog.find { it.title.contains("YouTube", ignoreCase = true) || it.id == 119 }
             if (yt != null) return listOf(yt)
         }
 
-        // Spotify
         if (q.contains("spotify") || q.contains("სპოტიფაი")) {
             val spot = catalog.find { it.title.contains("Spotify", ignoreCase = true) || it.id == 120 }
             if (spot != null) return listOf(spot)
         }
 
-        // Perplexity
         if (q.contains("perplexity") || q.contains("პერპლექს")) {
             val p = catalog.find { it.title.contains("Perplexity", ignoreCase = true) || it.id == 109 }
             if (p != null) return listOf(p)
         }
 
-        // Cursor
         if (q.contains("cursor") || q.contains("კურსორ")) {
             val p = catalog.find { it.title.contains("Cursor", ignoreCase = true) || it.id == 110 }
             if (p != null) return listOf(p)
         }
 
-        // Lovable
         if (q.contains("lovable") || q.contains("ლავაბლ")) {
             val p = catalog.find { it.title.contains("Lovable", ignoreCase = true) || it.id == 111 }
             if (p != null) return listOf(p)
         }
 
-        // Grok
         if (q.contains("grok") || q.contains("გროკ")) {
             val groks = catalog.filter { it.title.contains("Grok", ignoreCase = true) || it.id in listOf(105, 106) }
             if (groks.isNotEmpty()) return groks.take(2)
         }
 
-        // Claude
         if (q.contains("claude") || q.contains("კლოდ")) {
             val claudes = catalog.filter { it.title.contains("Claude", ignoreCase = true) || it.id in listOf(107, 108) }
             if (claudes.isNotEmpty()) return claudes.take(2)
         }
 
-        // ChatGPT
         if (q.contains("chatgpt") || q.contains("ჩატჯიპიტი") || q.contains("gpt") || q.contains("openai")) {
             if (q.contains("plus") || q.contains("პლუს")) {
                 val plus = catalog.find { it.id == 101 || (it.title.contains("ChatGPT", ignoreCase = true) && it.title.contains("Plus", ignoreCase = true)) }
@@ -4394,37 +4493,55 @@ object GeminiDiagnosticService {
             if (gpts.isNotEmpty()) return gpts.take(2)
         }
 
-        // Google AI / Gemini
         if (q.contains("google ai") || q.contains("gemini") || q.contains("ჯემინი") || q.contains("18 თვ")) {
             val geminis = catalog.filter { it.id in listOf(103, 104, 115) || it.title.contains("Google AI", ignoreCase = true) }
             if (geminis.isNotEmpty()) return geminis.take(3)
         }
 
-        // Google Storage / Gmail
-        if (q.contains("gmail") || q.contains("ჯიმეილ") || q.contains("google storage") || q.contains("google one") || q.contains("2tb") || q.contains("5tb") || q.contains("მეხსიერება")) {
+        // Google Storage / Gmail (only when not describing phone internal memory bootloop/full)
+        if (!isHardwareSymptom && (q.contains("gmail") || q.contains("ჯიმეილ") || q.contains("google storage") || q.contains("google one") || q.contains("2tb") || q.contains("5tb") || (q.contains("მეხსიერება") && q.contains("cloud")))) {
             val storages = catalog.filter { it.id in listOf(112, 113, 114, 115) }
             if (storages.isNotEmpty()) return storages.take(3)
         }
 
-        // Windows
         if (q.contains("windows") || q.contains("ვინდოუს")) {
             val win = catalog.find { it.id == 121 || it.title.contains("Windows", ignoreCase = true) }
             if (win != null) return listOf(win)
         }
 
-        // Office
         if (q.contains("office") || q.contains("ოფის") || q.contains("microsoft 365") || q.contains("word") || q.contains("excel") || q.contains("ltsc")) {
             val offices = catalog.filter { it.id in listOf(122, 123, 124) || it.title.contains("Office", ignoreCase = true) }
             if (offices.isNotEmpty()) return offices.take(3)
         }
 
-        // მულტიმედია / ვიდეო / დიზაინის ზოგადი შეკითხვა (მხოლოდ მაშინ თუ ზოგადადაა დასმული და არა კონკრეტულ სერვისზე)
-        if (q.contains("მულტიმედია") || q.contains("ვიდეო და დიზაინ") || (q.contains("დიზაინ") && !q.contains("canva") && !q.contains("adobe")) || (q.contains("მონტაჟ") && !q.contains("capcut"))) {
+        if (!isHardwareSymptom && (q.contains("მულტიმედია") || q.contains("ვიდეო და დიზაინ") || (q.contains("დიზაინ") && !q.contains("canva") && !q.contains("adobe")) || (q.contains("მონტაჟ") && !q.contains("capcut")))) {
             return listOf(118, 116, 117).mapNotNull { id -> catalog.find { it.id == id } }
         }
 
-        if (q.contains("სტუდენტ") || q.contains("სწავლ")) {
+        if (!isHardwareSymptom && (q.contains("სტუდენტ") || q.contains("სწავლ"))) {
             return listOf(103, 101, 109, 118).mapNotNull { id -> catalog.find { it.id == id } }
+        }
+
+        // If it's a hardware symptom without an explicit device model, do not attach random catalog products
+        if (isHardwareSymptom) {
+            val detectedModel = extractDeviceFromText(query)
+            if (detectedModel == null) {
+                if (q.contains("frp") || q.contains("google account")) {
+                    return catalog.filter { it.title.contains("FRP", ignoreCase = true) }.take(2)
+                }
+                if (q.contains("icloud") || q.contains("apple id")) {
+                    return catalog.filter { it.title.contains("iCloud", ignoreCase = true) }.take(2)
+                }
+                return emptyList()
+            }
+            val modelLower = detectedModel.lowercase()
+            return catalog.filter { prod ->
+                !SoftwareCatalogData.isDigitalSoftwareService(prod) &&
+                        (prod.title.lowercase().contains(modelLower) || prod.compatibleModels.lowercase().contains(modelLower)) &&
+                        ((q.contains("ეკრან") && prod.category.contains("ეკრან")) ||
+                                ((q.contains("ელემენტ") || q.contains("ბატარე")) && prod.category.contains("ელემენტ")) ||
+                                ((q.contains("პორტ") || q.contains("დამტენ") || q.contains("იტენება")) && prod.category.contains("პორტ")))
+            }.take(2)
         }
 
         // 2. დინამიური ამოცნობა ადმინის მიერ ახლად დამატებული ან სხვა სერვისებისთვის კატალოგში
@@ -4432,33 +4549,16 @@ object GeminiDiagnosticService {
             val titleLower = prod.title.lowercase()
             val brandLower = prod.brand.lowercase()
             val keywordsLower = prod.searchKeywords.lowercase()
-            val queryWords = q.split(" ", ",", "-", "?", "!", ".").filter { 
-                it.length >= 3 && it != "მინდა" && it != "გაქვთ" && it != "სერვისი" && it != "ფასი" && it != "რამდენი" 
-            }
-            
-            titleLower == q || 
-            (titleLower.length >= 3 && q.contains(titleLower)) || 
-            (brandLower.length >= 3 && q.contains(brandLower)) ||
-            (keywordsLower.isNotBlank() && keywordsLower.split(",").any { kw -> 
-                val cleanKw = kw.trim()
-                cleanKw.length >= 3 && (q.contains(cleanKw) || cleanKw.contains(q))
-            }) ||
-            (queryWords.isNotEmpty() && queryWords.any { word -> 
-                titleLower.contains(word) || (brandLower.length >= 3 && brandLower.contains(word)) || (keywordsLower.length >= 3 && keywordsLower.contains(word))
-            })
+            titleLower == q ||
+                    (titleLower.length >= 4 && q.contains(titleLower)) ||
+                    (brandLower.length >= 4 && q.contains(brandLower) && !isHardwareSymptom) ||
+                    (keywordsLower.isNotBlank() && keywordsLower.split(",").any { kw ->
+                        val cleanKw = kw.trim()
+                        cleanKw.length >= 4 && q.contains(cleanKw)
+                    })
         }
         if (dynamicExact.isNotEmpty()) {
             return dynamicExact.take(3)
-        }
-
-        // საკვანძო სიტყვებითა და ტექსტით ძებნა
-        val searchMatched = optimizeSearchFilter(catalog, query)
-        if (searchMatched.isNotEmpty()) {
-            val first = searchMatched.first()
-            if (q.contains(first.title.lowercase())) {
-                return listOf(first)
-            }
-            return searchMatched.take(3)
         }
 
         return emptyList()
@@ -4469,6 +4569,7 @@ object GeminiDiagnosticService {
         latestUserMessage: String,
         products: List<ProductItem> = emptyList()
     ): String = withContext(Dispatchers.IO) {
+        val cleanInput = latestUserMessage.trim()
         val apiKey = BuildConfig.GEMINI_API_KEY
         val fullSystemInstruction = BASE_SYSTEM_INSTRUCTION + buildDynamicCatalogContext(products)
         if (apiKey.isNotBlank() && apiKey != "MY_GEMINI_API_KEY") {
@@ -4485,14 +4586,15 @@ object GeminiDiagnosticService {
 
                         val contentsArray = JSONArray()
 
-                        val historyTurns = if (history.isNotEmpty() && history.last().text == latestUserMessage && history.last().sender == "user") {
-                            history.dropLast(1).takeLast(6)
+                        val historyTurns = if (history.isNotEmpty() && history.last().text.trim() == cleanInput && history.last().sender == "user") {
+                            history.dropLast(1).takeLast(8)
                         } else {
-                            history.takeLast(6)
+                            history.takeLast(8)
                         }
 
                         var lastRole: String? = null
                         for (msg in historyTurns) {
+                            if (msg.text.isBlank()) continue
                             val role = if (msg.sender == "user") "user" else "model"
                             if (role != lastRole) {
                                 contentsArray.put(JSONObject().apply {
@@ -4508,15 +4610,15 @@ object GeminiDiagnosticService {
                         contentsArray.put(JSONObject().apply {
                             put("role", "user")
                             put("parts", JSONArray().apply {
-                                put(JSONObject().put("text", latestUserMessage))
+                                put(JSONObject().put("text", cleanInput))
                             })
                         })
 
                         put("contents", contentsArray)
 
                         put("generationConfig", JSONObject().apply {
-                            put("temperature", 0.7)
-                            put("topP", 0.95)
+                            put("temperature", 0.35)
+                            put("topP", 0.9)
                             put("topK", 40)
                         })
                     }
@@ -4551,7 +4653,7 @@ object GeminiDiagnosticService {
             }
         }
 
-        return@withContext generateLocalDiagnostic(latestUserMessage, products)
+        return@withContext generateLocalDiagnostic(cleanInput, products, history)
     }
 
     private fun formatSoftwareProductSummary(p: ProductItem): String {
@@ -4567,12 +4669,22 @@ object GeminiDiagnosticService {
                 (if (p.activationTerms.isNotBlank()) "• **აქტივაცია:** ${p.activationTerms}\n" else "")
     }
 
-    private fun generateLocalDiagnostic(query: String, products: List<ProductItem> = emptyList()): String {
+    fun generateLocalDiagnostic(
+        query: String,
+        products: List<ProductItem> = emptyList(),
+        history: List<ChatMessage> = emptyList()
+    ): String {
         val q = query.lowercase().trim()
         val catalog = if (products.isNotEmpty()) products else ProductRepository.getAllProducts()
 
+        val priorUserMessages = history
+            .filter { it.sender == "user" && it.text.trim() != query.trim() }
+            .map { it.text.lowercase() }
+        val combinedHistoryText = (priorUserMessages.takeLast(3) + listOf(q)).joinToString(" | ")
+        val isHardwareSymptom = isDiagnosticFaultQuery(q)
+
         // =========================================================================
-        // 0. კონკრეტული სერვისები — პირდაპირი, დეტალური რეკომენდაცია (მთელი კატეგორიის ჩამოთვლის გარეშე)
+        // 0. კონკრეტული სერვისები — პირდაპირი, დეტალური რეკომენდაცია (მხოლოდ როცა არ არის აპარატურული სიმპტომი)
         // =========================================================================
         if (q.contains("canva") || q.contains("კანვა")) {
             val canva = catalog.find { it.title.contains("Canva", ignoreCase = true) || it.id == 118 }
@@ -4678,14 +4790,13 @@ object GeminiDiagnosticService {
                     "\nშეგიძლიათ გახსნათ სასურველი სერვისის ბარათი ქვემოთ და შეუკვეთოთ მყისიერად."
         }
 
-        if (q.contains("gmail") || q.contains("ჯიმეილ") || q.contains("google storage") || q.contains("google one") || q.contains("2tb") || q.contains("5tb") || q.contains("მეხსიერება")) {
+        if (!isHardwareSymptom && (q.contains("gmail") || q.contains("ჯიმეილ") || q.contains("google storage") || q.contains("google one") || q.contains("2tb") || q.contains("5tb") || (q.contains("მეხსიერება") && q.contains("cloud")))) {
             val matched = listOf(112, 113, 114, 115).mapNotNull { id -> catalog.find { it.id == id } }
             return "☁️ **Google-ის ანგარიშები და Cloud მეხსიერების პაკეტები BEKASERVICE-ში:**\n\n" +
                     matched.joinToString("\n") { formatSoftwareProductSummary(it) }
         }
 
-        // მულტიმედია კატეგორიის ზოგადი მიმოხილვა (მხოლოდ მაშინ თუ მომხმარებელი ითხოვს მთელ კატეგორიას ან შედარებას)
-        if (q.contains("მულტიმედია") || q.contains("ვიდეო და დიზაინ") || q.contains("ყველა დიზაინ") || (q.contains("მონტაჟ") && q.contains("დიზაინ"))) {
+        if (!isHardwareSymptom && (q.contains("მულტიმედია") || q.contains("ვიდეო და დიზაინ") || q.contains("ყველა დიზაინ") || (q.contains("მონტაჟ") && q.contains("დიზაინ")))) {
             val matched = listOf(116, 117, 118, 119, 120).mapNotNull { id -> catalog.find { it.id == id } }
             return "🎨 **ვიდეო, დიზაინი და მულტიმედია პრემიუმ სერვისები BEKASERVICE-ში:**\n\n" +
                     matched.joinToString("\n") { formatSoftwareProductSummary(it) }
@@ -4700,7 +4811,7 @@ object GeminiDiagnosticService {
                     "• **Microsoft 365 Personal** არის 1-წლიანი ქლაუდ გამოწერა 1TB OneDrive მეხსიერებით და 5 მოწყობილობაზე სინქრონიზაციით."
         }
 
-        if (q.contains("სტუდენტ") || q.contains("დიზაინერ") || q.contains("მონტაჟ") || q.contains("პროგრამისტ") || q.contains("დეველოპერ")) {
+        if (!isHardwareSymptom && (q.contains("სტუდენტ") || q.contains("დიზაინერ") || q.contains("მონტაჟ") || q.contains("პროგრამისტ") || q.contains("დეველოპერ"))) {
             return "🎯 **BEKASERVICE-ის რეკომენდაციები საქმიანობის მიხედვით:**\n\n" +
                     "• 🎓 **სტუდენტებისა და მკვლევრებისთვის:** Google AI Pro (18 თვე + 2TB), ChatGPT Plus, Perplexity Pro, Canva Pro.\n" +
                     "• 🎬 **ვიდეო მონტაჟისა და დიზაინისთვის:** CapCut Pro, Adobe Creative Cloud (All Apps), Canva Pro.\n" +
@@ -4709,68 +4820,39 @@ object GeminiDiagnosticService {
                     "ქვემოთ მოცემულ ბარათებზე დაჭერით შეგიძლიათ ნახოთ დეტალური პირობები და შეუკვეთოთ!"
         }
 
-        // დინამიური ამოცნობა ნებისმიერი ახლად დამატებული სერვისისთვის
-        val isGreetingOrGeneral = q == "გამარჯობა" || q == "სალამი" || q.contains("როგორ ხარ") || 
+        // დინამიური ამოცნობა ნებისმიერი ახლად დამატებული სერვისისთვის (მხოლოდ როცა არ არის დიაგნოსტიკური სიმპტომი!)
+        val isGreetingOrGeneral = q == "გამარჯობა" || q == "სალამი" || q.contains("როგორ ხარ") ||
                 q.contains("მადლობა") || q.contains("მისამართ") || q.contains("სად ხართ")
-        val dynamicMatched = catalog.firstOrNull { prod ->
-            val titleLower = prod.title.lowercase()
-            (titleLower.length >= 3 && q.contains(titleLower)) ||
-            (prod.searchKeywords.isNotBlank() && prod.searchKeywords.split(",").any { kw -> kw.trim().length >= 3 && q.contains(kw.trim().lowercase()) })
-        }
-        if (dynamicMatched != null && !isGreetingOrGeneral) {
-            val isSoft = SoftwareCatalogData.isDigitalSoftwareService(dynamicMatched)
-            return if (isSoft) {
-                "💎 **${dynamicMatched.title} — ოფიციალური შეთავაზება BEKASERVICE-ში:**\n\n" +
-                        formatSoftwareProductSummary(dynamicMatched) + "\n" +
-                        "დეტალების სანახავად ან შესაკვეთად გამოიყენეთ ქვემოთ მოცემული ბარათი!"
-            } else {
-                "🔧 **${dynamicMatched.title} (${dynamicMatched.brand}) BEKASERVICE-ში:**\n\n" +
-                        "• **ფასი:** ${dynamicMatched.price} | **სტატუსი:** ${if (dynamicMatched.inStock) "ხელმისაწვდომია" else "შეკვეთით"}\n" +
-                        "• **თავსებადი მოდელები:** ${dynamicMatched.compatibleModels}\n" +
-                        "• **გარანტია:** ${dynamicMatched.warranty}\n" +
-                        (if (dynamicMatched.shortDescription.isNotBlank()) "• **აღწერა:** ${dynamicMatched.shortDescription}\n\n" else "\n") +
-                        "დეტალების სანახავად და შესაკვეთად გამოიყენეთ ქვემოთ მოცემული ბარათი!"
+        if (!isHardwareSymptom && !isGreetingOrGeneral) {
+            val dynamicMatched = catalog.firstOrNull { prod ->
+                val titleLower = prod.title.lowercase()
+                (titleLower.length >= 4 && q.contains(titleLower)) ||
+                        (prod.searchKeywords.isNotBlank() && prod.searchKeywords.split(",").any { kw ->
+                            val cleanKw = kw.trim().lowercase()
+                            cleanKw.length >= 4 && q.contains(cleanKw) && cleanKw != "ეკრანი" && cleanKw != "ელემენტი" && cleanKw != "პორტი" && cleanKw != "კამერა"
+                        })
+            }
+            if (dynamicMatched != null) {
+                val isSoft = SoftwareCatalogData.isDigitalSoftwareService(dynamicMatched)
+                return if (isSoft) {
+                    "💎 **${dynamicMatched.title} — ოფიციალური შეთავაზება BEKASERVICE-ში:**\n\n" +
+                            formatSoftwareProductSummary(dynamicMatched) + "\n" +
+                            "დეტალების სანახავად ან შესაკვეთად გამოიყენეთ ქვემოთ მოცემული ბარათი!"
+                } else {
+                    "🔧 **${dynamicMatched.title} (${dynamicMatched.brand}) BEKASERVICE-ში:**\n\n" +
+                            "• **ფასი:** ${dynamicMatched.price} | **სტატუსი:** ${if (dynamicMatched.inStock) "ხელმისაწვდომია" else "შეკვეთით"}\n" +
+                            "• **თავსებადი მოდელები:** ${dynamicMatched.compatibleModels}\n" +
+                            "• **გარანტია:** ${dynamicMatched.warranty}\n" +
+                            (if (dynamicMatched.shortDescription.isNotBlank()) "• **აღწერა:** ${dynamicMatched.shortDescription}\n\n" else "\n") +
+                            "დეტალების სანახავად და შესაკვეთად გამოიყენეთ ქვემოთ მოცემული ბარათი!"
+                }
             }
         }
 
-        // 1. მოდელის დინამიური ამოცნობა
-        val detectedDevice = when {
-            q.contains("16 pro max") -> "iPhone 16 Pro Max"
-            q.contains("16 pro") -> "iPhone 16 Pro"
-            q.contains("16") -> "iPhone 16"
-            q.contains("15 pro max") -> "iPhone 15 Pro Max"
-            q.contains("15 pro") -> "iPhone 15 Pro"
-            q.contains("15") -> "iPhone 15"
-            q.contains("14 pro max") -> "iPhone 14 Pro Max"
-            q.contains("14 pro") -> "iPhone 14 Pro"
-            q.contains("14") -> "iPhone 14"
-            q.contains("13 pro max") -> "iPhone 13 Pro Max"
-            q.contains("13 pro") -> "iPhone 13 Pro"
-            q.contains("13") -> "iPhone 13"
-            q.contains("12 pro") -> "iPhone 12 Pro"
-            q.contains("12") -> "iPhone 12"
-            q.contains("11 pro") -> "iPhone 11 Pro"
-            q.contains("11") -> "iPhone 11"
-            q.contains("xs") || q.contains("xr") || q.contains("x") -> "iPhone X / XR / XS"
-            q.contains("s24 ultra") -> "Samsung Galaxy S24 Ultra"
-            q.contains("s24") -> "Samsung Galaxy S24"
-            q.contains("s23 ultra") -> "Samsung Galaxy S23 Ultra"
-            q.contains("s23") -> "Samsung Galaxy S23"
-            q.contains("s22") -> "Samsung Galaxy S22"
-            q.contains("a54") -> "Samsung Galaxy A54"
-            q.contains("a53") -> "Samsung Galaxy A53"
-            q.contains("xiaomi 14") -> "Xiaomi 14"
-            q.contains("xiaomi 13") -> "Xiaomi 13T / 13"
-            q.contains("redmi note 13") -> "Redmi Note 13 Pro"
-            q.contains("redmi") -> "Xiaomi Redmi"
-            q.contains("pixel 8") -> "Google Pixel 8 Pro"
-            q.contains("pixel 7") -> "Google Pixel 7 Pro"
-            q.contains("pixel") -> "Google Pixel"
-            q.contains("samsung") || q.contains("სამსუნგ") -> "Samsung Galaxy"
-            q.contains("iphone") || q.contains("აიფონ") || q.contains("apple") -> "iPhone"
-            q.contains("xiaomi") || q.contains("შაომ") -> "Xiaomi"
-            else -> ""
-        }
+        // 1. მოდელის დინამიური ამოცნობა (მიმდინარე კითხვიდან ან სესიის ისტორიიდან)
+        val detectedDevice = extractDeviceFromText(query)
+            ?: history.asReversed().firstNotNullOfOrNull { extractDeviceFromText(it.text) }
+            ?: ""
 
         val devicePrefix = if (detectedDevice.isNotBlank()) "📱 მოდელი: **$detectedDevice**\n\n" else ""
 
@@ -4781,22 +4863,21 @@ object GeminiDiagnosticService {
                 q == "დილა მშვიდობისა" || q == "საღამო მშვიდობისა" || q == "hello" || q == "hi" || q == "hey" ||
                 q.startsWith("გამარჯობა") || q.startsWith("სალამი") || q.startsWith("მოგესალმებით")
 
-        if (isGreeting && !q.contains("ეკრან") && !q.contains("ელემენტ") && !q.contains("პორტ") &&
-            !q.contains("frp") && !q.contains("icloud") && !q.contains("ბლოკ") && !q.contains("გაფუჭდა")
+        if (isGreeting && !isHardwareSymptom && !q.contains("ეკრან") && !q.contains("ელემენტ") && !q.contains("პორტ") &&
+            !q.contains("frp") && !q.contains("icloud") && !q.contains("ბლოკ")
         ) {
             return "გამარჯობა! 👋 მოგესალმებით **BEKASERVICE**-ში. მე ვარ თქვენი AI ტექნიკოსი და პროგრამული სერვისების კონსულტანტი.\n\n" +
                     "რით შემიძლია დაგეხმაროთ დღეს?\n" +
-                    "• 💻 **ციფრული პროგრამული სერვისები (24 პაკეტი):** ChatGPT Plus/Pro, Google AI Pro (18 თვე + 2TB), Claude Pro, Grok, Cursor, Canva Pro, CapCut Pro, Adobe CC, YouTube/Spotify Premium, Windows 11 & Office\n" +
-                    "• 📱 **ტექნიკური დიაგნოსტიკა და ნაწილები:** ეკრანი, ელემენტი, კამერა, დამტენის პორტი, წყლისგან დაზიანება\n" +
-                    "• 🔓 **მობილურის განბლოკვა:** Google FRP, iCloud Activation, SIM Lock, Bootloop\n\n" +
-                    "მომწერეთ სასურველი პროგრამული სერვისი ან ტელეფონის მოდელი!"
+                    "• 📱 **ტექნიკური დიაგნოსტიკა:** აღწერეთ ტელეფონის სიმპტომი (მაგ: ეკრანი არ ირთვება, ტელეფონი არ იტენება, კამერა არ ფოკუსირდება) და განვსაზღვროთ შესაძლო მიზეზები და უსაფრთხო შემოწმების ნაბიჯები.\n" +
+                    "• 💻 **ციფრული პროგრამული სერვისები (24 პაკეტი):** Canva Pro, CapCut Pro, Adobe CC, YouTube/Spotify Premium, Windows 11 & Office\n" +
+                    "• 🔓 **მობილურის განბლოკვა:** Google FRP, iCloud Activation, SIM Lock, Bootloop."
         }
 
         // =========================================================================
         // 2. როგორ ხარ / მდგომარეობა
         // =========================================================================
         if (q.contains("როგორ ხარ") || q.contains("როგორ ბრძანდებით") || q.contains("როგორ ხართ") || q == "how are you") {
-            return "მადლობა, შესანიშნავად! 😊 მზად ვარ გაგიწიოთ კონსულტაცია როგორც პროგრამულ სერვისებზე (ChatGPT, Google AI Pro, Canva, Windows/Office), ისე ნებისმიერი სმარტფონის შეკეთებაზე.\n\nრა გაინტერესებთ დღეს?"
+            return "მადლობა, შესანიშნავად! 😊 მზად ვარ გაგიწიოთ კონსულტაცია როგორც ტელეფონის ტექნიკურ დიაგნოსტიკაზე, ისე პროგრამულ სერვისებზე.\n\nრა გაინტერესებთ დღეს?"
         }
 
         // =========================================================================
@@ -4808,10 +4889,11 @@ object GeminiDiagnosticService {
 
         // =========================================================================
         // 4. ლოკაცია / მისამართი / სამუშაო საათები / კონტაქტი
+        // NOTE: Never trigger on generic "ტელეფონ" (which matches "ტელეფონი არ იტენება"!)
         // =========================================================================
-        if (q.contains("სად ხართ") || q.contains("მისამართ") || q.contains("რომელ საათ") || q.contains("სად მდებარეობს") ||
-            q.contains("ლოკაცია") || q.contains("ახალციხე") || q.contains("ტელეფონ") || q.contains("კონტაქტ") || q.contains("ნომერი") ||
-            q.contains("whatsapp") || q.contains("ვაცაპ") || q.contains("telegram") || q.contains("ტელეგრამ")
+        if (!isHardwareSymptom && (q.contains("სად ხართ") || q.contains("მისამართ") || q.contains("რომელ საათ") || q.contains("სად მდებარეობს") ||
+                    q.contains("ლოკაცია") || q.contains("ახალციხე") || q.contains("ტელეფონის ნომერ") || q.contains("საკონტაქტო") || q.contains("კონტაქტ") || q.contains("ნომერი") ||
+                    q.contains("whatsapp") || q.contains("ვაცაპ") || q.contains("telegram") || q.contains("ტელეგრამ"))
         ) {
             return "📍 **BEKASERVICE-ის საკონტაქტო მონაცემები:**\n\n" +
                     "• **მისამართი:** ქ. ახალციხე, მერაბ კოსტავას ქუჩა N10\n" +
@@ -4840,17 +4922,17 @@ object GeminiDiagnosticService {
                     "   • Windows 11 Pro Retail Key, Office LTSC 2024, Microsoft 365 Personal, Office 2019\n\n" +
                     "5. 📱 **სმარტფონების აპარატურული და პროგრამული რემონტი:**\n" +
                     "   • ეკრანები, ელემენტები, პორტები, კამერები, FRP, iCloud, SIM Unlock, Bootloop.\n\n" +
-                    "დაწერეთ ნებისმიერი პროდუქტის სახელი და გაჩვენებთ დეტალურ პირობებს!"
+                    "დაწერეთ ნებისმიერი პროდუქტის სახელი ან ტელეფონის სიმპტომი!"
         }
 
         // =========================================================================
         // 6. ფასები / რა ღირს
         // =========================================================================
         if ((q.contains("რა ღირს") || q.contains("ფასი") || q.contains("ღირებულება") || q.contains("რა ჯდება")) &&
-            !q.contains("ეკრან") && !q.contains("ელემენტ") && !q.contains("პორტ") && !q.contains("frp") && !q.contains("icloud")
+            !isHardwareSymptom && !q.contains("ეკრან") && !q.contains("ელემენტ") && !q.contains("პორტ") && !q.contains("frp") && !q.contains("icloud")
         ) {
             return "💰 **BEKASERVICE-ის ფასების მიმოხილვა:**\n\n" +
-                    "• 💻 **ციფრული პროგრამული სერვისები (ChatGPT, Google AI Pro 18 თვე, Canva, CapCut, Windows, Office):** მოქმედებს მოქნილი ტარიფები („ფასი შეთანხმებით“ — დამოკიდებულია არჩეულ ვადასა და Private/Shared ტიპზე). შეგიძლიათ პირდაპირ გახსნათ სასურველი ბარათი და მოგვწეროთ WhatsApp/Telegram-ში.\n" +
+                    "• 💻 **ციფრული პროგრამული სერვისები:** მოქმედებს მოქნილი ტარიფები („ფასი შეთანხმებით“ — დამოკიდებულია არჩეულ ვადასა და Private/Shared ტიპზე).\n" +
                     "• 🔋 **ელემენტის შეცვლა:** 65 ₾ - 110 ₾ (ორიგინალი, 6 თვე გარანტია)\n" +
                     "• 📱 **ეკრანის შეცვლა:** 140 ₾ - 390 ₾ (OLED / AMOLED)\n" +
                     "• 🔌 **დამტენის პორტი:** 45 ₾ - 75 ₾\n" +
@@ -4858,175 +4940,171 @@ object GeminiDiagnosticService {
                     "დააკონკრეტეთ რომელი სერვისი ან მოდელი გაინტერესებთ!"
         }
 
+        // Use combinedHistoryText when current message is a follow-up answer in a multi-turn conversation
+        val diagQuery = if (!isHardwareSymptom && priorUserMessages.isNotEmpty()) combinedHistoryText else q
+
         // =========================================================================
-        // 7. დიაგნოსტიკა სიმპტომების მიხედვით (კომპლექსური და ერთეული სიმპტომები)
+        // 7. მტკიცებულებაზე დაფუძნებული დიაგნოსტიკა სიმპტომების მიხედვით
         // =========================================================================
         return when {
             // 7.0 კომპლექსური სიმპტომი: დავარდნა + შავი ეკრანი + ვიბრაცია/ხმა/კომპიუტერი მუშაობს
-            ((q.contains("ვარდნ") || q.contains("დამივარდა") || q.contains("დავარდა") || q.contains("დარტყმ")) &&
-             (q.contains("შავ") || q.contains("არ ანათებს") || q.contains("ჩაქრა") || q.contains("ჩაბნელ") || q.contains("ეკრან")) &&
-             (q.contains("ვიბრაცი") || q.contains("ვიბრირებს") || q.contains("ხმა") || q.contains("კომპიუტერ") || q.contains("ზარი"))) -> {
-                "📱 **სრული კომპლექსური დიაგნოზი: დედაპლატა 100% ცოცხალია, დაზიანებულია მხოლოდ OLED მატრიცა!**\n\n" +
+            ((diagQuery.contains("ვარდნ") || diagQuery.contains("დამივარდა") || diagQuery.contains("დავარდა") || diagQuery.contains("დარტყმ")) &&
+             (diagQuery.contains("შავ") || diagQuery.contains("არ ანათებს") || diagQuery.contains("ჩაქრა") || diagQuery.contains("ჩაბნელ") || diagQuery.contains("ეკრან") || diagQuery.contains("არ ირთვება")) &&
+             (diagQuery.contains("ვიბრაცი") || diagQuery.contains("ვიბრირებს") || diagQuery.contains("ხმა") || diagQuery.contains("კომპიუტერ") || diagQuery.contains("ზარი"))) -> {
+                "📱 **დიაგნოსტიკური შეფასება: ტელეფონი ჩართულია, სავარაუდოა დისპლეის (OLED/განათების) ან შლეიფის დაზიანება**\n\n" +
                 devicePrefix +
-                "• **სიმპტომების კომპლექსური ანალიზი:** თქვენს მიერ აღწერილი დეტალები (ტელეფონის ვიბრაცია, ხმოვანი სიგნალი, კომპიუტერის მიერ ამოცნობა ან შემოსული ზარი) უტყუარად ადასტურებს, რომ:\n" +
-                "  1. **ტელეფონის დედაპლატა, პროცესორი (CPU), მეხსიერება და კვების კონტროლერი (PMIC) სრულად მწყობრშია!**\n" +
-                "  2. **თქვენი პირადი მონაცემები, ფოტოები, კონტაქტები და აპლიკაციები 100% ხელუხლებელი და უსაფრთხოა!**\n" +
-                "  3. დარტყმის შედეგად დაზიანდა მხოლოდ ორგანული OLED მატრიცა ან დისპლეის შლეიფის მიერთება, რის გამოც ეკრანზე გამოსახულება არ ჩანს.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ახალი ორიგინალი OLED / Super AMOLED დისპლეის ინსტალაცია, True Tone მონაცემების გადაპროგრამება და ჰერმეტული წებოს აღდგენა.\n" +
-                "• **სამუშაო დრო:** 25-35 წუთი ადგილზევე (ქ. ახალციხე, კოსტავას 10)\n" +
-                "• **გარანტია:** 6 თვე ოფიციალური გარანტია."
+                "• **დადასტურებული სიმპტომი:** ტელეფონი გამოსცემს ხმას/ვიბრაციას ან რეაგირებს ზარზე, რაც ნიშნავს, რომ დედაპლატა და კვების სისტემა მუშაობს, ხოლო პირადი მონაცემები უსაფრთხოა.\n" +
+                "• **შესაძლო მიზეზები:**\n" +
+                "  1. დარტყმის შედეგად OLED/AMOLED მატრიცის ან განათების წრედის (Backlight) დაზიანება;\n" +
+                "  2. ეკრანის შლეიფის (FPC კონექტორის) ამოვარდნა ან კონტაქტის დარღვევა.\n" +
+                "• **უსაფრთხო შემოწმების ნაბიჯები:**\n" +
+                "  1. სცადეთ იძულებითი გადატვირთვა (Force Restart);\n" +
+                "  2. დააკვირდით კაშკაშა შუქის ქვეშ, ჩანს თუ არა ეკრანზე მკრთალი გამოსახულება.\n" +
+                "• **როდის მიმართოთ სერვისს:** თუ Force Restart-ის შემდეგ ეკრანი ისევ ბნელია, საჭიროა სერვისცენტრში სატესტო ეკრანით და კონექტორის მიკროსკოპული შემოწმებით ზუსტი დიაგნოზის დადასტურება."
             }
 
             // 7.0.1 კომპლექსური სიმპტომი: წყალი/სითხე + დამტენზე შეერთება
-            ((q.contains("წყალ") || q.contains("სითხ") || q.contains("დასველ") || q.contains("ნესტ")) &&
-             (q.contains("დამტენ") || q.contains("შევაერთე") || q.contains("დავტენე") || q.contains("იტენება"))) -> {
+            ((diagQuery.contains("წყალ") || diagQuery.contains("სითხ") || diagQuery.contains("დასველ") || diagQuery.contains("ნესტ")) &&
+             (diagQuery.contains("დამტენ") || diagQuery.contains("შევაერთე") || diagQuery.contains("დავტენე") || diagQuery.contains("იტენება"))) -> {
                 "💧⚠️ **კრიტიკული გაფრთხილება: სითხის მოხვედრა და დამტენზე შეერთება!**\n\n" +
                 devicePrefix +
-                "• **რისკის შეფასება:** სითხის მოხვედრის შემდეგ მოწყობილობის დამტენზე შეერთება უკიდურესად სახიფათოა! დენის მიწოდება სველ კონტაქტებზე იწვევს მყისიერ ელექტროლიზს, დამტენის პორტისა და PMIC/Hydra კვების კონტროლერის მოკლე ჩართვას (Short circuit).\n" +
-                "• **დაუყოვნებელი მოქმედება:** გამორთეთ დამტენიდან ახლავე! არ სცადოთ ტელეფონის ჩართვა ან დატენვა.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ტელეფონის დაუყოვნებელი გახსნა, ელემენტის გათიშვა, დედაპლატის ულტრაბგერითი ქიმიური წმენდა 99%+ იზოპროპილით და მოკლე ჩართვების ლოკალიზება თერმო-კამერით.\n" +
-                "• **სასწრაფოდ მოიტანეთ ბექასერვისში:** ქ. ახალციხე, კოსტავას 10 (WhatsApp: +995 598 23 33 32)."
+                "• **რისკის შეფასება:** სითხის მოხვედრის შემდეგ მოწყობილობის დამტენზე შეერთება იწვევს სველ კონტაქტებზე ელექტროლიზს და პორტის ან კვების კონტროლერის მოკლე ჩართვის რისკს.\n" +
+                "• **უსაფრთხო მოქმედება ახლავე:** დაუყოვნებლივ გამოაერთეთ დამტენიდან და გამორთეთ მოწყობილობა. არ სცადოთ მისი ფენით გაშრობა ან ხელახლა დატენვა.\n" +
+                "• **სერვისცენტრის დიაგნოსტიკა:** აუცილებელია ტელეფონის გახსნა, ელემენტის გათიშვა და პლატის ულტრაბგერითი ქიმიური წმენდა კოროზიის შესაჩერებლად."
             }
 
-            // 7.0.2 კომპლექსური სიმპტომი: მეხსიერების გადავსება + ლოგოზე გაჭედვა (Bootloop)
-            ((q.contains("მეხსიერება") || q.contains("ადგილი აღარ") || q.contains("გაივსო") || q.contains("სავსე იყო")) &&
-             (q.contains("ლოგო") || q.contains("bootloop") || q.contains("რესტარტ") || q.contains("გაიჭედა") || q.contains("არ ირთვება"))) -> {
-                "💾⚙️ **მეხსიერების გადავსებით გამოწვეული სისტემური Bootloop (ლოგოზე გაჭედვა)**\n\n" +
+            // 7.1 ეკრანი არ ირთვება / შავი ეკრანი / ზოლები / ბზარი
+            (diagQuery.contains("ეკრან") && (diagQuery.contains("არ ირთვება") || diagQuery.contains("შავ") || diagQuery.contains("ჩაქრა") || diagQuery.contains("გაშავდა"))) ||
+            diagQuery == "ეკრანი არ ირთვება" -> {
+                "📱 **დიაგნოსტიკური ანალიზი: ეკრანი არ ირთვება (შავი ეკრანის სიმპტომი)**\n\n" +
                 devicePrefix +
-                "• **პრობლემის მიზეზი:** როდესაც შიდა მეხსიერება 100%-ით ივსება, ოპერაციული სისტემა ვეღარ ქმნის დროებით სისტემურ Cache და Swap ფაილებს, რის გამოც ჩატვირთვის ციკლი (Boot sequence) წყდება და ტელეფონი რჩება ლოგოზე.\n" +
-                "• **კრიტიკული გაფრთხილება:** არ გააკეთოთ 'Wipe Data / Factory Reset' Recovery მენიუდან! ეს სამუდამოდ წაშლის ყველა თქვენს ფოტოსა და ფაილს.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** სპეციალური საინჟინრო ხელსაწყოებით (Recovery Log / RAM Dump / Retain User Data რეჟიმი) სისტემის სტაბილიზაცია და პირადი მონაცემების მაქსიმალური შენარჩუნება.\n" +
-                "• **შესრულების დრო:** 30-40 წუთი ბექასერვისში."
+                "• **სიმპტომის გამიჯვნა:** როდესაც ეკრანი არ ირთვება, პირველ რიგში უნდა გაირკვეს — ტელეფონი საერთოდ გათიშულია (No Power), თუ ჩართულია და მხოლოდ გამოსახულება არ გამოაქვს (No Display / Black Screen).\n" +
+                "• **შესაძლო მიზეზები (საჭიროებს გადამოწმებას):**\n" +
+                "  1. **ეკრანის მოდულის, OLED მატრიცის ან განათების (Backlight) ხარვეზი** — თუ ტელეფონი რეაგირებს ზარზე, ვიბრაციაზე ან დამტენის შეერთების ხმაზე;\n" +
+                "  2. **დისპლეის შლეიფის (FPC კონექტორის) კონტაქტის დარღვევა** — განსაკუთრებით დავარდნის ან დარტყმის შემდეგ;\n" +
+                "  3. **ღრმა განმუხტვა ან სისტემური გაჭედვა (System Hang)** — თუ მოწყობილობა საერთოდ არ რეაგირებს;\n" +
+                "  4. **კვების წრედის (PMIC) ან ელემენტის ხარვეზი** — განიხილება მხოლოდ მაშინ, თუ დატენვისა და გადატვირთვის შემდეგაც სრული უმოქმედობაა.\n" +
+                "• **უსაფრთხო პირველადი შემოწმება (მარტივიდან რთულისკენ):**\n" +
+                "  1. შეაერთეთ ტელეფონი заведомо მუშა კაბელსა და ადაპტერზე 15–20 წუთით;\n" +
+                "  2. შეამოწმეთ, ისმის თუ არა დამტენის შეერთების ხმა, ვიბრაცია ან შემოდის თუ არა ზარი;\n" +
+                "  3. სცადეთ იძულებითი გადატვირთვა (Force Restart: ხმის ჩაწევისა და ჩართვის ღილაკებზე ხანგრძლივი დაჭერით 10–15 წამი).\n" +
+                "• **დამაზუსტებელი კითხვა:** დავარდნის ან სითხის მოხვედრის შემდეგ დაეწყო ეს პრობლემა, და გამოსცემს თუ არა ტელეფონი ხმას/ვიბრაციას?"
+            }
+
+            // 7.2 ეკრანის სხვა ხარვეზები (ზოლები, ბზარი, სენსორი, ციმციმი)
+            diagQuery.contains("ეკრან") || diagQuery.contains("ზოლ") || diagQuery.contains("ბზარ") || diagQuery.contains("ციმციმ") || diagQuery.contains("display") || diagQuery.contains("screen") -> {
+                "📱 **დიაგნოსტიკური ანალიზი: ეკრანის გამოსახულების ან სენსორის ხარვეზი**\n\n" +
+                devicePrefix +
+                "• **შესაძლო მიზეზები:**\n" +
+                "  1. OLED/AMOLED პიქსელების შრის ან შიდა სუბსტრატის მექანიკური დაზიანება (მწვანე/თეთრი ზოლები, მელნისფერი ლაქები);\n" +
+                "  2. დისპლეის შლეიფის ან კონექტორის კონტაქტის დაზიანება;\n" +
+                "  3. სენსორული შრის (Digitizer) ან დროებითი პროგრამული ხარვეზი.\n" +
+                "• **უსაფრთხო შემოწმება:** გადატვირთეთ მოწყობილობა, მოხსენით დაზიანებული დამცავი ბრონი და შეამოწმეთ, ჩანს თუ არა ხარვეზი ჩართვის ლოგოზეც (Boot screen).\n" +
+                "• **დამაზუსტებელი კითხვა:** აღენიშნება თუ არა ეკრანს გარეგანი ბზარი და მუშაობს თუ არა შეხება (Touch) მთელ ფართობზე?"
+            }
+
+            // 7.3 კამერა არ ფოკუსირდება / ბუნდოვანია / კანკალებს
+            diagQuery.contains("კამერ") || diagQuery.contains("ფოკუს") || diagQuery.contains("კანკალ") || diagQuery.contains("ბუნდოვან") -> {
+                "📷 **დიაგნოსტიკური ანალიზი: კამერის ფოკუსირების / გამოსახულების ხარვეზი**\n\n" +
+                devicePrefix +
+                "• **სიმპტომის შეფასება:** კამერის მიერ ფოკუსის ვერდაჭერა ან ბუნდოვანი გამოსახულება უკავშირდება ოპტიკურ ან ავტოფოკუსის მექანიზმს (და არა ელემენტს ან კვების სისტემას).\n" +
+                "• **შესაძლო მიზეზები (მარტივიდან რთულისკენ):**\n" +
+                "  1. **ლინზის გარეგანი დაბინძურება, ნაკაწრი ან ქეისის/დამცავი შუშის ხელშეშლა** — ხელს უშლის ლაზერულ/ფაზურ ავტოფოკუსს;\n" +
+                "  2. **პროგრამული/აპლიკაციის ხარვეზი** — კამერის აპის დროებითი შეცდომა;\n" +
+                "  3. **ავტოფოკუსის (AF) ან ოპტიკური სტაბილიზაციის (OIS) მექანიზმის დაზიანება** — ხშირია დავარდნის ან ძლიერი ვიბრაციის შემდეგ.\n" +
+                "• **უსაფრთხო პირველადი შემოწმება:**\n" +
+                "  1. გაწმინდეთ კამერის შუშა რბილი მიკროფიბრით და დროებით მოხსენით ქეისი/ლინზის დამცავი;\n" +
+                "  2. შეამოწმეთ ფოკუსირება სხვადასხვა რეჟიმში: **0.5x, 1x და 2x/3x** გადართვისას — თუ 0.5x სუფთაა და მხოლოდ 1x ბუნდოვანია, ხარვეზი კონკრეტულად მთავარ (1x) კამერის მოდულშია;\n" +
+                "  3. გადატვირთეთ ტელეფონი და შეამოწმეთ კამერა სხვა აპლიკაციაშიც.\n" +
+                "• **დამაზუსტებელი კითხვა:** დავარდნის შემდეგ დაეწყო ფოკუსის პრობლემა და ისმის თუ არა კამერის ჩართვისას ჩუმი წკაპუნის ან ზუზუნის ხმა?"
+            }
+
+            // 7.4 ტელეფონი არ იტენება / დამტენის პორტი
+            diagQuery.contains("არ იტენება") || diagQuery.contains("პორტ") || diagQuery.contains("დამტენ") || diagQuery.contains("charger") || diagQuery.contains("type-c") -> {
+                "🔌 **დიაგნოსტიკური ანალიზი: ტელეფონი არ იტენება / დამუხტვის ხარვეზი**\n\n" +
+                devicePrefix +
+                "• **სიმპტომის შეფასება:** დამუხტვის შეწყვეტა შეიძლება გამოწვეული იყოს როგორც გარე აქსესუარით (კაბელი/ადაპტერი), ისე ტელეფონის პორტით ან კვების კვანძით. წინასწარი შემოწმების გარეშე ელემენტის ან პლატის დაზიანების დაბრალება არასწორია.\n" +
+                "• **შესაძლო მიზეზები (საჭიროებს გადამოწმებას):**\n" +
+                "  1. **კაბელის ან დამტენი ადაპტერის გაუმართაობა** (ყველაზე ხშირი და მარტივად გამოსარიცხი მიზეზი);\n" +
+                "  2. **დამტენის პორტში (Type-C / Lightning) დაგროვილი მტვერი, ნადები ან კონტაქტების ცვეთა** — კაბელი ბოლომდე არ ჯდება ან ირყევა;\n" +
+                "  3. **პორტში სისველის/ნესტის მოხვედრა ან ქვედა შლეიფის დაზიანება**;\n" +
+                "  4. **ელემენტის ღრმა განმუხტვა ან დამუხტვის კონტროლერის (Charging IC / PMIC) ხარვეზი** (შესაძლო მიზეზი, თუ კაბელი და პორტი გამართულია).\n" +
+                "• **უსაფრთხო პირველადი შემოწმება (მარტივიდან რთულისკენ):**\n" +
+                "  1. სცადეთ სხვა, заведомо მუშა კაბელი, სხვა ადაპტერი და სხვა დენის წყარო (შტეფსელი);\n" +
+                "  2. ფანრით ჩახედეთ დამტენის პორტში — ხომ არ ჩანს მტვერი ან უცხო ნაწილაკი (არ გამოიყენოთ ლითონის ნემსი პორტის გასაწმენდად!);\n" +
+                "  3. დააკვირდით, ეწერება თუ არა დამუხტვის ნიშანი კაბელის განძრევისას ან ხომ არ ცხელდება პორტის მიდამო.\n" +
+                "• **დამაზუსტებელი კითხვა:** სხვა კაბელზე/ადაპტერზეც იგივეა და ჩნდება თუ არა ეკრანზე დატენვის ინდიკატორი?"
+            }
+
+            // 7.5 ელემენტი / ბატარეა (მხოლოდ მაშინ, როცა მომხმარებელი აღწერს მალე დაჯდომას, გათიშვას ან გაბერვას)
+            diagQuery.contains("ელემენტ") || diagQuery.contains("ბატარე") || diagQuery.contains("battery") || diagQuery.contains("ჯდება") || diagQuery.contains("ითიშება") || diagQuery.contains("გაბერ") -> {
+                "🔋 **დიაგნოსტიკური ანალიზი: ელემენტის სწრაფი განმუხტვა ან არასტაბილური მუშაობა**\n\n" +
+                devicePrefix +
+                "• **შესაძლო მიზეზები:**\n" +
+                "  1. ელემენტის ქიმიური ცვეთა (Battery Health < 80%, გაზრდილი შიდა წინააღმდეგობა);\n" +
+                "  2. ფონური აპლიკაციების ან სისტემური პროცესების მიერ მომატებული ენერგომოხმარება;\n" +
+                "  3. დედაპლატაზე მომატებული დენის მოხმარება (თუ ტელეფონი უმოქმედო რეჟიმშიც ცხელდება).\n" +
+                "• **უსაფრთხო შემოწმება:** შეამოწმეთ პარამეტრებში Battery Health და აპლიკაციების ენერგომოხმარების სტატისტიკა. თუ ეკრანი ამოწეულია (ელემენტი გაბერილია), არ დატენოთ ტელეფონი!\n" +
+                "• **დამაზუსტებელი კითხვა:** რამდენ პროცენტზეა Battery Health და ითიშება თუ არა ტელეფონი მოულოდნელად დაბალ პროცენტზე?"
+            }
+
+            // 7.6 Bootloop / ლოგოზე გაჭედვა / არ ირთვება ბოლომდე
+            diagQuery.contains("bootloop") || diagQuery.contains("აგური") || diagQuery.contains("ლოგო") || diagQuery.contains("არ ირთვება") || diagQuery.contains("ფლეშ") -> {
+                "⚙️ **დიაგნოსტიკური ანალიზი: ჩატვირთვის შეფერხება (Bootloop / არ ირთვება)**\n\n" +
+                devicePrefix +
+                "• **შესაძლო მიზეზები:**\n" +
+                "  1. ოპერაციული სისტემის (Firmware) შეცდომა ან მეხსიერების გადავსება;\n" +
+                "  2. ჩართვის ღილაკის ან პერიფერიული შლეიფის მოკლე ჩართვა;\n" +
+                "  3. ელემენტის ძაბვის ვარდნა ჩატვირთვის პიკურ დატვირთვაზე.\n" +
+                "• **უსაფრთხო შემოწმება:** შეაერთეთ დამტენზე 15 წუთით და სცადეთ Force Restart. არ გააკეთოთ Factory Reset, თუ ტელეფონში მნიშვნელოვანი ფოტოები და მონაცემები გაქვთ!\n" +
+                "• **დამაზუსტებელი კითხვა:** ჩერდება თუ არა ტელეფონი ჩართვის ლოგოზე, თუ საერთოდ არ რეაგირებს ღილაკზე?"
+            }
+
+            // 7.7 წყალი / სითხე
+            diagQuery.contains("წყალ") || diagQuery.contains("სისველ") || diagQuery.contains("ჩავარდა") -> {
+                "💧 **დიაგნოსტიკური ანალიზი: სითხის მოხვედრა და კოროზიის რისკი**\n\n" +
+                devicePrefix +
+                "• **უსაფრთხო მოქმედება ახლავე:** გამორთეთ მოწყობილობა და არ შეაერთოთ დამტენზე! დენის მიწოდება სველ კონტაქტებზე აჩქარებს ელექტროქიმიურ კოროზიას.\n" +
+                "• **რატომ არის საჭირო სერვისი:** გარეგანი გაშრობა პლატის ეკრანების ქვეშ დარჩენილ სითხეს ვერ აშორებს; საჭიროა დაშლა და ულტრაბგერითი წმენდა."
+            }
+
+            // 7.8 დინამიკი / მიკროფონი / ხმა
+            diagQuery.contains("დინამიკ") || diagQuery.contains("მიკროფონ") || diagQuery.contains("ხმა") || diagQuery.contains("აუდიო") || diagQuery.contains("speaker") -> {
+                "🔊 **დიაგნოსტიკური ანალიზი: ხმის / მიკროფონის ხარვეზი**\n\n" +
+                devicePrefix +
+                "• **შესაძლო მიზეზები:** დინამიკის/მიკროფონის ბადის დაბინძურება, Bluetooth აუდიოზე გადართვა, ან აუდიო მოდულის/კოდეკის ხარვეზი.\n" +
+                "• **უსაფრთხო შემოწმება:** ჩაწერეთ ხმოვანი შეტყობინება დიქტოფონში და შეამოწმეთ ხმა სპიკერზე (Speakerphone).\n" +
+                "• **დამაზუსტებელი კითხვა:** ხმა საერთოდ არ ისმის, თუ ისმის დაბალზე/შხრიალით?"
             }
 
             // FRP / Google Account
-            q.contains("frp") || q.contains("google account") || q.contains("ფრპ") -> {
+            diagQuery.contains("frp") || diagQuery.contains("google account") || diagQuery.contains("ფრპ") -> {
                 "🔓 **Google FRP (Factory Reset Protection) აქტივაციის ბლოკი**\n\n" +
                 devicePrefix +
-                "• **სიმპტომის მიზეზი:** მოწყობილობის გადატვირთვის შემდეგ ჩართულია Google-ის ქარხნული დაცვა, რომელიც ითხოვს ძველ ანგარიშს.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** განბლოკვა ხდება ლიცენზირებული სერვერული ხელსაწყოებით (Knox / Testpoint / Brom). მოწყობილობა ინარჩუნებს ყველა ფუნქციას, SIM სიგნალს და განახლებებს.\n" +
-                "• **შესრულების დრო:** 15-20 წუთი ადგილზე (ან დისტანციურად USB-ით)\n" +
-                "• **ღირებულება:** 40 ₾ - 50 ₾ (ოფიციალური მუდმივი გარანტიით)\n\n" +
-                "📍 გელოდებით ბექასერვისში: ქ. ახალციხე, კოსტავას 10 (WhatsApp: +995 598 23 33 32)."
+                "• **სიმპტომის მიზეზი:** მოწყობილობის ქარხნული გადატვირთვის შემდეგ ჩართულია Google-ის უსაფრთხოების დაცვა, რომელიც ითხოვს წინა სინქრონიზებულ ანგარიშს.\n" +
+                "• **პირველადი შემოწმება:** დაუკავშირეთ ტელეფონი სტაბილურ Wi-Fi ქსელს და სცადეთ Google ანგარიშის პაროლის აღდგენა ოფიციალური გვერდიდან.\n" +
+                "• **BEKASERVICE-ის გადაწყვეტა:** სერვისცენტრში შესაძლებელია FRP ბლოკის პროგრამული მოხსნა მოდელისა და უსაფრთხოების პატჩის მიხედვით."
             }
 
             // iCloud / Apple ID
-            q.contains("icloud") || q.contains("აიქლაუდ") || q.contains("apple id") || q.contains("აქტივაცია") -> {
-                "🍏 **Apple iCloud / Activation Lock (Hello Screen ან Passcode)**\n\n" +
+            diagQuery.contains("icloud") || diagQuery.contains("აიქლაუდ") || diagQuery.contains("apple id") || diagQuery.contains("აქტივაცია") -> {
+                "🍏 **Apple iCloud / Activation Lock დიაგნოსტიკა**\n\n" +
                 devicePrefix +
-                "• **სიმპტომის მიზეზი:** iPhone მიბმულია Apple ID-ზე Find My (FMI) ჩართული სტატუსით.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** Checkm8 / Ramdisk და სერვერული Token Bypass მეთოდით სრულად ნარჩუნდება სიმ-ბარათის სიგნალი, ზარები, SMS, LTE, iCloud სერვისები და App Store.\n" +
-                "• **სამუშაო დრო:** 20-35 წუთი\n" +
-                "• **ღირებულება:** 90 ₾ - 120 ₾\n\n" +
-                "ბექასერვისში გვაქვს ოფიციალური პროგრამული ლიცენზიები iPhone-ის ყველა ვერსიისთვის. შეგიძლიათ მობრძანდეთ ან მოგვწეროთ WhatsApp-ში!"
+                "• **სიმპტომის მიზეზი:** მოწყობილობაზე გააქტიურებულია Find My (FMI) უსაფრთხოების ბლოკი.\n" +
+                "• **დამაზუსტებელი კითხვა:** ტელეფონი გაჩერებულია Hello ეკრანზე თუ Passcode რეჟიმში და რომელი მოდელია ზუსტად?"
             }
 
             // ქსელის ბლოკი (SIM Lock / Carrier Unlock)
-            q.contains("ქსელ") || q.contains("sim") || q.contains("სიმ") || q.contains("unlock") || q.contains("ოპერატორ") -> {
-                "📶 **Network Carrier SIM Lock (უცხოურ ოპერატორზე ბლოკი)**\n\n" +
+            diagQuery.contains("ქსელ") || diagQuery.contains("sim") || diagQuery.contains("სიმ") || diagQuery.contains("unlock") || diagQuery.contains("ოპერატორ") -> {
+                "📶 **ქსელის / SIM ბარათის კავშირის დიაგნოსტიკა**\n\n" +
                 devicePrefix +
-                "• **სიმპტომის მიზეზი:** ტელეფონი ჩამოტანილია საზღვარგარეთიდან და მიბმულია კონკრეტულ ქსელზე (AT&T, T-Mobile, Verizon, Vodafone, Softbank და სხვ.).\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ოფიციალური Factory Unlock IMEI ბაზით ან R-SIM / eSIM Patch კონფიგურაციით. ტელეფონი იმუშავებს Silknet, Magti და Cellfie-ზე შეუფერხებლად.\n" +
-                "• **დრო & ფასი:** 60 ₾ - 75 ₾ (სრული გარანტიით).\n\n" +
-                "დეტალებისთვის მოგვაწოდეთ IMEI კოდი ბექასერვისის WhatsApp-ზე: +995 598 23 33 32."
-            }
-
-            // Auth Flashing / EDL 9008
-            q.contains("auth") || q.contains("edl") || q.contains("9008") || q.contains("msm") -> {
-                "🔐 **Emergency Download Mode (EDL 9008 / BROM Hard-Brick)**\n\n" +
-                devicePrefix +
-                "• **სიმპტომის მიზეზი:** სისტემური ბირთვის დაზიანების გამო პროცესორი გადავიდა დაბალი დონის Qualcomm HS-USB 9008 რეჟიმში და ითხოვს ოფიციალურ სერვერულ Firehose ავტორიზაციას.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** გვაქვს ოფიციალური მწარმოებლის სერვერული წვდომა Xiaomi, OnePlus, Realme, Oppo მოდელებზე. ტელეფონი აღდგება სრულად 20 წუთში.\n" +
-                "• **ღირებულება:** 55 ₾.\n\n" +
-                "ბექასერვისი ახალციხეში ერთადერთი სერვისია ოფიციალური Auth სერვერული ხელსაწყოებით!"
-            }
-
-            // Bootloop / არ ირთვება / ლოგოზე გაჭედილი
-            q.contains("bootloop") || q.contains("აგური") || q.contains("ლოგო") || q.contains("არ ირთვება") || q.contains("ფლეშ") -> {
-                "⚙️ **Bootloop / სისტემური ფაილების კოლაფსი**\n\n" +
-                devicePrefix +
-                "• **სიმპტომის მიზეზი:** მეხსიერების UFS/eMMC დანაყოფის შეცდომა, შეწყვეტილი OTA განახლება ან Bootloader-ის კონფლიქტი.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** Stock Firmware-ის ოფიციალური გადაწერა, ქეშის გასუფთავება და შესაძლებლობის შემთხვევაში პირადი მონაცემების შენარჩუნება.\n" +
-                "• **შესრულების დრო:** 20-30 წუთი | **ღირებულება:** 35 ₾ - 55 ₾\n\n" +
-                "ადგილზე გაგირემონტებთ უმოკლეს დროში ბექასერვისში: კოსტავას 10."
-            }
-
-            // ეკრანი (ზოლები, ბზარი, სენსორი)
-            q.contains("ეკრან") || q.contains("ზოლ") || q.contains("შავ") || q.contains("ბზარ") || q.contains("display") || q.contains("screen") -> {
-                "📱 **დისპლეის მატრიცის / სენსორის დაზიანება**\n\n" +
-                devicePrefix +
-                "• **სიმპტომის მიზეზი:** დარტყმის ან წნევის შედეგად დაზიანდა ორგანული OLED პიქსელების შრე (მწვანე/თეთრი ზოლები, შავი ლაქები) ან სენსორის დიგიტაიზერი.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ახალი ორიგინალი OLED / Super AMOLED დისპლეის მონტაჟი, True Tone მონაცემების გადაპროგრამება და ჰერმეტული წებოს აღდგენა.\n" +
-                "• **სამუშაო დრო:** 25-35 წუთი ადგილზევე\n" +
-                "• **ღირებულება:** 180 ₾ - 390 ₾ (მოდელის მიხედვით, 6-თვიანი გარანტიით)\n\n" +
-                "ყველა პოპულარული მოდელის ეკრანი ადგილზე გვაქვს მარაგში ბექასერვისში!"
-            }
-
-            // ელემენტი / ბატარეა
-            q.contains("ელემენტ") || q.contains("ბატარე") || q.contains("battery") || q.contains("ჯდება") || q.contains("ითიშება") || q.contains("გაბერ") -> {
-                "🔋 **ლითიუმ-იონური ელემენტის დეგრადაცია / ცვეთა**\n\n" +
-                devicePrefix +
-                "• **სიმპტომის მიზეზი:** ელემენტის ქიმიური ცვეთა (ციკლები > 500, Health < 80%) ან შიდა წინააღმდეგობის მატება.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** 100% ახალი ორიგინალი ელემენტის ინსტალაცია 0-ციკლით. iPhone მოდელებზე გადაგვაქვს ორიგინალი BMS ჩიპი 100% Health-ის საჩვენებლად.\n" +
-                "• **დრო & ფასი:** 15-20 წუთი | 65 ₾ - 110 ₾ (6 თვე ოფიციალური გარანტია)\n\n" +
-                "მობრძანდით ბექასერვისში და 20 წუთში ჩაგისვამთ ახალ ელემენტს."
-            }
-
-            // დამტენის პორტი / არ იტენება
-            q.contains("პორტ") || q.contains("დამტენ") || q.contains("charger") || q.contains("type-c") || q.contains("არ იტენება") -> {
-                "🔌 **Type-C / Lightning პორტის ან დამუხტვის კონტროლერის ხარვეზი**\n\n" +
-                devicePrefix +
-                "• **სიმპტომის მიზეზი:** პინების მექანიკური ცვეთა, დაჟანგვა ან Hydra/Tristar/PMIC დამტენის კონტროლერის ხარვეზი.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** მიკროსკოპული ულტრაბგერითი წმენდა ან ქვედა ორიგინალი შლეიფის შეცვლა Fast Charging / PD მხარდაჭერით.\n" +
-                "• **სამუშაო დრო:** 20-30 წუთი | ღირებულება: 55 ₾ - 85 ₾.\n\n" +
-                "ბექასერვისში შევამოწმებთ ამპერმეტრით და მოვაგვარებთ უმოკლეს დროში!"
-            }
-
-            // წყალი / სითხე
-            q.contains("წყალ") || q.contains("სისველ") || q.contains("ჩავარდა") -> {
-                "💧 **სითხის მოხვედრა და ელექტროქიმიური კოროზია**\n\n" +
-                devicePrefix +
-                "• **სასწრაფო რეკომენდაცია:** გამორთეთ მოწყობილობა, არ შეაერთოთ დამტენზე! დენი აჩქარებს კონტაქტების დაჟანგვას.\n" +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ტელეფონის დაუყოვნებელი გახსნა, დედაპლატის ულტრაბგერითი ქიმიური წმენდა და მოკლე ჩართვების ლოკალიზება თერმო-კამერით.\n" +
-                "• **ფასი:** 50 ₾ - 90 ₾ | დრო: 40-60 წუთი.\n\n" +
-                "სასწრაფოდ მოიტანეთ ბექასერვისში: ქ. ახალციხე, კოსტავას 10."
-            }
-
-            // კამერა / ფოკუსი
-            q.contains("კამერ") || q.contains("ფოკუს") || q.contains("კანკალ") || q.contains("ბუნდოვან") -> {
-                "📷 **კამერის ოპტიკური სტაბილიზატორის (OIS) ან ლინზის დაზიანება**\n\n" +
-                devicePrefix +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ორიგინალი კამერის მოდულის მონტაჟი და ლაზერული ფოკუსირების კალიბრაცია.\n" +
-                "• **დრო & ფასი:** 25 წუთი | 140 ₾ - 220 ₾ (6-თვიანი გარანტიით).\n\n" +
-                "მოგვწერეთ WhatsApp-ში და დაგიჯავშნით ორიგინალ ნაწილს ბექასერვისში: +995 598 23 33 32."
-            }
-
-            // დინამიკი / მიკროფონი / ხმა
-            q.contains("დინამიკ") || q.contains("მიკროფონ") || q.contains("ხმა") || q.contains("აუდიო") || q.contains("speaker") -> {
-                "🔊 **დინამიკის / აუდიო კოდეკის დაზიანება**\n\n" +
-                devicePrefix +
-                "• **BEKASERVICE-ის გადაწყვეტა:** ულტრაბგერითი წმენდა ან ორიგინალი სმენის/ზარის დინამიკის შეცვლა.\n" +
-                "• **დრო & ფასი:** 20 წუთი | 35 ₾ - 55 ₾."
-            }
-
-            // Face ID / Touch ID
-            q.contains("face id") || q.contains("ფეის") || q.contains("touch id") || q.contains("ანაბეჭდ") -> {
-                "👤 **Face ID / TrueDepth სენსორის ხარვეზი**\n\n" +
-                devicePrefix +
-                "• **BEKASERVICE-ის გადაწყვეტა:** TrueDepth სენსორის მიკრო-შედუღება და გადაპროგრამება სპეციალური პროგრამატორით.\n" +
-                "• **დრო & ფასი:** 45 წუთი | 80 ₾ - 120 ₾ (სრული გარანტიით)."
-            }
-
-            // უკანა შუშა / კორპუსი
-            q.contains("კორპუს") || q.contains("შუშ") || q.contains("ხუფ") || q.contains("ჩარჩო") || q.contains("glass") -> {
-                "✨ **უკანა შუშის / კორპუსის ლაზერული შეცვლა**\n\n" +
-                devicePrefix +
-                "• **BEKASERVICE-ის გადაწყვეტა:** უკანა შუშის მოხსნა ხდება სპეციალური ლაზერული დანადგარით ტელეფონის დაუშლელად.\n" +
-                "• **დრო & ფასი:** 40-50 წუთი | 70 ₾ - 130 ₾ (ორიგინალი ფერებით)."
+                "• **შესაძლო მიზეზები:** SIM ბარათის კონტაქტის ხარვეზი, უცხოურ ოპერატორზე დაბლოკვა (Carrier SIM Lock), ან ქსელის მოდემის/ანტენის ხარვეზი.\n" +
+                "• **უსაფრთხო შემოწმება:** სცადეთ სხვა მოქმედი SIM ბარათი და გადაამოწმეთ პარამეტრებში Carrier Lock სტატუსი.\n" +
+                "• **დამაზუსტებელი კითხვა:** ეკრანზე ეწერება 'SIM Not Supported' / 'Invalid SIM', თუ 'No Service'?"
             }
 
             else -> {
-                val matched = optimizeSearchFilter(catalog, query).take(3)
+                val matched = findRelevantProducts(query, catalog).take(3)
                 if (matched.isNotEmpty()) {
                     "🔎 **თქვენი მოთხოვნით BEKASERVICE-ის კატალოგში მოიძებნა:**\n\n" +
                             matched.joinToString("\n\n") { p ->
@@ -5041,12 +5119,12 @@ object GeminiDiagnosticService {
                             "\n\nქვემოთ მოცემულ ბარათებზე დაჭერით შეგიძლიათ გახსნათ დეტალური გვერდი ან შეუკვეთოთ!"
                 } else {
                     val modelHint = if (detectedDevice.isNotBlank()) "აღნიშნულ მოდელზე (**$detectedDevice**) " else ""
-                    "🔍 **ტექნიკური და პროგრამული კონსულტაცია BEKASERVICE-ისგან**\n\n" +
+                    "🔍 **ტექნიკური დიაგნოსტიკა — დამაზუსტებელი კითხვა**\n\n" +
                     devicePrefix +
-                    "${modelHint}შეგიძლიათ მკითხოთ როგორც 24 ციფრულ პროგრამულ სერვისზე (ChatGPT Plus/Pro, Google AI Pro 18 თვე, Claude, Grok, Canva, CapCut, Adobe CC, Windows 11, Office), ისე ნებისმიერი ტელეფონის ნაწილსა და შეკეთებაზე.\n\n" +
-                    "• 📍 მისამართი: ქ. ახალციხე, კოსტავას ქ. N10\n" +
-                    "• ⏰ სამუშაო საათები: ყოველდღე 10:00 - 20:00\n" +
-                    "• 📞 WhatsApp კონსულტაცია & შეკვეთა: +995 598 23 33 32"
+                    "${modelHint}ზუსტი დიაგნოსტიკური ანალიზისთვის გთხოვთ მომწეროთ:\n" +
+                    "1. **ტელეფონის ზუსტი მოდელი** (მაგ: iPhone 13, Samsung S23, Redmi Note 12);\n" +
+                    "2. **კონკრეტული სიმპტომი** (მაგ: ეკრანი არ ირთვება, ტელეფონი არ იტენება, კამერა არ ფოკუსირდება);\n" +
+                    "3. **რის შემდეგ დაეწყო პრობლემა** (დავარდნა, სითხის მოხვედრა, განახლება თუ თავისით)."
                 }
             }
         }
@@ -5056,6 +5134,7 @@ object GeminiDiagnosticService {
 // ==============================================================================
 // 7. AI ასისტენტის ინტერფეისი (Gemini Multi-Turn Diagnostics & Software Chat)
 // ==============================================================================
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun AiAssistantScreen(
     products: List<ProductItem> = emptyList(),
@@ -5066,8 +5145,11 @@ fun AiAssistantScreen(
     val context = LocalContext.current
     val isDark = AppPreferencesManager.isDarkMode
     val coroutineScope = rememberCoroutineScope()
+    val bringIntoViewRequester = remember { androidx.compose.foundation.relocation.BringIntoViewRequester() }
     var textInput by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var activeChatJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var activeRequestId by remember { mutableStateOf(0L) }
 
     val chatList = remember {
         mutableStateListOf(
@@ -5075,8 +5157,8 @@ fun AiAssistantScreen(
                 "ai",
                 "გამარჯობა! მე ვარ BEKASERVICE-ის ოფიციალური AI ასისტენტი & ტექნიკური კონსულტანტი.\n\n" +
                 "შემიძლია დაგეხმაროთ:\n" +
-                "• 💻 **24 პროგრამული სერვისის შერჩევაში:** Google AI Pro (18 თვე + 2TB), ChatGPT Plus/Pro, Claude Pro, Grok, Cursor, Canva Pro, CapCut Pro, Adobe CC, Windows 11 & Office\n" +
-                "• 📱 **სმარტფონების დიაგნოსტიკასა და ნაწილებში:** ეკრანები, ელემენტები, პორტები, FRP, iCloud, SIM Lock.",
+                "• 📱 **სმარტფონების დიაგნოსტიკასა და ნაწილებში:** ეკრანები, ელემენტები, პორტები, კამერა, FRP, iCloud, SIM Lock\n" +
+                "• 💻 **24 პროგრამული სერვისის შერჩევაში:** Canva Pro, CapCut Pro, Adobe CC, Windows 11 & Office.",
                 recommendedProducts = listOf(103, 101, 118).mapNotNull { id -> products.find { it.id == id } }
             )
         )
@@ -5084,32 +5166,69 @@ fun AiAssistantScreen(
 
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
+    // IME (Keyboard) & Bottom Navigation unified inset calculation:
+    // Prevents the keyboard from ever covering the composer while avoiding double bottom padding.
+    val topPadding = contentPadding.calculateTopPadding()
+    val bottomNavPadding = contentPadding.calculateBottomPadding()
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val isKeyboardOpen = imeBottom > bottomNavPadding
+    val effectiveBottomInset = maxOf(imeBottom, bottomNavPadding)
+
+    // Auto-scroll to latest message when messages change, loading state updates, or keyboard opens
+    LaunchedEffect(chatList.size, isLoading, isKeyboardOpen) {
+        if (chatList.isNotEmpty()) {
+            val lastIdx = (chatList.size - 1 + (if (isLoading) 1 else 0)).coerceAtLeast(0)
+            try {
+                listState.animateScrollToItem(lastIdx)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     val quickQuestions = listOf(
+        "📱 ეკრანი არ ირთვება",
+        "🔌 ტელეფონი არ იტენება",
+        "📷 კამერა არ ფოკუსირდება",
         "✨ Google AI Pro — 18 თვე",
-        "🤖 ChatGPT Plus vs Pro შედარება",
         "🎨 Canva Pro & CapCut Pro",
-        "🧠 Claude Pro Private vs Shared",
         "🪟 Windows 11 & Office ლიცენზიები",
         "🔓 Google FRP ბლოკის მოხსნა",
-        "🍏 iCloud Activation / Apple ID",
-        "📱 ეკრანზე მწვანე ზოლი / ბზარი",
         "🔋 ელემენტი 80%-ზე ნაკლებია"
     )
 
     fun sendMessage(prompt: String) {
-        if (prompt.isBlank() || isLoading) return
         val userText = prompt.trim()
+        if (userText.isBlank() || isLoading) return
+        val historySnapshot = chatList.toList()
         chatList.add(ChatMessage("user", userText))
         textInput = ""
         isLoading = true
 
-        coroutineScope.launch {
-            listState.animateScrollToItem(chatList.size - 1)
-            val reply = GeminiDiagnosticService.diagnose(chatList, userText, products)
-            val matchedProducts = GeminiDiagnosticService.findRelevantProducts(userText, products)
-            chatList.add(ChatMessage("ai", reply, matchedProducts))
-            isLoading = false
-            listState.animateScrollToItem(chatList.size - 1)
+        val requestId = ++activeRequestId
+        activeChatJob?.cancel()
+        activeChatJob = coroutineScope.launch {
+            try {
+                val reply = GeminiDiagnosticService.diagnose(historySnapshot, userText, products)
+                if (requestId != activeRequestId) return@launch
+                val matchedProducts = GeminiDiagnosticService.findRelevantProducts(userText, products)
+                chatList.add(ChatMessage("ai", reply, matchedProducts))
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                if (requestId == activeRequestId) {
+                    chatList.add(
+                        ChatMessage(
+                            "ai",
+                            "⚠️ მოთხოვნის დამუშავებისას დაფიქსირდა დროებითი შეფერხება. გთხოვთ სცადოთ თავიდან.",
+                            emptyList()
+                        )
+                    )
+                }
+            } finally {
+                if (requestId == activeRequestId) {
+                    isLoading = false
+                }
+            }
         }
     }
 
@@ -5117,11 +5236,12 @@ fun AiAssistantScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(
-                top = contentPadding.calculateTopPadding(),
-                bottom = contentPadding.calculateBottomPadding(),
+                top = topPadding,
+                bottom = effectiveBottomInset,
                 start = 14.dp,
                 end = 14.dp
-            ),
+            )
+            .testTag("ai_assistant_root"),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -5169,7 +5289,7 @@ fun AiAssistantScreen(
                                     Text("✨", fontSize = 9.sp)
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text(
-                                        "Gemini",
+                                        "AI",
                                         color = Color(0xFF93C5FD),
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
@@ -5191,16 +5311,22 @@ fun AiAssistantScreen(
 
                 IconButton(
                     onClick = {
+                        activeRequestId++
+                        activeChatJob?.cancel()
+                        activeChatJob = null
+                        isLoading = false
                         chatList.clear()
                         chatList.add(
                             ChatMessage(
                                 "ai",
-                                "ჩათი გასუფთავდა. მკითხეთ ნებისმიერ პროგრამულ სერვისზე (ChatGPT, Google AI Pro 18 თვე, Canva, Windows/Office) ან ტელეფონის დიაგნოსტიკაზე!",
+                                "ჩათი გასუფთავდა. მკითხეთ ტელეფონის დიაგნოსტიკაზე ან ნებისმიერ პროგრამულ სერვისზე!",
                                 recommendedProducts = listOf(103, 101, 118).mapNotNull { id -> products.find { it.id == id } }
                             )
                         )
                     },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("ai_assistant_clear_button")
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = "Clear Chat", tint = Color(0xFF6E7582), modifier = Modifier.size(18.dp))
                 }
@@ -5218,6 +5344,7 @@ fun AiAssistantScreen(
                             if (isDark) Color(0xFF282F3C).copy(alpha = 0.70f) else Color(0xFFCBD5E1)
                         ),
                         modifier = Modifier.clickable(
+                            enabled = !isLoading,
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { sendMessage(q) }
@@ -5237,7 +5364,9 @@ fun AiAssistantScreen(
             LazyColumn(
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("ai_assistant_chat_list")
             ) {
                 items(chatList, key = { it.id }) { msg ->
                     val isAi = msg.sender == "ai"
@@ -5273,7 +5402,6 @@ fun AiAssistantScreen(
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 msg.recommendedProducts.forEach { prod ->
-                                    val isSoft = SoftwareCatalogData.isDigitalSoftwareService(prod)
                                     Surface(
                                         shape = RoundedCornerShape(12.dp),
                                         color = Color(0xFF141820),
@@ -5416,7 +5544,9 @@ fun AiAssistantScreen(
                             shape = RoundedCornerShape(12.dp),
                             color = Color(0xFF16191E),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth(0.9f)
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .testTag("ai_assistant_loading_indicator")
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -5429,7 +5559,7 @@ fun AiAssistantScreen(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    "⚡ AI ამოწმებს BEKASERVICE-ის კატალოგს...",
+                                    "⚡ AI აანალიზებს მოთხოვნას...",
                                     color = Color(0xFFA0A5B0),
                                     fontSize = 12.sp
                                 )
@@ -5466,7 +5596,9 @@ fun AiAssistantScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 6.dp)
+                .bringIntoViewRequester(bringIntoViewRequester)
+                .testTag("ai_assistant_composer_row"),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -5524,14 +5656,39 @@ fun AiAssistantScreen(
                         }
                         BasicTextField(
                             value = textInput,
-                            onValueChange = { textInput = it },
+                            onValueChange = {
+                                textInput = it
+                                coroutineScope.launch {
+                                    bringIntoViewRequester.bringIntoView()
+                                }
+                            },
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 fontSize = 13.sp,
                                 color = AppThemeColorAdapter.inputTextColor(),
                                 lineHeight = 18.sp
                             ),
+                            maxLines = 4,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                imeAction = androidx.compose.ui.text.input.ImeAction.Send
+                            ),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                onSend = {
+                                    if (!isLoading && textInput.isNotBlank()) {
+                                        sendMessage(textInput)
+                                    }
+                                }
+                            ),
                             cursorBrush = SolidColor(Color(0xFFFF7A00)),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        coroutineScope.launch {
+                                            bringIntoViewRequester.bringIntoView()
+                                        }
+                                    }
+                                }
+                                .testTag("ai_assistant_input")
                         )
                     }
                 }
@@ -5557,6 +5714,7 @@ fun AiAssistantScreen(
                     ) {
                         sendMessage(textInput)
                     }
+                    .testTag("ai_assistant_send_button")
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(

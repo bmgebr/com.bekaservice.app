@@ -201,6 +201,8 @@ class DiagnosticsWorkspaceStateHolder(
 
     private var lastFailedText: String = ""
     private var lastFailedAttachments: List<DiagnosticAttachment> = emptyList()
+    private var activeRequestJob: kotlinx.coroutines.Job? = null
+    private var activeRequestId: Long = 0L
 
     init {
         refreshSavedSessions()
@@ -218,6 +220,10 @@ class DiagnosticsWorkspaceStateHolder(
     }
 
     fun startNewSession() {
+        activeRequestId++
+        activeRequestJob?.cancel()
+        activeRequestJob = null
+        isAnalyzing = false
         if (messages.isNotEmpty()) {
             DiagnosticsSessionRepository.saveOrUpdateSession(
                 context = context,
@@ -227,7 +233,7 @@ class DiagnosticsWorkspaceStateHolder(
             )
             refreshSavedSessions()
         }
-        sessionId = "diag_session_" + System.currentTimeMillis()
+        sessionId = "diag_session_" + System.currentTimeMillis() + "_" + activeRequestId
         messages.clear()
         pendingAttachments.clear()
         inputText = ""
@@ -237,6 +243,10 @@ class DiagnosticsWorkspaceStateHolder(
     }
 
     fun openSavedSession(record: DiagnosticSessionRecord) {
+        activeRequestId++
+        activeRequestJob?.cancel()
+        activeRequestJob = null
+        isAnalyzing = false
         sessionId = record.id
         selectedMode = record.mode
         messages.clear()
@@ -251,13 +261,17 @@ class DiagnosticsWorkspaceStateHolder(
         savedSessions.clear()
         savedSessions.addAll(updated)
         if (sessionId == targetSessionId) {
+            activeRequestId++
+            activeRequestJob?.cancel()
+            activeRequestJob = null
+            isAnalyzing = false
             messages.clear()
             pendingAttachments.clear()
             inputText = ""
             errorMessage = null
             lastFailedText = ""
             lastFailedAttachments = emptyList()
-            sessionId = "diag_session_" + System.currentTimeMillis()
+            sessionId = "diag_session_" + System.currentTimeMillis() + "_" + activeRequestId
         }
     }
 
@@ -302,7 +316,7 @@ class DiagnosticsWorkspaceStateHolder(
         catalogProducts: List<ProductItem>,
         onFocusInputRequest: () -> Unit = {}
     ) {
-        if (isAnalyzing) return // Duplicate send prevention
+        if (isAnalyzing || isProcessingImage) return // Duplicate send prevention
 
         val textToSend = (overrideText ?: inputText).trim()
         val attachmentsToSend = pendingAttachments.toList()
@@ -329,7 +343,11 @@ class DiagnosticsWorkspaceStateHolder(
         pendingAttachments.clear()
         isAnalyzing = true
 
-        coroutineScope.launch {
+        val requestId = ++activeRequestId
+        val targetSessionId = sessionId
+        activeRequestJob?.cancel()
+
+        activeRequestJob = coroutineScope.launch {
             try {
                 val response = BekaMultimodalDiagnosticsEngine.analyzeTurn(
                     conversationHistory = historyBeforeTurn,
@@ -337,7 +355,15 @@ class DiagnosticsWorkspaceStateHolder(
                     mode = selectedMode,
                     catalogProducts = catalogProducts
                 )
-                messages.add(response.assistantMessage)
+                if (requestId != activeRequestId || targetSessionId != sessionId) {
+                    return@launch
+                }
+                if (response.assistantMessage.isError || response.assistantMessage.text.isBlank()) {
+                    throw IllegalStateException("Diagnostic response is empty or flagged as error")
+                }
+                if (messages.none { it.id == response.assistantMessage.id }) {
+                    messages.add(response.assistantMessage)
+                }
                 val saved = DiagnosticsSessionRepository.saveOrUpdateSession(
                     context = context,
                     sessionId = sessionId,
@@ -348,16 +374,22 @@ class DiagnosticsWorkspaceStateHolder(
                 if (saved != null) {
                     DiagnosticsSessionRepository.syncSessionSummaryToFirestoreIfSignedIn(context, saved)
                 }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (e: Exception) {
-                // Remove optimistic user message and restore composer so user can retry without losing anything
-                messages.removeAll { it.id == userMsg.id }
-                inputText = lastFailedText
-                pendingAttachments.clear()
-                pendingAttachments.addAll(lastFailedAttachments)
-                errorMessage = "დიაგნოსტიკის მოთხოვნა დროებით შეფერხდა. თქვენი ტექსტი და ფოტო შენახულია — სცადეთ თავიდან."
-                onFocusInputRequest()
+                if (requestId == activeRequestId && targetSessionId == sessionId) {
+                    // Remove optimistic user message and restore composer so user can retry without losing anything
+                    messages.removeAll { it.id == userMsg.id }
+                    inputText = lastFailedText
+                    pendingAttachments.clear()
+                    pendingAttachments.addAll(lastFailedAttachments)
+                    errorMessage = "დიაგნოსტიკის მოთხოვნა დროებით შეფერხდა. თქვენი ტექსტი და ფოტო შენახულია — სცადეთ თავიდან."
+                    onFocusInputRequest()
+                }
             } finally {
-                isAnalyzing = false
+                if (requestId == activeRequestId) {
+                    isAnalyzing = false
+                }
             }
         }
     }
@@ -1482,6 +1514,37 @@ private fun DiagnosticAssistantCard(
                                     lineHeight = 16.sp
                                 )
                             }
+                        }
+                    }
+                }
+
+                // Clarifying Follow-up Question (only if not already included in summaryText)
+                val cleanFollowUp = section.followUpQuestion.trim()
+                if (cleanFollowUp.isNotBlank() && !message.text.contains(cleanFollowUp.take(24))) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.subSurfaceBg,
+                        border = BorderStroke(1.dp, BrandOrange.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("diag_followup_question_box")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(11.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "დამაზუსტებელი კითხვა დიაგნოზის დასაზუსტებლად:",
+                                color = BrandOrange,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = cleanFollowUp,
+                                color = palette.textPrimary,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
                         }
                     }
                 }
