@@ -1,7 +1,10 @@
 package com.example
 
 object ProductRepository {
-    fun getAllProducts(): List<ProductItem> = listOf(
+    fun getAllProducts(): List<ProductItem> = cachedAllProducts
+
+    private val cachedAllProducts: List<ProductItem> by lazy {
+        listOf(
         // =====================================================================
         // 1. APPLE - ეკრანები (DISPLAYS)
         // =====================================================================
@@ -1283,4 +1286,5 @@ object ProductRepository {
             warranty = "OTA განახლებების მხარდაჭერა"
         )
     ) + SoftwareCatalogData.getDigitalSoftwareProducts()
+    }
 }

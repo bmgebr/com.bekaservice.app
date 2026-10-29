@@ -378,20 +378,11 @@ fun ProfileAndAuthScreen(
                                                 .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
                                                 .border(1.dp, AppThemeColorAdapter.dividerColor(Color(0xFF282E3A)), RoundedCornerShape(10.dp))
                                         ) {
-                                            if (isSoftware) {
-                                                SoftwareBrandVisualHeader(
-                                                    product = favProd,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    compact = true
-                                                )
-                                            } else {
-                                                AsyncImage(
-                                                    model = favProd.imageUrl,
-                                                    contentDescription = favProd.title,
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            }
+                                            ProductSmartVisual(
+                                                product = favProd,
+                                                modifier = Modifier.fillMaxSize(),
+                                                compact = true
+                                            )
                                         }
 
                                         Column(

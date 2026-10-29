@@ -1,0 +1,24 @@
+<resources>
+    <string name="onboarding_brand_subtitle">Ваши цифровые сервисы</string>
+    <string name="onboarding_welcome_title">Добро пожаловать!</string>
+    <string name="onboarding_welcome_subtitle">Всё, что вам нужно — в одном месте.</string>
+    <string name="onboarding_lang_title">Выберите язык</string>
+    <string name="onboarding_lang_subtitle">Select language</string>
+    <string name="onboarding_next">Далее</string>
+    <string name="onboarding_auth_title">Вход в аккаунт</string>
+    <string name="onboarding_auth_subtitle">Выберите удобный способ или продолжите без аккаунта.</string>
+    <string name="onboarding_google_sign_in">Войти через Google</string>
+    <string name="onboarding_apple_sign_in">Войти через Apple</string>
+    <string name="onboarding_email_sign_in">По эл. почте</string>
+    <string name="onboarding_skip_auth">Пропустить авторизацию</string>
+    <string name="onboarding_ready_title">Всё готово!</string>
+    <string name="onboarding_ready_subtitle">Откройте цифровые сервисы в BEKASERVICE.</string>
+    <string name="onboarding_benefit_nav_title">Простая навигация</string>
+    <string name="onboarding_benefit_nav_desc">Быстрый поиск и категории в одном месте</string>
+    <string name="onboarding_benefit_trust_title">Надёжность</string>
+    <string name="onboarding_benefit_trust_desc">Гарантированное качество и официальный сервис</string>
+    <string name="onboarding_benefit_digital_title">Цифровые сервисы</string>
+    <string name="onboarding_benefit_digital_desc">AI пакеты, программы и комплектующие</string>
+    <string name="onboarding_start_action">Начать →</string>
+    <string name="onboarding_home_action">На главную</string>
+</resources>

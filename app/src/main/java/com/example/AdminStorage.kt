@@ -63,7 +63,7 @@ object AdminStorage {
     fun markLocalEditsSynced(context: Context) {
         getPrefs(context).edit()
             .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)
-            .commit()
+            .apply()
     }
 
     fun isInitialCloudMigrationCompleted(context: Context): Boolean {
@@ -73,7 +73,7 @@ object AdminStorage {
     fun setInitialCloudMigrationCompleted(context: Context, completed: Boolean) {
         getPrefs(context).edit()
             .putBoolean(KEY_INITIAL_CLOUD_MIGRATION_DONE, completed)
-            .commit()
+            .apply()
     }
 
     fun getKnownCloudDocIds(context: Context): Set<String> {
@@ -96,7 +96,7 @@ object AdminStorage {
         docIds.forEach { arr.put(it) }
         getPrefs(context).edit()
             .putString(KEY_KNOWN_CLOUD_DOC_IDS, arr.toString())
-            .commit()
+            .apply()
     }
 
     fun getLastLocalEditTimestamp(context: Context): Long {
@@ -706,7 +706,7 @@ object AdminStorage {
             .putBoolean(KEY_HAS_CUSTOM_PRODUCTS, true)
             .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)
             .putString(KEY_CUSTOM_PRODUCTS, serialized)
-            .commit()
+            .apply()
     }
 
     fun saveProducts(context: Context, products: List<ProductItem>, markUnsyncedLocalEdit: Boolean = false) {

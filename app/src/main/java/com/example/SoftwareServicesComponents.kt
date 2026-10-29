@@ -251,9 +251,28 @@ object SoftwareServicesData {
 // ==============================================================================
 // 3. პროგრამული სერვისების დეტალური ჩამონათვალის UI (ProductDetail-ში ჩასაშენებლად)
 // ==============================================================================
+private fun formatVerifiedDateBadge(rawDate: String): String {
+    val trimmed = rawDate.trim()
+    if (trimmed.isBlank()) {
+        return java.text.SimpleDateFormat("dd.MM.yyyy", java.util.Locale.US).format(java.util.Date())
+    }
+    // Convert YYYY-MM-DD (e.g. 2026-10-25) -> DD.MM.YYYY (25.10.2026) so it is compact and readable
+    val isoRegex = Regex("""^(\d{4})-(\d{2})-(\d{2})$""")
+    val match = isoRegex.matchEntire(trimmed)
+    if (match != null) {
+        val (year, month, day) = match.destructured
+        return "$day.$month.$year"
+    }
+    return trimmed
+}
+
 @Composable
 fun SoftwareServiceDetailSection(product: ProductItem) {
     val context = LocalContext.current
+    val isDark = AppPreferencesManager.isDarkMode
+    val formattedVerifiedDate = remember(product.lastVerifiedAt) {
+        formatVerifiedDateBadge(product.lastVerifiedAt)
+    }
 
     if (SoftwareCatalogData.isDigitalSoftwareService(product)) {
         Surface(
@@ -266,38 +285,64 @@ fun SoftwareServiceDetailSection(product: ProductItem) {
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Header: ოფიციალური სპეციფიკაცია და გადამოწმების თარიღი
+                // Header: ოფიციალური სპეციფიკაცია და გადამოწმების თარიღი (ერთ ხაზზე, გადატანის გარეშე)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             Icons.Default.Verified,
                             contentDescription = null,
                             tint = Color(0xFFFF7A00),
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            "სერვისის სრული პარამეტრები",
+                            text = "სერვისის სრული პარამეტრები",
                             color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = 12.5.sp,
+                            lineHeight = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF1E2634)
-                    ) {
-                        Text(
-                            "განახლდა: ${product.lastVerifiedAt.ifBlank { "2026-10-25" }}",
-                            color = Color(0xFF4ADE80),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDark) Color(0xFF182420) else Color(0xFFDCFCE7),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isDark) Color(0xFF234233) else Color(0xFF86EFAC)
                         )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A))
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "განახლდა: $formattedVerifiedDate",
+                                color = if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D),
+                                fontSize = 9.5.sp,
+                                lineHeight = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 }
 
@@ -315,28 +360,55 @@ fun SoftwareServiceDetailSection(product: ProductItem) {
                         if (product.subcategory.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
                             ) {
                                 Text("კატეგორია:", color = Color(0xFFA0A5B0), fontSize = 11.5.sp)
-                                Text(product.subcategory, color = Color(0xFFFF7A00), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = product.subcategory,
+                                    color = Color(0xFFFF7A00),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                         if (product.offerType.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
                             ) {
                                 Text("გეგმის ტიპი:", color = Color(0xFFA0A5B0), fontSize = 11.5.sp)
-                                Text(product.offerType, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = product.offerType,
+                                    color = Color.White,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                         if (product.duration.isNotBlank()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
                             ) {
                                 Text("ხანგრძლივობა:", color = Color(0xFFA0A5B0), fontSize = 11.5.sp)
-                                Text(product.duration, color = Color(0xFF4ADE80), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = product.duration,
+                                    color = Color(0xFF4ADE80),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                                    modifier = Modifier.weight(1f)
+                                )
                             }
                         }
                         if (product.accountType.isNotBlank()) {
@@ -709,7 +781,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "Google FRP (Factory Reset Protection) ბლოკი",
                     issueCategory = "პროგრამული (Software)",
-                    confidence = "99.2% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "45 ₾",
                     estimatedTime = "10-20 წუთი",
                     primaryCause = "ქარხნული გადატვირთვის შემდეგ გააქტიურდა Google-ის უსაფრთხოების ბლოკი, რადგან წინა ანგარიშის პაროლი არ იქნა შეყვანილი.",
@@ -728,7 +800,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "iCloud Activation Lock / Apple ID ბლოკი",
                     issueCategory = "პროგრამული (Software)",
-                    confidence = "98.5% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "90 ₾ - 120 ₾",
                     estimatedTime = "20-35 წუთი",
                     primaryCause = "Apple მოწყობილობა დაკავშირებულია წინა მფლობელის iCloud ანგარიშთან და Find My iPhone გააქტიურებულია.",
@@ -747,7 +819,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "ოპერატორის ქსელური ბლოკი (Carrier / SIM Lock)",
                     issueCategory = "პროგრამული (Software)",
-                    confidence = "97.8% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "60 ₾ - 75 ₾",
                     estimatedTime = "12-24 სთ (სერვერული)",
                     primaryCause = "საზღვარგარეთ შეძენილი ტელეფონი მიბმულია კონკრეტულ ოპერატორზე (AT&T, T-Mobile, Docomo, Vodafone) და არ იღებს ქართულ სიმ-ბარათს.",
@@ -765,7 +837,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "სისტემური კოლაფსი (Bootloop / Firmware Corruption)",
                     issueCategory = "პროგრამული (Software)",
-                    confidence = "96.5% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "35 ₾ - 55 ₾",
                     estimatedTime = "25-35 წუთი",
                     primaryCause = "დაზიანდა Android/iOS სისტემური დანაყოფი (Boot/System Partition), წარუმატებელი განახლების ან მეხსიერების გადავსების გამო.",
@@ -784,7 +856,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "Authorized EDL 9008 სერვერული ფლეშინგი",
                     issueCategory = "პროგრამული (Software)",
-                    confidence = "99.0% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "55 ₾",
                     estimatedTime = "15-20 წუთი",
                     primaryCause = "მოწყობილობა ჩავარდნილია ღრმა აგურის რეჟიმში (Emergency Download Mode) და მოითხოვს მწარმოებლის ოფიციალურ სერვერულ ტოკენს.",
@@ -802,7 +874,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "OLED დისპლეის მატრიცის ფიზიკური დაზიანება",
                     issueCategory = "აპარატურული (Hardware)",
-                    confidence = "99.5% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "180 ₾ - 390 ₾",
                     estimatedTime = "25-35 წუთი",
                     primaryCause = "დარტყმის შედეგად დაზიანდა AMOLED/OLED მატრიცის ორგანული პიქსელების ფენა ან სენსორული შლეიფი.",
@@ -821,7 +893,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "ლითიუმ-იონური ელემენტის ქიმიური დეგრადაცია",
                     issueCategory = "აპარატურული (Hardware)",
-                    confidence = "98.7% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "75 ₾ - 110 ₾",
                     estimatedTime = "15-20 წუთი",
                     primaryCause = "ელემენტის ციკლების რაოდენობამ გადააჭარბა 500-ს (Health < 80%) ან გაჩნდა შიდა მიკრო-მოკლე ჩართვა.",
@@ -839,7 +911,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "Type-C / Lightning დამტენის პორტის კონტაქტების ცვეთა",
                     issueCategory = "აპარატურული (Hardware)",
-                    confidence = "97.5% სიზუსტე",
+                    confidence = "მაღალი ალბათობით სავარაუდო",
                     estimatedPrice = "55 ₾ - 85 ₾",
                     estimatedTime = "20-30 წუთი",
                     primaryCause = "მექანიკური ცვეთა, მტვრის დაპრესვა ან ტენიანობით გამოწვეული პინების დაჟანგვა.",
@@ -857,7 +929,7 @@ object DiagnosticsAiEngine {
                 DiagnosticAiReport(
                     title = "$brand $model - კომპლექსური დიაგნოსტიკა",
                     issueCategory = "კომპლექსური (Hardware & Software)",
-                    confidence = "95.0% სიზუსტე",
+                    confidence = "საჭიროებს გადამოწმებას",
                     estimatedPrice = "30 ₾ - 120 ₾",
                     estimatedTime = "20-40 წუთი",
                     primaryCause = "სიმპტომები მოითხოვს პროფესიონალურ შემოწმებას ტესტერითა და დიაგნოსტიკური პროგრამით.",

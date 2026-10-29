@@ -19,10 +19,16 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.shadow
@@ -36,9 +42,17 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -157,15 +171,8 @@ class MainActivity : ComponentActivity() {
     private val pendingDeepLinkIntent = mutableStateOf<Intent?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            splashScreen.setOnExitAnimationListener { splashScreenView ->
-                splashScreenView.remove()
-            }
-        }
         super.onCreate(savedInstanceState)
         AppPreferencesManager.init(this)
-        BekaNotificationManager.ensureNotificationChannels(this)
-        BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(this)
         if (savedInstanceState != null) {
             hasCompletedInitialLaunch = true
         }
@@ -194,7 +201,7 @@ class MainActivity : ComponentActivity() {
 }
 
 // ==============================================================================
-// ოფიციალური BEKASERVICE Seamless Icon-to-Splash Transition
+// ოფიციალური BEKASERVICE Seamless Launch Splash (Uniform Fade-In + Brand Wordmark)
 // ==============================================================================
 @Composable
 fun VideoSplashScreen(
@@ -204,20 +211,27 @@ fun VideoSplashScreen(
     var startAnim by remember { mutableStateOf(false) }
     var minTransitionDone by remember { mutableStateOf(false) }
 
+    val smoothFadeEasing = remember { androidx.compose.animation.core.CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f) }
+
+    val fadeAlpha by animateFloatAsState(
+        targetValue = if (startAnim) 1f else 0f,
+        animationSpec = tween(durationMillis = 680, easing = smoothFadeEasing),
+        label = "SplashUniformFadeAlpha"
+    )
     val scale by animateFloatAsState(
-        targetValue = if (startAnim) 1f else 0.62f,
-        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        targetValue = if (startAnim) 1f else 0.92f,
+        animationSpec = tween(durationMillis = 680, easing = smoothFadeEasing),
         label = "SplashIconExpandScale"
     )
     val glowAlpha by animateFloatAsState(
-        targetValue = if (startAnim) 0.16f else 0f,
-        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        targetValue = if (startAnim) 0.14f else 0f,
+        animationSpec = tween(durationMillis = 680, easing = smoothFadeEasing),
         label = "SplashGlowAlpha"
     )
 
     LaunchedEffect(Unit) {
         startAnim = true
-        delay(320L)
+        delay(950L)
         minTransitionDone = true
     }
 
@@ -230,37 +244,122 @@ fun VideoSplashScreen(
 
     // Fallback safety guard so initialization errors or slow network never block launch
     LaunchedEffect(Unit) {
-        delay(400L)
+        delay(1250L)
         hasCompletedInitialLaunch = true
         onFinish()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                hasCompletedInitialLaunch = true
-                onFinish()
-            }
-            .testTag("splash_screen_container"),
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.bekaservice_splash_logo),
-            contentDescription = "BEKASERVICE",
-            contentScale = ContentScale.Fit,
+    CompositionLocalProvider(LocalPreserveWhiteText provides true) {
+        Box(
             modifier = Modifier
-                .size(168.dp)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
+                .fillMaxSize()
+                .background(Color(0xFF0A0B0E))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    hasCompletedInitialLaunch = true
+                    onFinish()
                 }
-                .testTag("splash_logo_image")
-        )
+                .testTag("splash_screen_container"),
+            contentAlignment = Alignment.Center
+        ) {
+            // Subtle ambient warm radial light behind the logo lockup
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .graphicsLayer { alpha = glowAlpha }
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFFFF7A00),
+                                Color(0xFFFF7A00).copy(alpha = 0.25f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    )
+            )
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .graphicsLayer {
+                        alpha = fadeAlpha
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                    .testTag("splash_lockup_column")
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.bekaservice_splash_logo),
+                    contentDescription = "BEKASERVICE",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(30.dp))
+                        .testTag("splash_logo_image")
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier.testTag("splash_brand_text_container")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.testTag("splash_brand_title_row")
+                    ) {
+                        Text(
+                            text = "ბექა",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 25.sp,
+                            lineHeight = 26.sp,
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            style = TextStyle(
+                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                            )
+                        )
+                        Text(
+                            text = "სერვისი",
+                            color = Color(0xFFFF7A00),
+                            fontWeight = FontWeight.Black,
+                            fontSize = 25.sp,
+                            lineHeight = 26.sp,
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            style = TextStyle(
+                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                            )
+                        )
+                    }
+
+                    Text(
+                        text = "სანდო სერვისი",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 12.sp,
+                        lineHeight = 13.sp,
+                        letterSpacing = 0.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        softWrap = false,
+                        style = TextStyle(
+                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                        ),
+                        modifier = Modifier.testTag("splash_brand_subtitle")
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1091,7 +1190,10 @@ fun BekaServiceApp(
 
     LaunchedEffect(Unit) {
         AppPreferencesManager.init(context)
-        BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(context)
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            BekaNotificationManager.ensureNotificationChannels(context)
+            BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(context)
+        }
     }
 
     // Firestore რეპოზიტორი რეალური სინქრონიზაციისთვის
@@ -1104,7 +1206,6 @@ fun BekaServiceApp(
     }
 
     var latestBroadcastNotifications by remember {
-        BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(context, force = true)
         mutableStateOf(BekaNotificationManager.loadLocalNotificationHistory(context))
     }
     var isNotificationsLoading by remember { mutableStateOf(true) }
@@ -1224,15 +1325,17 @@ fun BekaServiceApp(
 
     LaunchedEffect(Unit) {
         try {
-            BekaNotificationManager.ensureNotificationChannels(context)
-            val existing = AuthAndOrderManager.getCurrentUser(context)
-            if (existing == null) {
-                AuthAndOrderManager.attemptAutoSignIn(context)
-            } else {
-                AuthAndOrderManager.refreshCurrentUserFromCloud(context)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                BekaNotificationManager.ensureNotificationChannels(context)
+                val existing = AuthAndOrderManager.getCurrentUser(context)
+                if (existing == null && AppPreferencesManager.isOnboardingCompleted) {
+                    AuthAndOrderManager.attemptAutoSignIn(context)
+                } else if (existing != null) {
+                    AuthAndOrderManager.refreshCurrentUserFromCloud(context)
+                }
+                BekaNotificationManager.syncFcmTokenAndSubscribeTopic(context, firestoreRepo)
+                firestoreRepo?.performSafeInitialMigrationIfNeeded(context)
             }
-            BekaNotificationManager.syncFcmTokenAndSubscribeTopic(context, firestoreRepo)
-            firestoreRepo?.performSafeInitialMigrationIfNeeded(context)
         } catch (e: Exception) {
             android.util.Log.e("BekaService", "Auth/Migration init error", e)
         } finally {
@@ -1240,8 +1343,10 @@ fun BekaServiceApp(
         }
     }
 
-    LaunchedEffect(showSplash) {
-        if (!showSplash && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+    val isOnboardingCompleted = AppPreferencesManager.isOnboardingCompleted
+
+    LaunchedEffect(showSplash, isOnboardingCompleted) {
+        if (!showSplash && isOnboardingCompleted && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (!BekaNotificationManager.hasNotificationPermission(context) &&
                 !BekaNotificationManager.wasPermissionPrompted(context)
             ) {
@@ -1273,6 +1378,7 @@ fun BekaServiceApp(
         if (targetProdId > 0 || targetTab in 0..7) {
             hasCompletedInitialLaunch = true
             showSplash = false
+            AppPreferencesManager.setOnboardingCompleted(context, true)
             if (targetTab in 0..7) {
                 selectedTab = targetTab
             }
@@ -1374,20 +1480,24 @@ fun BekaServiceApp(
             firestoreRepo?.let { repo ->
                 registration = repo.listenToProductsWithChanges(
                     onSnapshotUpdated = { syncSnapshot ->
-                        val merged = AdminStorage.mergeCloudWithLocal(
-                            context = context,
-                            cloudProducts = syncSnapshot.products,
-                            removedProductIds = syncSnapshot.removedProductIds,
-                            presentCloudDocIds = syncSnapshot.presentDocIds
-                        )
-                        if (productsList.toList() != merged) {
-                            productsList.clear()
-                            productsList.addAll(merged)
+                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            val merged = AdminStorage.mergeCloudWithLocal(
+                                context = context,
+                                cloudProducts = syncSnapshot.products,
+                                removedProductIds = syncSnapshot.removedProductIds,
+                                presentCloudDocIds = syncSnapshot.presentDocIds
+                            )
+                            AdminStorage.saveProductsFromCloud(context, merged)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                if (productsList.toList() != merged) {
+                                    productsList.clear()
+                                    productsList.addAll(merged)
+                                }
+                                if (selectedProductForDetail != null) {
+                                    selectedProductForDetail = merged.find { it.id == selectedProductForDetail?.id }
+                                }
+                            }
                         }
-                        if (selectedProductForDetail != null) {
-                            selectedProductForDetail = merged.find { it.id == selectedProductForDetail?.id }
-                        }
-                        AdminStorage.saveProductsFromCloud(context, merged)
                     },
                     onError = { errMsg ->
                         android.util.Log.w("BekaService", "Products listener error: $errMsg")
@@ -1403,7 +1513,9 @@ fun BekaServiceApp(
     }
 
     // უკან ღილაკის მართვა ქვე-გვერდებიდან, Drawer-იდან და Splash-დან
-    BackHandler(enabled = drawerState.isOpen || showSplash || isAdminOpen || showAdminPanelScreen || selectedProductForDetail != null || selectedTab != 0) {
+    BackHandler(
+        enabled = showSplash || (isOnboardingCompleted && (drawerState.isOpen || isAdminOpen || showAdminPanelScreen || selectedProductForDetail != null || selectedTab != 0))
+    ) {
         if (drawerState.isOpen) {
             coroutineScope.launch { drawerState.close() }
         } else if (showSplash) {
@@ -1420,28 +1532,43 @@ fun BekaServiceApp(
         }
     }
 
+    val appLaunchStage = when {
+        showSplash -> 0
+        !isOnboardingCompleted -> 1
+        else -> 2
+    }
+
     AnimatedContent(
-        targetState = showSplash,
+        targetState = appLaunchStage,
         transitionSpec = {
             fadeIn(animationSpec = tween(240, easing = FastOutSlowInEasing))
                 .togetherWith(fadeOut(animationSpec = tween(220, easing = FastOutSlowInEasing)))
         },
-        label = "SplashAppTransition"
-    ) { isSplash ->
-        if (isSplash) {
-            VideoSplashScreen(
-                isAppReady = isEssentialInitReady,
-                onFinish = {
-                    hasCompletedInitialLaunch = true
-                    showSplash = false
-                }
-            )
-        } else {
-            val isDark = AppPreferencesManager.isDarkMode
-            val scaffoldBgColor = AppThemeColorAdapter.adaptPageBackground(Color(0xFF121212))
-            val topBarBgColor = if (isDark) Color(0xFF12141A).copy(alpha = 0.92f) else Color(0xFFFFFFFF).copy(alpha = 0.94f)
+        label = "SplashOnboardingAppTransition"
+    ) { stage ->
+        when (stage) {
+            0 -> {
+                VideoSplashScreen(
+                    isAppReady = isEssentialInitReady,
+                    onFinish = {
+                        hasCompletedInitialLaunch = true
+                        showSplash = false
+                    }
+                )
+            }
+            1 -> {
+                BekaOnboardingFlow(
+                    onFinishOnboarding = {
+                        AppPreferencesManager.setOnboardingCompleted(context, true)
+                    }
+                )
+            }
+            else -> {
+                val isDark = AppPreferencesManager.isDarkMode
+                val scaffoldBgColor = AppThemeColorAdapter.adaptPageBackground(Color(0xFF121212))
+                val topBarBgColor = if (isDark) Color(0xFF12141A).copy(alpha = 0.92f) else Color(0xFFFFFFFF).copy(alpha = 0.94f)
 
-            ModalNavigationDrawer(
+                ModalNavigationDrawer(
                 drawerState = drawerState,
                 // პირველ გვერდზე (selectedTab == 0) სლაიდით გახსნა/დახურვა ჩართულია, ასევე ღია მენიუს დახურვა სლაიდით ყველგან მუშაობს
                 gesturesEnabled = (selectedTab == 0 && selectedProductForDetail == null && !showAdminPanelScreen && !isAdminOpen) || drawerState.isOpen,
@@ -1536,7 +1663,38 @@ fun BekaServiceApp(
                                 onToggleFavorite = handleToggleFavorite,
                                 onOpenDiagnostics = { selectedTab = 2 },
                                 onOpenAiChat = { selectedTab = 3 },
-                                onOpenCatalogTab = { selectedTab = 1 }
+                                onOpenCatalogTab = { selectedTab = 1 },
+                                onRefreshCatalog = {
+                                    withContext(Dispatchers.IO) {
+                                        try {
+                                            val cloudResult = firestoreRepo?.fetchProductsOnce()
+                                            val cloudProds = cloudResult?.getOrNull()
+                                            if (!cloudProds.isNullOrEmpty()) {
+                                                val merged = AdminStorage.mergeCloudWithLocal(
+                                                    context = context,
+                                                    cloudProducts = cloudProds
+                                                )
+                                                AdminStorage.saveProductsFromCloud(context, merged)
+                                                withContext(Dispatchers.Main) {
+                                                    productsList.clear()
+                                                    productsList.addAll(merged)
+                                                }
+                                            } else {
+                                                val localReloaded = AdminStorage.loadProducts(context)
+                                                withContext(Dispatchers.Main) {
+                                                    productsList.clear()
+                                                    productsList.addAll(localReloaded)
+                                                }
+                                            }
+                                        } catch (_: Exception) {
+                                            val localReloaded = AdminStorage.loadProducts(context)
+                                            withContext(Dispatchers.Main) {
+                                                productsList.clear()
+                                                productsList.addAll(localReloaded)
+                                            }
+                                        }
+                                    }
+                                }
                             )
                             1 -> CatalogScreen(
                                 contentPadding = screenScrollPadding,
@@ -1787,8 +1945,9 @@ fun BekaServiceApp(
                     onClose = { showAdminPanelScreen = false }
                 )
             }
-        }
-    }
+                }
+            }
+            }
         }
     }
 }
@@ -1992,20 +2151,11 @@ fun ProductDetailModalWindow(
                                     .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
                                     .border(1.dp, AppThemeColorAdapter.dividerColor(Color(0xFF282F3A)), RoundedCornerShape(16.dp))
                             ) {
-                                if (isDigitalSoftware) {
-                                    SoftwareBrandVisualHeader(
-                                        product = product,
-                                        modifier = Modifier.fillMaxSize(),
-                                        compact = false
-                                    )
-                                } else {
-                                    AsyncImage(
-                                        model = product.imageUrl,
-                                        contentDescription = product.title,
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
+                                ProductSmartVisual(
+                                    product = product,
+                                    modifier = Modifier.fillMaxSize(),
+                                    compact = false
+                                )
 
                                 // გულის ღილაკი
                                 Surface(
@@ -2308,13 +2458,7 @@ fun ProductDetailModalWindow(
                                         .weight(1f)
                                         .height(44.dp)
                                         .clickable(enabled = product.inStock) {
-                                            val extraInfo = if (isDigitalSoftware) {
-                                                "\nპაკეტი: ${product.offerType}\nხანგრძლივობა: ${product.duration}"
-                                            } else {
-                                                " ($selectedQuality)"
-                                            }
-                                            val msg = "გამარჯობა BEKASERVICE! მსურს შეკვეთა:\n${product.title}$extraInfo\nფასი: $currentPrice"
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/share/url?url=&text=${Uri.encode(msg)}"))
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/geounlock"))
                                             context.startActivity(intent)
                                         }
                                 ) {
@@ -2396,10 +2540,13 @@ fun HomeScreen(
     onOpenDiagnostics: () -> Unit,
     onOpenAiChat: () -> Unit,
     onOpenCatalogTab: () -> Unit,
+    onRefreshCatalog: suspend () -> Unit = {},
     contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    val refreshScope = rememberCoroutineScope()
     var selectedSubcategory by remember { mutableStateOf("ყველა") }
 
     // შეთავაზებების ბანერები AdminStorage-დან და Cloud Firestore-დან (ადმინ პანელიდან სრულად რედაქტირებადი)
@@ -2431,9 +2578,9 @@ fun HomeScreen(
         }
     }
 
-    // კატეგორიები
-    val categories = remember {
-        listOf(
+    // კატეგორიები (მოიცავს როგორც სტანდარტულ, ისე ადმინის/AI-ის მიერ დამატებულ კატეგორიებს)
+    val categories = remember(products) {
+        val basePairs = listOf(
             Pair("ყველა", "🔥"),
             Pair("პროგრამული სერვისები", "💻"),
             Pair("ეკრანები", "📱"),
@@ -2443,15 +2590,28 @@ fun HomeScreen(
             Pair("დამტენის პორტები", "🔌"),
             Pair("კორპუსები", "🛠️")
         )
+        val existingNames = basePairs.map { it.first }.toSet()
+        val customPairs = products
+            .map { it.category.trim() }
+            .filter { it.isNotBlank() && it !in existingNames }
+            .distinct()
+            .map { Pair(it, "✨") }
+        basePairs + customPairs
     }
 
     // ოპტიმიზებული საძიებო ფილტრი (ყოველთვის იყენებს განახლებულ products სიას)
-    val filteredProducts = optimizeSearchFilter(products, searchQuery, selectedCategory, "ყველა", "default", selectedSubcategory)
-    val productRows = filteredProducts.chunked(2)
-    val allSoftwareServices = products.filter {
-        SoftwareCatalogData.isDigitalSoftwareService(it) || it.category == "პროგრამული სერვისები"
+    val filteredProducts = remember(products, searchQuery, selectedCategory, selectedSubcategory) {
+        optimizeSearchFilter(products, searchQuery, selectedCategory, "ყველა", "default", selectedSubcategory)
     }
-    val featuredSoftwareProducts = run {
+    val productRows = remember(filteredProducts) {
+        filteredProducts.chunked(2)
+    }
+    val allSoftwareServices = remember(products) {
+        products.filter {
+            SoftwareCatalogData.isDigitalSoftwareService(it) || it.category == "პროგრამული სერვისები"
+        }
+    }
+    val featuredSoftwareProducts = remember(products, allSoftwareServices) {
         val explicitlyFeatured = allSoftwareServices
             .filter { it.isFeatured }
             .sortedWith(compareBy<ProductItem> { if (it.displayOrder > 0) it.displayOrder else Int.MAX_VALUE }.thenBy { it.id })
@@ -2464,17 +2624,131 @@ fun HomeScreen(
     }
     val listState = rememberLazyListState()
 
-    LazyColumn(
-        state = listState,
+    // =========================================================================
+    // Pull-to-Refresh მექანიზმი ჩამოთრევის დონის პროპორციული ანიმაციით
+    // =========================================================================
+    val pullThresholdPx = remember(density) { with(density) { 84.dp.toPx() } }
+    val maxPullPx = remember(density) { with(density) { 150.dp.toPx() } }
+    val refreshingHoldPx = remember(density) { with(density) { 70.dp.toPx() } }
+
+    var rawPullDistancePx by remember { mutableFloatStateOf(0f) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var isRefreshCompleted by remember { mutableStateOf(false) }
+
+    val pullProgress = remember(rawPullDistancePx, pullThresholdPx) {
+        (rawPullDistancePx / pullThresholdPx).coerceIn(0f, 1.35f)
+    }
+
+    val pullRefreshNestedScrollConnection = remember(listState, pullThresholdPx, maxPullPx, refreshingHoldPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // როცა მომხმარებელს ჩამოწეული აქვს და თითს ისევ ზემოთ აბრუნებს გაშვებამდე
+                if (available.y < 0f && rawPullDistancePx > 0f && !isRefreshing) {
+                    val consumedY = available.y.coerceAtLeast(-rawPullDistancePx)
+                    rawPullDistancePx = (rawPullDistancePx + consumedY).coerceAtLeast(0f)
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                // როცა სია თავშია და მომხმარებელი ქვემოთ ქაჩავს (ჩამოთრევა)
+                if (source == NestedScrollSource.UserInput &&
+                    available.y > 0f &&
+                    !isRefreshing &&
+                    listState.firstVisibleItemIndex == 0 &&
+                    listState.firstVisibleItemScrollOffset == 0
+                ) {
+                    val resistanceRatio = (rawPullDistancePx / maxPullPx).coerceIn(0f, 1f)
+                    val dragMultiplier = 0.54f * (1f - resistanceRatio * 0.44f)
+                    rawPullDistancePx = (rawPullDistancePx + available.y * dragMultiplier).coerceIn(0f, maxPullPx)
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (rawPullDistancePx > 0f && !isRefreshing) {
+                    if (rawPullDistancePx >= pullThresholdPx) {
+                        isRefreshing = true
+                        isRefreshCompleted = false
+                        refreshScope.launch {
+                            animate(
+                                initialValue = rawPullDistancePx,
+                                targetValue = refreshingHoldPx,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ) { value, _ ->
+                                rawPullDistancePx = value
+                            }
+                            banners = AdminStorage.getHomeBanners(context)
+                            onRefreshCatalog()
+                            delay(700L)
+                            isRefreshCompleted = true
+                            delay(380L)
+                            isRefreshing = false
+                            isRefreshCompleted = false
+                            animate(
+                                initialValue = rawPullDistancePx,
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ) { value, _ ->
+                                rawPullDistancePx = value
+                            }
+                        }
+                        return available
+                    } else {
+                        val startPx = rawPullDistancePx
+                        refreshScope.launch {
+                            animate(
+                                initialValue = startPx,
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
+                                )
+                            ) { value, _ ->
+                                rawPullDistancePx = value
+                            }
+                        }
+                    }
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    val contentPullShiftDp = with(density) { (rawPullDistancePx * 0.68f).toDp() }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = contentPadding
+            .nestedScroll(pullRefreshNestedScrollConnection)
+            .testTag("home_pull_refresh_container")
     ) {
-        // 1. საძიებო ველი (Glassmorphism Frosted Search Bar & Smooth Transition)
-        item {
-            val isDark = AppPreferencesManager.isDarkMode
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp)
+                .graphicsLayer {
+                    translationY = rawPullDistancePx * 0.68f
+                },
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = contentPadding
+        ) {
+            // 1. საძიებო ველი (Glassmorphism Frosted Search Bar & Smooth Transition)
+            item {
+                val isDark = AppPreferencesManager.isDarkMode
             val isSearchActive = searchQuery.isNotEmpty()
             val searchBorderColor by animateColorAsState(
                 targetValue = if (isSearchActive) Color(0xFFFF7A00) else if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1),
@@ -3205,6 +3479,238 @@ fun HomeScreen(
             }
         }
     }
+
+        // Pull-to-Refresh ანიმირებული ინდიკატორი (მოძრაობს ჩამოთრევის დონის შესაბამისად)
+        if (rawPullDistancePx > 1f || isRefreshing) {
+            BekaPullToRefreshIndicator(
+                pullProgress = pullProgress,
+                rawPullDistancePx = rawPullDistancePx,
+                isRefreshing = isRefreshing,
+                isRefreshCompleted = isRefreshCompleted,
+                topInsetPadding = contentPadding.calculateTopPadding(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .testTag("home_pull_refresh_indicator")
+            )
+        }
+    }
+}
+
+@Composable
+fun BekaPullToRefreshIndicator(
+    pullProgress: Float,
+    rawPullDistancePx: Float,
+    isRefreshing: Boolean,
+    isRefreshCompleted: Boolean,
+    topInsetPadding: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    val isDark = AppPreferencesManager.isDarkMode
+    val density = LocalDensity.current
+
+    val clampedProgress = pullProgress.coerceIn(0f, 1f)
+    val isReadyToRefresh = pullProgress >= 1f
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pullRefreshInfinite")
+    val spinAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 760, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pullRefreshSpinAngle"
+    )
+    val pulseGlow by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 620, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pullRefreshPulse"
+    )
+
+    val readyScale by animateFloatAsState(
+        targetValue = when {
+            isRefreshCompleted -> 1.06f
+            isRefreshing -> 1.0f
+            isReadyToRefresh -> 1.04f
+            else -> (0.68f + clampedProgress * 0.32f).coerceIn(0.68f, 1.0f)
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "pullRefreshScale"
+    )
+
+    // ინდიკატორი ჩამოდის ჩამოთრევის დონის პროპორციულად
+    val indicatorSlideDp = with(density) { (rawPullDistancePx * 0.42f).toDp().coerceAtMost(44.dp) }
+    val indicatorAlpha = (clampedProgress * 1.45f).coerceIn(0f, 1f)
+
+    val accentColor = when {
+        isRefreshCompleted -> Color(0xFF4ADE80)
+        isReadyToRefresh || isRefreshing -> Color(0xFFFF6A00)
+        else -> Color(0xFFFF8533)
+    }
+
+    val containerBg = if (isDark) {
+        Color(0xFF141821).copy(alpha = 0.95f)
+    } else {
+        Color(0xFFFFFFFF).copy(alpha = 0.97f)
+    }
+
+    val borderColor = when {
+        isRefreshCompleted -> Color(0xFF4ADE80).copy(alpha = 0.75f)
+        isReadyToRefresh || isRefreshing -> Color(0xFFFF6A00).copy(alpha = 0.80f)
+        isDark -> Color(0xFF2D3546)
+        else -> Color(0xFFCBD5E1)
+    }
+
+    Box(
+        modifier = modifier
+            .padding(top = topInsetPadding + 4.dp)
+            .offset(y = indicatorSlideDp - 18.dp)
+            .graphicsLayer {
+                alpha = indicatorAlpha
+                scaleX = readyScale
+                scaleY = readyScale
+            }
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = containerBg,
+            border = androidx.compose.foundation.BorderStroke(1.2.dp, borderColor),
+            shadowElevation = if (isDark) 10.dp else 6.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // ორბიტალური რგოლი + ცენტრალური ხატულა, რომელიც ბრუნავს ჩამოთრევის დონის შესაბამისად
+                Box(
+                    modifier = Modifier.size(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val strokeW = 2.6.dp.toPx()
+                        val radius = (size.minDimension - strokeW) / 2f
+                        val centerOffset = Offset(size.width / 2f, size.height / 2f)
+
+                        // 1. ფონური ტრეკი
+                        drawCircle(
+                            color = accentColor.copy(alpha = if (isDark) 0.16f else 0.14f),
+                            radius = radius,
+                            center = centerOffset,
+                            style = Stroke(width = strokeW)
+                        )
+
+                        // 2. 8 ორბიტალური წერტილი, რომლებიც ინთება ჩამოთრევის დონის ზრდასთან ერთად
+                        val totalTicks = 8
+                        val activeTicks = if (isRefreshing || isRefreshCompleted) {
+                            totalTicks
+                        } else {
+                            (clampedProgress * totalTicks).toInt()
+                        }
+                        for (i in 0 until totalTicks) {
+                            val angleRad = Math.toRadians((i * (360.0 / totalTicks)) - 90.0)
+                            val dotX = centerOffset.x + (radius * 0.72f * kotlin.math.cos(angleRad)).toFloat()
+                            val dotY = centerOffset.y + (radius * 0.72f * kotlin.math.sin(angleRad)).toFloat()
+                            val isTickActive = i < activeTicks
+                            drawCircle(
+                                color = if (isTickActive) accentColor.copy(alpha = 0.85f * pulseGlow) else accentColor.copy(alpha = 0.15f),
+                                radius = if (isTickActive) 1.5.dp.toPx() else 1.dp.toPx(),
+                                center = Offset(dotX, dotY)
+                            )
+                        }
+
+                        // 3. პროგრესის რკალი (იზრდება ჩამოთრევის დონის მიხედვით ან ბრუნავს განახლებისას)
+                        val startAngle = if (isRefreshing && !isRefreshCompleted) spinAngle - 90f else -90f
+                        val sweepAngle = when {
+                            isRefreshCompleted -> 360f
+                            isRefreshing -> 250f
+                            else -> (clampedProgress * 330f).coerceIn(8f, 330f)
+                        }
+                        drawArc(
+                            color = accentColor,
+                            startAngle = startAngle,
+                            sweepAngle = sweepAngle,
+                            useCenter = false,
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                    }
+
+                    // ცენტრალური ხატულა (ბრუნავს ჩამოთრევის პროპორციულად: pullProgress * 240°)
+                    val iconRotation = when {
+                        isRefreshCompleted -> 0f
+                        isRefreshing -> spinAngle
+                        else -> pullProgress * 240f
+                    }
+                    Icon(
+                        imageVector = if (isRefreshCompleted) Icons.Default.Check else Icons.Default.Refresh,
+                        contentDescription = "Refresh",
+                        tint = accentColor,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .graphicsLayer {
+                                rotationZ = iconRotation
+                            }
+                    )
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = when {
+                            isRefreshCompleted -> "განახლდა წარმატებით!"
+                            isRefreshing -> "მიმდინარეობს განახლება..."
+                            isReadyToRefresh -> "გაუშვით განახლებისთვის ✨"
+                            else -> "ჩამოწიეთ განახლებისთვის • ${(clampedProgress * 100).toInt()}%"
+                        },
+                        color = when {
+                            isRefreshCompleted -> if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
+                            isReadyToRefresh || isRefreshing -> if (isDark) Color.White else Color(0xFF0F172A)
+                            isDark -> Color(0xFFE2E8F0)
+                            else -> Color(0xFF1E293B)
+                        },
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+
+                    // ჩამოთრევის დონის პროპორციული მიკრო-პროგრეს ზოლი
+                    Box(
+                        modifier = Modifier
+                            .width(136.dp)
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(if (isDark) Color(0xFF262D3B) else Color(0xFFE2E8F0))
+                    ) {
+                        val barFraction = if (isRefreshing || isRefreshCompleted) 1f else clampedProgress
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(barFraction)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = if (isRefreshCompleted) {
+                                            listOf(Color(0xFF22C55E), Color(0xFF4ADE80))
+                                        } else {
+                                            listOf(Color(0xFFFF6A00), Color(0xFFFFAE52))
+                                        }
+                                    )
+                                )
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ==============================================================================
@@ -3222,7 +3728,11 @@ fun CatalogScreen(
     onToggleFavorite: (ProductItem) -> Unit,
     contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
-    val categories = listOf("ყველა", "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები")
+    val baseCategories = listOf("ყველა", "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები")
+    val categories = remember(products) {
+        val dynamicCats = products.map { it.category.trim() }.filter { it.isNotBlank() }
+        (baseCategories + dynamicCats).distinct()
+    }
     var selectedBrand by remember { mutableStateOf("ყველა") }
     var selectedSubcategory by remember { mutableStateOf("ყველა") }
     var sortBy by remember { mutableStateOf("default") }
@@ -3233,7 +3743,9 @@ fun CatalogScreen(
         }
     }
 
-    val filteredProducts = optimizeSearchFilter(products, searchQuery, selectedCategory, selectedBrand, sortBy, selectedSubcategory)
+    val filteredProducts = remember(products, searchQuery, selectedCategory, selectedBrand, sortBy, selectedSubcategory) {
+        optimizeSearchFilter(products, searchQuery, selectedCategory, selectedBrand, sortBy, selectedSubcategory)
+    }
 
     val focusManager = LocalFocusManager.current
     val isDark = AppPreferencesManager.isDarkMode
@@ -3416,11 +3928,18 @@ fun CatalogScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (selectedCategory == "პროგრამული სერვისები") {
+                            val dynamicSubcats = remember(products) {
+                                val extra = products
+                                    .filter { it.category == "პროგრამული სერვისები" || it.type == "software" }
+                                    .map { it.subcategory.trim() }
+                                    .filter { it.isNotBlank() }
+                                (SoftwareCatalogData.softwareSubcategories + extra).distinct()
+                            }
                             LazyRow(
                                 modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                items(SoftwareCatalogData.softwareSubcategories) { subcat ->
+                                items(dynamicSubcats) { subcat ->
                                     val isSel = selectedSubcategory == subcat
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
@@ -3439,11 +3958,15 @@ fun CatalogScreen(
                                 }
                             }
                         } else {
+                            val brands = remember(products) {
+                                val baseBrands = listOf("ყველა", "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor")
+                                val extraBrands = products.map { it.brand.trim() }.filter { it.isNotBlank() }
+                                (baseBrands + extraBrands).distinct()
+                            }
                             LazyRow(
                                 modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                val brands = listOf("ყველა", "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor")
                                 items(brands) { brand ->
                                     val isSel = selectedBrand == brand
                                     Surface(
@@ -3507,7 +4030,7 @@ fun CatalogScreen(
     }
 
 // ==============================================================================
-// 4. სწრაფი დიაგნოსტიკა (Diagnostics Screen - Tab 2)
+// 4. AI დიაგნოსტიკის სამუშაო სივრცე (Diagnostics Screen - Tab 2)
 // ==============================================================================
 @Composable
 fun DiagnosticsScreen(
@@ -3515,255 +4038,11 @@ fun DiagnosticsScreen(
     products: List<ProductItem>,
     contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
-    val context = LocalContext.current
-    var selectedBrand by remember { mutableStateOf("Apple") }
-    var selectedModel by remember { mutableStateOf("iPhone 16 Pro Max") }
-    var selectedIssue by remember { mutableStateOf("ეკრანი გატეხილია") }
-
-    val brands = listOf("Apple", "Samsung", "Xiaomi", "Google Pixel")
-    val models = when (selectedBrand) {
-        "Apple" -> listOf("iPhone 16 Pro Max", "iPhone 16 Pro", "iPhone 15 Pro", "iPhone 14 Pro", "iPhone 13")
-        "Samsung" -> listOf("Galaxy S24 Ultra", "Galaxy S23 Ultra", "Galaxy S22", "Galaxy A54")
-        "Xiaomi" -> listOf("Xiaomi 14", "Xiaomi 13T", "Redmi Note 13 Pro")
-        else -> listOf("Pixel 8 Pro", "Pixel 7 Pro", "Pixel 6")
-    }
-
-    val issues = listOf(
-        Pair("ეკრანი გატეხილია", "📱"),
-        Pair("FRP ბლოკი (Google Account)", "🔓"),
-        Pair("iCloud ბლოკი / Apple ID", "🍏"),
-        Pair("ქსელის ბლოკი (SIM Lock)", "📶"),
-        Pair("Bootloop / არ ირთვება", "⚙️"),
-        Pair("Auth Flashing (EDL 9008)", "🔐"),
-        Pair("ელემენტი სწრაფად ჯდება", "🔋"),
-        Pair("არ იტენება / პორტი", "🔌"),
-        Pair("კამერა არ ფოკუსირებს", "📷"),
-        Pair("წყლის მოხვედრა", "💧")
-    )
-
-    // გამოთვლილი სავარაუდო ფასი და დრო
-    val estimateData = when (selectedIssue) {
-        "ეკრანი გატეხილია" -> Triple("180 ₾ - 390 ₾", "25-35 წუთი", "ორიგინალი OLED ეკრანის მოდული")
-        "FRP ბლოკი (Google Account)" -> Triple("40 ₾ - 50 ₾", "15-20 წუთი", "Google FRP Bypass & Knox გასუფთავება")
-        "iCloud ბლოკი / Apple ID" -> Triple("90 ₾ - 120 ₾", "20-35 წუთი", "Apple Server / Checkm8 Bypass")
-        "ქსელის ბლოკი (SIM Lock)" -> Triple("60 ₾ - 75 ₾", "12-24 საათი", "ოფიციალური Factory SIM Unlock")
-        "Bootloop / არ ირთვება" -> Triple("35 ₾ - 55 ₾", "20-30 წუთი", "ოფიციალური Stock ROM-ის ჩაწერა")
-        "Auth Flashing (EDL 9008)" -> Triple("50 ₾ - 60 ₾", "15-20 წუთი", "Xiaomi/Oppo/Realme სერვერული ავტორიზაცია")
-        "ელემენტი სწრაფად ჯდება" -> Triple("85 ₾ - 120 ₾", "15-20 წუთი", "ახალი ორიგინალი ელემენტი 100%")
-        "არ იტენება / პორტი" -> Triple("60 ₾ - 85 ₾", "20-30 წუთი", "Type-C დამტენის პორტის შლეიფი")
-        "კამერა არ ფოკუსირებს" -> Triple("140 ₾ - 220 ₾", "25-35 წუთი", "მთავარი კამერის OIS მოდული")
-        else -> Triple("50 ₾ - 150 ₾", "40-60 წუთი", "ულტრაბგერითი წმენდა და დიაგნოსტიკა")
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 14.dp),
+    DiagnosticsWorkspaceScreen(
         contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item {
-            Text("სწრაფი თვითდიაგნოსტიკა", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text("აირჩიე მოდელი და პრობლემა ზუსტი ფასის გასაგებად", color = Color(0xFFA0A5B0), fontSize = 12.sp)
-        }
-
-        // ნაბიჯი 1: ბრენდი
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF242830)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("1. აირჩიე ბრენდი", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        brands.forEach { brand ->
-                            val isSelected = selectedBrand == brand
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF121418),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        selectedBrand = brand
-                                        selectedModel = when (brand) {
-                                            "Apple" -> "iPhone 16 Pro Max"
-                                            "Samsung" -> "Galaxy S24 Ultra"
-                                            "Xiaomi" -> "Xiaomi 14"
-                                            else -> "Pixel 8 Pro"
-                                        }
-                                    }
-                            ) {
-                                Text(
-                                    brand,
-                                    color = if (isSelected) Color.White else Color(0xFFA0A5B0),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ნაბიჯი 2: მოდელი
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF242830)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("2. აირჩიე მოდელი", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(models) { model ->
-                            val isSelected = selectedModel == model
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Color(0x33FF6A00) else Color(0xFF121418),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630)),
-                                modifier = Modifier.clickable { selectedModel = model }
-                            ) {
-                                Text(
-                                    model,
-                                    color = if (isSelected) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ნაბიჯი 3: პრობლემა
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF242830)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("3. რა პრობლემა აქვს ტელეფონს?", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        issues.forEach { (issue, icon) ->
-                            val isSelected = selectedIssue == issue
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) Color(0x22FF6A00) else Color(0xFF121418),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedIssue = issue }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(icon, fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        issue,
-                                        color = if (isSelected) Color(0xFFFF6A00) else Color.White,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    if (isSelected) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFFFF6A00), modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // დიაგნოსტიკის შედეგი
-        item {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF191D24),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("დიაგნოსტიკის შედეგი", color = Color(0xFFFF7A00), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Surface(shape = RoundedCornerShape(4.dp), color = Color(0x334ADE80)) {
-                            Text("გარანტია 6 თვე", color = Color(0xFF4ADE80), fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                        }
-                    }
-
-                    Text("$selectedModel - $selectedIssue", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text("სავარაუდო ფასი", color = Color(0xFFA0A5B0), fontSize = 11.sp)
-                            Text(estimateData.first, color = Color(0xFFFF7A00), fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("სამუშაო დრო", color = Color(0xFFA0A5B0), fontSize = 11.sp)
-                            Text(estimateData.second, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Text("საჭირო ნაწილი: ${estimateData.third}", color = Color(0xFFA0A5B0), fontSize = 11.5.sp)
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Button(
-                        onClick = {
-                            val msg = "გამარჯობა ბექა! დიაგნოსტიკით გამოიკვეთა:\nმოდელი: $selectedModel\nპრობლემა: $selectedIssue\nმსურს სერვისზე ჩაწერა."
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/995598233332?text=${Uri.encode(msg)}"))
-                            context.startActivity(intent)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                    ) {
-                        Text("ჩაეწერე სერვისზე WhatsApp-ით 💬", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-                }
-            }
-        }
-
-        // 5. მიმაგრებული AI ასისტენტი (მაქსიმალური სიზუსტისთვის)
-        item {
-            AttachedAiDiagnosticsCard(
-                brand = selectedBrand,
-                model = selectedModel,
-                selectedIssue = selectedIssue,
-                onDirectOrderClick = { report ->
-                    val msg = "გამარჯობა ბექა! AI დიაგნოსტიკის შედეგი:\nმოდელი: $selectedBrand $selectedModel\nპრობლემა: ${report.title}\nფასი: ${report.estimatedPrice}\nმსურს სერვისზე ჩაწერა."
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/995598233332?text=${Uri.encode(msg)}"))
-                    context.startActivity(intent)
-                }
-            )
-        }
-    }
+        onProductClick = onProductClick,
+        products = products
+    )
 }
 
 // ==============================================================================
@@ -3807,20 +4086,11 @@ fun ProductPhotoCard(
                     .clip(RoundedCornerShape(10.dp))
                     .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
             ) {
-                if (isDigitalSoftware) {
-                    SoftwareBrandVisualHeader(
-                        product = product,
-                        modifier = Modifier.fillMaxSize(),
-                        compact = true
-                    )
-                } else {
-                    AsyncImage(
-                        model = product.imageUrl,
-                        contentDescription = product.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
+                ProductSmartVisual(
+                    product = product,
+                    modifier = Modifier.fillMaxSize(),
+                    compact = true
+                )
 
                 // Favorite Button
                 Surface(
@@ -3988,14 +4258,14 @@ fun ProductPhotoCard(
 // 6. Gemini AI დიაგნოსტიკური და პროგრამული კონსულტანტის სერვისი (BEKASERVICE Exclusive)
 // ==============================================================================
 object GeminiDiagnosticService {
-    private const val MODEL = "gemini-3.5-flash"
-    private val CANDIDATE_MODELS = listOf("gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest")
+    private const val MODEL = "gemini-2.5-flash"
+    private val CANDIDATE_MODELS = listOf("gemini-2.5-flash")
     private const val BASE_SYSTEM_INSTRUCTION = """
 შენ ხარ „ბექასერვისის“ (BEKASERVICE) ოფიციალური AI ტექნიკოს-ინჟინერი, დიაგნოსტიკოსი და ციფრული პროგრამული სერვისების კონსულტანტი.
-ესაუბრე მომხმარებელს ცოცხლად, პროფესიონალურად, ზუსტად და ადამიანურად ქართულ ენაზე.
+ესაუბრე მომხმარებელს ცოცხლად, პროფესიონალურად, ზუსტად და ადამიანურად ქართულ ენაზე (როგორც ChatGPT / Gemini).
 
 მნიშვნელოვანი წესები:
-1. არ გასცე ერთფეროვანი ან რობოტული შაბლონები! უპასუხე კონკრეტულ კითხვას რეალური კატალოგის მონაცემებზე დაყრდნობით.
+1. არ გასცე ერთფეროვანი ან რობოტული შაბლონები! უპასუხე კონკრეტულ კითხვას ზუსტად, გასაგებად და სრულყოფილად.
 2. შენ გაქვს წვდომა BEKASERVICE-ის სრულ LIVE კატალოგზე (პროგრამული სერვისები, განბლოკვა, ტელეფონის ნაწილები და შეკეთება).
 3. პროგრამულ სერვისებზე კითხვისას:
    - დაეყრდენი ქვემოთ მოცემულ LIVE კატალოგის მონაცემებს (ფასი, ხელმისაწვდომობა, ხანგრძლივობა, ანგარიშის ტიპი Private vs Shared, აქტივაციის პირობები).
@@ -4003,19 +4273,17 @@ object GeminiDiagnosticService {
    - თუ სერვისის ფასია „ფასი შეთანხმებით“, განუმარტე, რომ ზუსტი ტარიფი დამოკიდებულია არჩეულ ვადასა და აქტივაციის ტიპზე და შეუძლია პირდაპირ შეუკვეთოს აპიდან.
 4. აპარატურულ დიაგნოსტიკაზე კითხვისას:
    - ჩაატარე სიღრმისეული ტექნიკური ანალიზი (PMIC, Hydra/Tristar, True Tone EEPROM, BMS 0-ციკლი, OLED მატრიცა, UFS/eMMC, EDL 9008, Checkm8).
-5. უმკაცრესი წესი: არასდროს ახსენო სხვა სახელოსნო ან მაღაზია. მიუთითე მხოლოდ BEKASERVICE-ზე (ქ. ახალციხე, კოსტავას 10, WhatsApp: +995 598 23 33 32).
-6. კონკრეტული სერვისის ან პროდუქტის მოთხოვნისას (მაგალითად: „canva მინდა“, „canva pro“, „capcut“, „adobe“, „chatgpt“, ან ნებისმიერი სხვა კონკრეტული სერვისი თუ პროდუქტი):
-   - უპასუხე კონკრეტულად და პირდაპირ მხოლოდ მოთხოვნილ სერვისზე (მაგალითად Canva Pro-ზე)!
-   - ნუ ჩამოთვლი მთელ კატეგორიას (არ ჩამოთვალო CapCut, Adobe, YouTube, Spotify ერთად, თუ მომხმარებელს ისინი არ უთხოვია ან არ უკითხავს შედარება/მთელი კატეგორია).
-   - მიაწოდე ზუსტი ინფორმაცია ამ კონკრეტულ სერვისზე: ფასი, ვადა, პაკეტის ტიპი, მთავარი უპირატესობები, და განუმარტე რომ შეუძლია შეკვეთა პირდაპირ ქვემოთ მოცემული ბარათიდან.
-7. ახლად დამატებული სერვისები:
-   - ქვემოთ მოცემულ LIVE კატალოგში დინამიურად ემატება ადმინისტრატორის მიერ შეყვანილი ახალი სერვისები და ნაწილები. როცა მომხმარებელი იკითხავს მათზე, მოძებნე ისინი კატალოგში სათაურით, აღწერით ან საკვანძო სიტყვებით და ურჩიე ზუსტად.
+5. თუ მომხმარებელი გისვამს ზოგად ტექნიკურ ან ნებისმიერ სხვა კითხვას (რომელიც პირდაპირ არ ეხება კატალოგის პროდუქტს), მაინც ამომწურავად, ჭკვიანურად და სასარგებლოდ უპასუხე და დაეხმაროს მას!
+6. უმკაცრესი წესი: არასდროს ახსენო სხვა სახელოსნო ან მაღაზია. მიუთითე მხოლოდ BEKASERVICE-ზე (ქ. ახალციხე, კოსტავას 10, WhatsApp: +995 598 23 33 32).
+7. კონკრეტული სერვისის ან პროდუქტის მოთხოვნისას (მაგალითად: „canva მინდა“, „canva pro“, „capcut“, „adobe“, „chatgpt“, ან ნებისმიერი სხვა კონკრეტული სერვისი თუ პროდუქტი):
+   - უპასუხე კონკრეტულად და პირდაპირ მხოლოდ მოთხოვნილ სერვისზე!
 """
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(6, TimeUnit.SECONDS)
+        .writeTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(6, TimeUnit.SECONDS)
         .build()
 
     private fun buildDynamicCatalogContext(products: List<ProductItem>): String {
@@ -4539,12 +4807,13 @@ object GeminiDiagnosticService {
         // =========================================================================
         if (q.contains("სად ხართ") || q.contains("მისამართ") || q.contains("რომელ საათ") || q.contains("სად მდებარეობს") ||
             q.contains("ლოკაცია") || q.contains("ახალციხე") || q.contains("ტელეფონ") || q.contains("კონტაქტ") || q.contains("ნომერი") ||
-            q.contains("whatsapp") || q.contains("ვაცაპ")
+            q.contains("whatsapp") || q.contains("ვაცაპ") || q.contains("telegram") || q.contains("ტელეგრამ")
         ) {
             return "📍 **BEKASERVICE-ის საკონტაქტო მონაცემები:**\n\n" +
                     "• **მისამართი:** ქ. ახალციხე, მერაბ კოსტავას ქუჩა N10\n" +
                     "• ⏰ **სამუშაო საათები:** ყოველდღე 10:00 - 20:00 (შაბათ-კვირის ჩათვლით)\n" +
                     "• 📞 **ტელეფონი / WhatsApp:** +995 598 23 33 32\n" +
+                    "• ✈️ **Telegram:** t.me/geounlock\n" +
                     "• 💻 **ციფრული სერვისების ჩართვა:** დისტანციურად მთელი საქართველოს მასშტაბით 15-30 წუთში!\n" +
                     "• 🛡️ **გარანტია:** ყველა შესრულებულ სამუშაოსა და პროგრამულ პაკეტზე მოქმედებს BEKASERVICE-ის გარანტია."
         }
@@ -4983,20 +5252,11 @@ fun AiAssistantScreen(
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
                                             ) {
-                                                if (isSoft) {
-                                                    SoftwareBrandVisualHeader(
-                                                        product = prod,
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        compact = true
-                                                    )
-                                                } else {
-                                                    AsyncImage(
-                                                        model = prod.imageUrl,
-                                                        contentDescription = prod.title,
-                                                        modifier = Modifier.fillMaxSize(),
-                                                        contentScale = ContentScale.Crop
-                                                    )
-                                                }
+                                                ProductSmartVisual(
+                                                    product = prod,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    compact = true
+                                                )
                                             }
 
                                             Column(modifier = Modifier.weight(1f)) {
@@ -5331,20 +5591,11 @@ fun CartScreen(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
                                 ) {
-                                    if (isSoft) {
-                                        SoftwareBrandVisualHeader(
-                                            product = item.product,
-                                            modifier = Modifier.fillMaxSize(),
-                                            compact = true
-                                        )
-                                    } else {
-                                        AsyncImage(
-                                            model = item.product.imageUrl,
-                                            contentDescription = item.product.title,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    }
+                                    ProductSmartVisual(
+                                        product = item.product,
+                                        modifier = Modifier.fillMaxSize(),
+                                        compact = true
+                                    )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {

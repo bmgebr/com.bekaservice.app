@@ -1,11 +1,19 @@
 package com.example
 
 import android.content.Context
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.theme.RepairProTheme
 import kotlin.math.abs
@@ -30,6 +38,7 @@ class ExampleRobolectricTest {
   fun `header logo BEKASERVICE and subtitle are symmetric and vertically aligned with right action buttons`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     AppPreferencesManager.init(context)
+    AppPreferencesManager.setOnboardingCompleted(context, true)
     hasCompletedInitialLaunch = true
 
     composeTestRule.setContent {
@@ -554,6 +563,657 @@ class ExampleRobolectricTest {
     val unreadEmpty = BekaNotificationManager.getUnreadNotificationsCount(context, emptyList())
     assertEquals(0, unreadEmpty)
   }
-}
 
+  @Test
+  fun `onboarding flow appears on fresh install supports KA EN RU language persistence guest access and skips on returning launch`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    context.getSharedPreferences("bekaservice_ui_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_auth_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    AppPreferencesManager.init(context)
+    hasCompletedInitialLaunch = true
+
+    // 1. Fresh install state: onboarding is not completed and default language is Georgian (KA)
+    assertFalse(AppPreferencesManager.isOnboardingCompleted)
+    assertEquals(AppLanguage.KA, AppPreferencesManager.currentLanguage)
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        BekaServiceApp(
+          deepLinkIntent = null,
+          onDeepLinkConsumed = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 2. Screen 1 (Welcome) is displayed
+    composeTestRule.onNodeWithTag("onboarding_root_container").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_welcome_step").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_brand_logo").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_welcome_next_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    // 3. Screen 2 (Language selection) supports KA, EN, RU and persists choice
+    composeTestRule.onNodeWithTag("onboarding_language_step").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_lang_ru").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(AppLanguage.RU, AppPreferencesManager.currentLanguage)
+    assertEquals(
+      "ru",
+      context.getSharedPreferences("bekaservice_ui_prefs", Context.MODE_PRIVATE).getString("app_language_code", null)
+    )
+
+    composeTestRule.onNodeWithTag("onboarding_lang_en").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(AppLanguage.EN, AppPreferencesManager.currentLanguage)
+
+    composeTestRule.onNodeWithTag("onboarding_lang_ka").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(AppLanguage.KA, AppPreferencesManager.currentLanguage)
+
+    composeTestRule.onNodeWithTag("onboarding_language_next_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    // 4. Screen 3 (Auth or Guest) displays Google sign-in, Apple sign-in, Email option, and Skip as Guest
+    composeTestRule.onNodeWithTag("onboarding_auth_step").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_google_sign_in_button").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_apple_sign_in_button").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_email_auth_button").performScrollTo().assertIsDisplayed()
+
+    // Toggling Apple sign-in button expands the minimal glass Apple ID form panel
+    composeTestRule.onNodeWithTag("onboarding_apple_sign_in_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("onboarding_apple_form_panel").performScrollTo().assertIsDisplayed()
+
+    // Skip as Guest continues without creating a fake session
+    composeTestRule.onNodeWithTag("onboarding_skip_auth_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    // Guest access must NOT create a fake authenticated session
+    assertEquals(null, AuthAndOrderManager.getCurrentUser(context))
+
+    // 5. Screen 4 (Ready & Benefits) displays and finishes onboarding into the existing Home screen
+    composeTestRule.onNodeWithTag("onboarding_ready_step").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_finish_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    // 6. Verify onboarding completion is persisted and existing Home screen with Glassmorphism bars is shown
+    assertTrue(AppPreferencesManager.isOnboardingCompleted)
+    assertTrue(
+      context.getSharedPreferences("bekaservice_ui_prefs", Context.MODE_PRIVATE)
+        .getBoolean("onboarding_completed", false)
+    )
+    composeTestRule.onNodeWithTag("glassmorphic_top_app_bar_container").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("glassmorphic_bottom_nav_bar_container").assertIsDisplayed()
+  }
+
+  @Test
+  fun `splash screen renders logo with ბექასერვისი brand wordmark underneath and adaptive icon has 108dp safe zone dimensions`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Verify adaptive launcher foreground intrinsic size corresponds to 108dp (not 66dp stretched)
+    val density = context.resources.displayMetrics.density
+    val fgDrawable = context.getDrawable(R.drawable.ic_launcher_foreground)
+    assertNotNull(fgDrawable)
+    val expected108Px = (108f * density).toInt()
+    assertEquals("Foreground drawable intrinsic width must be 108dp", expected108Px.toFloat(), fgDrawable!!.intrinsicWidth.toFloat(), 2.0f)
+    assertEquals("Foreground drawable intrinsic height must be 108dp", expected108Px.toFloat(), fgDrawable.intrinsicHeight.toFloat(), 2.0f)
+
+    // 2. Verify VideoSplashScreen displays logo and "ბექასერვისი" below it with uniform fade-in and standard duration
+    hasCompletedInitialLaunch = false
+    var finished = false
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        VideoSplashScreen(
+          isAppReady = true,
+          onFinish = { finished = true }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    val logoNode = composeTestRule.onNodeWithTag("splash_logo_image", useUnmergedTree = true).assertIsDisplayed()
+    val brandTitleNode = composeTestRule.onNodeWithTag("splash_brand_title_row", useUnmergedTree = true).assertIsDisplayed()
+    val brandSubtitleNode = composeTestRule.onNodeWithTag("splash_brand_subtitle", useUnmergedTree = true).assertIsDisplayed()
+
+    val logoBounds = logoNode.fetchSemanticsNode().boundsInRoot
+    val brandTitleBounds = brandTitleNode.fetchSemanticsNode().boundsInRoot
+    val brandSubtitleBounds = brandSubtitleNode.fetchSemanticsNode().boundsInRoot
+
+    assertTrue("Brand wordmark ბექასერვისი must be positioned below the logo", brandTitleBounds.top > logoBounds.bottom)
+    assertTrue("Subtitle სანდო სერვისი must be positioned below ბექასერვისი", brandSubtitleBounds.top >= brandTitleBounds.bottom - 1f)
+    assertEquals("Logo and ბექასერვისი must be horizontally centered together", logoBounds.center.x, brandTitleBounds.center.x, 2.0f)
+
+    composeTestRule.mainClock.advanceTimeBy(1000L)
+    composeTestRule.waitForIdle()
+    assertTrue("Splash screen should complete after standard animation duration", finished)
+  }
+
+  @Test
+  fun `admin product dialog supports AI auto-fill, manual category and brand entry, and custom photo via URL or phone memory`() {
+    // 1. Verify ProductImageManager distinguishes auto-generated vs URL vs phone memory file
+    val autoProduct = ProductItem(
+      id = 301,
+      title = "PDF Pro ყოველთვიური გამოწერა",
+      price = "25 ₾",
+      category = "პროგრამული სერვისები",
+      type = "software",
+      imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+    )
+    assertFalse("Auto marker should use auto-generated visual", ProductImageManager.hasCustomAttachedPhoto(autoProduct))
+
+    val urlProduct = autoProduct.copy(imageUrl = "https://example.com/custom_pdf_banner.png")
+    assertTrue("Real URL should be recognized as custom attached photo", ProductImageManager.hasCustomAttachedPhoto(urlProduct))
+
+    val localMemoryProduct = autoProduct.copy(imageUrl = "file:///data/user/0/com.example/files/product_images/prod_img_123.jpg")
+    assertTrue("Phone memory file:// URI should be recognized as custom attached photo", ProductImageManager.hasCustomAttachedPhoto(localMemoryProduct))
+    assertTrue(ProductImageManager.isLocalOrEmbeddedImage(localMemoryProduct.imageUrl))
+
+    // 2. Verify ProductEditDialog UI: AI auto-fill button, custom photo URL input, and manual category/brand fields
+    var savedProduct: ProductItem? = null
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        ProductEditDialog(
+          product = autoProduct.copy(title = "Adobe Acrobat PDF Pro ყოველთვიური გამოწერა", shortDescription = ""),
+          isNew = true,
+          existingCategories = listOf("პროგრამული სერვისები", "ეკრანები"),
+          existingBrands = listOf("OpenAI", "Adobe", "Apple"),
+          onDismiss = {},
+          onSave = { savedProduct = it }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Click AI Auto-Fill button and wait for coroutine completion
+    composeTestRule.onNodeWithTag("ai_autofill_product_button").assertIsDisplayed().performClick()
+    composeTestRule.waitUntil(timeoutMillis = 15000L) {
+      composeTestRule.onAllNodesWithTag("ai_status_completed").fetchSemanticsNodes().isNotEmpty()
+    }
+    composeTestRule.waitForIdle()
+
+    // Switch photo mode to URL and attach a custom link (and verify gallery button is displayed)
+    composeTestRule.onNodeWithTag("product_edit_lazy_column")
+      .performScrollToNode(hasTestTag("photo_mode_url_button"))
+    composeTestRule.onNodeWithTag("photo_mode_gallery_button").assertIsDisplayed()
+    composeTestRule.onNodeWithText("გალერეა", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("photo_mode_url_button").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("product_edit_lazy_column")
+      .performScrollToNode(hasTestTag("product_image_url_input"))
+    composeTestRule.onNodeWithTag("product_image_url_input")
+      .performTextReplacement("https://example.com/real_acrobat_photo.jpg")
+    composeTestRule.waitForIdle()
+
+    // Manually enter a custom category and custom brand
+    composeTestRule.onNodeWithTag("product_edit_lazy_column")
+      .performScrollToNode(hasTestTag("custom_category_input"))
+    composeTestRule.onNodeWithTag("custom_category_input")
+      .performTextReplacement("PDF და საოფისე პროგრამები")
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("product_edit_lazy_column")
+      .performScrollToNode(hasTestTag("custom_brand_input"))
+    composeTestRule.onNodeWithTag("custom_brand_input")
+      .performTextReplacement("Adobe Systems")
+    composeTestRule.waitForIdle()
+
+    // Save the product
+    composeTestRule.onNodeWithTag("save_product_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    assertNotNull("Product must be saved when clicking შენახვა", savedProduct)
+    assertEquals("https://example.com/real_acrobat_photo.jpg", savedProduct!!.imageUrl)
+    assertEquals("PDF და საოფისე პროგრამები", savedProduct!!.category)
+    assertEquals("Adobe Systems", savedProduct!!.brand)
+    assertTrue("AI auto-fill must populate shortDescription", savedProduct!!.shortDescription.isNotBlank())
+    assertTrue("AI auto-fill must populate full description", savedProduct!!.description.isNotBlank())
+    assertTrue("AI auto-fill must populate features", savedProduct!!.features.isNotEmpty())
+  }
+
+  @Test
+  fun `gallery photo button is centered, software detail განახლდა badge stays on one line, and home pull-to-refresh animates with pull progress`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val sampleSoftwareProduct = ProductItem(
+      id = 117,
+      title = "Adobe Acrobat Pro ყოველთვიური გამოწერა",
+      price = "25 ₾",
+      category = "პროგრამული სერვისები",
+      type = "software",
+      subcategory = "ვიდეო, დიზაინი და კონტენტის შექმნა",
+      imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER,
+      offerType = "პრემიუმ გამოწერა (1 თვე)",
+      duration = "1 თვე",
+      lastVerifiedAt = "2026-10-25"
+    )
+
+    // 1. Verify SoftwareServiceDetailSection and BekaPullToRefreshIndicator together
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        androidx.compose.foundation.layout.Column {
+          SoftwareServiceDetailSection(product = sampleSoftwareProduct)
+          BekaPullToRefreshIndicator(
+            pullProgress = 0.65f,
+            rawPullDistancePx = 55f,
+            isRefreshing = false,
+            isRefreshCompleted = false,
+            topInsetPadding = 0.dp,
+            modifier = androidx.compose.ui.Modifier.testTag("home_pull_refresh_indicator")
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    val headerNode = composeTestRule.onNodeWithText("სერვისის სრული პარამეტრები").assertIsDisplayed()
+    val updatedBadgeNode = composeTestRule.onNodeWithText("განახლდა: 25.10.2026").assertIsDisplayed()
+
+    val headerBounds = headerNode.fetchSemanticsNode().boundsInRoot
+    val badgeBounds = updatedBadgeNode.fetchSemanticsNode().boundsInRoot
+
+    // Both the title and the განახლდა badge must be on a single line (equal 1-line height) and aligned on the same row
+    assertEquals(
+      "განახლდა badge must remain on a single line matching the 1-line header height",
+      headerBounds.height,
+      badgeBounds.height,
+      4.0f
+    )
+    assertEquals(
+      "განახლდა badge and header title must be vertically centered on the same row",
+      headerBounds.center.y,
+      badgeBounds.center.y,
+      4.0f
+    )
+    assertTrue(
+      "განახლდა badge must sit to the right of სერვისის სრული პარამეტრები",
+      badgeBounds.left >= headerBounds.right - 4f
+    )
+
+    // 2. Verify BekaPullToRefreshIndicator responds to pull progress
+    composeTestRule.onNodeWithTag("home_pull_refresh_indicator").assertIsDisplayed()
+    composeTestRule.onNodeWithText("ჩამოწიეთ განახლებისთვის • 65%").assertIsDisplayed()
+  }
+
+  @Test
+  fun `multimodal AI diagnostics workspace supports free-form Georgian conversation, image attachments, Standard and Technician modes, contextual actions, and session history`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    DiagnosticsSessionRepository.clearAllSessions(context)
+
+    val catalog = AdminStorage.loadProducts(context).take(10)
+    var holderRef: DiagnosticsWorkspaceStateHolder? = null
+
+    composeTestRule.setContent {
+      val scope = androidx.compose.runtime.rememberCoroutineScope()
+      val holder = androidx.compose.runtime.remember {
+        DiagnosticsWorkspaceStateHolder(context = context, coroutineScope = scope)
+      }
+      holderRef = holder
+      RepairProTheme(darkTheme = true) {
+        DiagnosticsWorkspaceScreen(
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 0.dp, bottom = 0.dp),
+          onProductClick = {},
+          products = catalog,
+          externalStateHolder = holder
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Verify initial workspace header & empty state (no mandatory brand/model/issue selector grid)
+    composeTestRule.onNodeWithTag("diagnostics_workspace_root").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_header_card").assertIsDisplayed()
+    composeTestRule.onNodeWithText("AI დიაგნოსტიკა").assertIsDisplayed()
+    composeTestRule.onNodeWithText("რა პრობლემა აქვს ტელეფონს?").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_mode_standard").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_mode_technician").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_attach_gallery_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_attach_camera_button").assertIsDisplayed()
+
+    // Starter prompts are dismissible
+    composeTestRule.onNodeWithTag("diag_empty_state")
+      .performScrollToNode(hasTestTag("diag_dismiss_starters_button"))
+    composeTestRule.onNodeWithTag("diag_dismiss_starters_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue("Starter prompts should be dismissed", holderRef!!.startersDismissed)
+
+    // 2. Test image attachment preview & removal before sending
+    val testBitmap = android.graphics.Bitmap.createBitmap(240, 480, android.graphics.Bitmap.Config.ARGB_8888)
+    for (y in 0 until 480) {
+      for (x in 110..130) {
+        testBitmap.setPixel(x, y, android.graphics.Color.rgb(0, 255, 40)) // Green vertical OLED line artifact
+      }
+    }
+
+    composeTestRule.runOnIdle {
+      holderRef!!.attachBitmapDirect(testBitmap, "oled_green_line.jpg")
+    }
+    composeTestRule.waitForIdle()
+
+    assertEquals(1, holderRef!!.pendingAttachments.size)
+    val firstAttId = holderRef!!.pendingAttachments.first().id
+    composeTestRule.onNodeWithTag("diag_attachment_preview_row").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("remove_attachment_$firstAttId").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue("Pending attachment must be removed when clicking X", holderRef!!.pendingAttachments.isEmpty())
+
+    // Re-attach the image and send a free-form Georgian diagnostic message
+    composeTestRule.runOnIdle {
+      holderRef!!.attachBitmapDirect(testBitmap, "iphone14pro_screen.jpg")
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("diag_message_input")
+      .performTextReplacement("iPhone 14 Pro დამივარდა და ეკრანზე მწვანე ზოლი გაჩნდა, ზარი გადის")
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("diag_send_button").assertIsDisplayed().performClick()
+    composeTestRule.waitUntil(timeoutMillis = 15000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 2
+    }
+    composeTestRule.waitForIdle()
+
+    // 3. Verify structured diagnostic response, visual inspection findings, and evidence confidence labels (no 99.5% claim)
+    assertEquals(2, holderRef!!.messages.size)
+    val firstAssistantMsg = holderRef!!.messages.last()
+    assertFalse(firstAssistantMsg.isUser)
+    assertNotNull(firstAssistantMsg.structuredSection)
+    assertTrue(
+      "Visual inspection findings must be populated when an image is attached",
+      firstAssistantMsg.structuredSection!!.visualInspectionFindings.isNotBlank()
+    )
+    assertTrue(
+      "Device identification must recognize iPhone 14 Pro",
+      firstAssistantMsg.structuredSection!!.deviceIdentification.contains("iPhone 14 Pro", ignoreCase = true)
+    )
+    assertFalse(
+      "Assistant response must NEVER contain fabricated 99.5% accuracy claims",
+      firstAssistantMsg.text.contains("99.5%")
+    )
+    assertTrue(
+      "Hypotheses must use evidence confidence levels",
+      firstAssistantMsg.structuredSection!!.hypotheses.isNotEmpty()
+    )
+
+    // 4. Switch to Technician Mode and use contextual follow-up actions
+    composeTestRule.onNodeWithTag("diag_mode_technician").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(DiagnosticUserMode.TECHNICIAN, holderRef!!.selectedMode)
+
+    // Test "შედეგის დამატება" prefills composer
+    composeTestRule.runOnIdle {
+      holderRef!!.triggerContextualAction(
+        action = ContextualDiagnosticAction.ADD_RESULT,
+        catalogProducts = catalog
+      )
+    }
+    composeTestRule.waitForIdle()
+    assertTrue(holderRef!!.inputText.startsWith("ტესტის შედეგი: "))
+
+    // Send a technician follow-up with test result
+    composeTestRule.onNodeWithTag("diag_message_input")
+      .performTextReplacement("ტესტის შედეგი: სატესტო ეკრანზეც იგივეა, კონექტორის პინი დაზიანებულია")
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("diag_send_button").performClick()
+    composeTestRule.waitUntil(timeoutMillis = 15000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 4
+    }
+    composeTestRule.waitForIdle()
+
+    val techAssistantMsg = holderRef!!.messages.last()
+    assertEquals(DiagnosticUserMode.TECHNICIAN, techAssistantMsg.mode)
+    assertTrue(
+      "Multi-turn context must retain iPhone 14 Pro from turn 1",
+      techAssistantMsg.structuredSection!!.deviceIdentification.contains("iPhone 14 Pro", ignoreCase = true)
+    )
+
+    // Trigger session summary contextual action ("დიაგნოსტიკის შეჯამება")
+    composeTestRule.runOnIdle {
+      holderRef!!.triggerContextualAction(
+        action = ContextualDiagnosticAction.SUMMARIZE,
+        catalogProducts = catalog
+      )
+    }
+    composeTestRule.waitUntil(timeoutMillis = 15000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 6
+    }
+    composeTestRule.waitForIdle()
+    assertTrue(holderRef!!.messages.last().text.contains("შეჯამება"))
+
+    // 5. Verify Session History persistence: start new session, open history, reopen saved session, delete session
+    val savedSessionId = holderRef!!.sessionId
+    assertTrue("Session must be saved in repository", holderRef!!.savedSessions.any { it.id == savedSessionId })
+
+    composeTestRule.onNodeWithTag("diag_new_session_button").performClick()
+    composeTestRule.waitForIdle()
+    assertTrue("New session must clear active message list", holderRef!!.messages.isEmpty())
+
+    composeTestRule.onNodeWithTag("diag_history_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("diag_history_sheet").assertIsDisplayed()
+
+    // Reopen saved session
+    composeTestRule.onNodeWithTag("diag_history_open_$savedSessionId").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(savedSessionId, holderRef!!.sessionId)
+    assertEquals(6, holderRef!!.messages.size)
+
+    // Delete saved session
+    composeTestRule.onNodeWithTag("diag_history_button").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("diag_history_delete_$savedSessionId").performClick()
+    composeTestRule.waitForIdle()
+    assertFalse("Deleted session must be removed from repository", holderRef!!.savedSessions.any { it.id == savedSessionId })
+  }
+
+  @Test
+  fun `diagnostics workspace clears composer on starter prompt click, accurately diagnoses bootloop vs charging, and handles catalog and general questions`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    DiagnosticsSessionRepository.clearAllSessions(context)
+    val fullCatalog = ProductRepository.getAllProducts()
+    var holderRef: DiagnosticsWorkspaceStateHolder? = null
+
+    composeTestRule.setContent {
+      val scope = androidx.compose.runtime.rememberCoroutineScope()
+      val holder = androidx.compose.runtime.remember {
+        DiagnosticsWorkspaceStateHolder(context = context, coroutineScope = scope)
+      }
+      holderRef = holder
+      RepairProTheme(darkTheme = true) {
+        DiagnosticsWorkspaceScreen(
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 0.dp, bottom = 0.dp),
+          onProductClick = {},
+          products = fullCatalog,
+          externalStateHolder = holder
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Click starter chip #2: "ტელეფონი ჩართვისას ჩერდება ლოგოზე და აღარ ირთვება ბოლომდე"
+    composeTestRule.onNodeWithTag("diag_empty_state")
+      .performScrollToNode(hasTestTag("diag_starter_chip_2"))
+    composeTestRule.onNodeWithTag("diag_starter_chip_2").assertIsDisplayed().performClick()
+
+    composeTestRule.waitUntil(timeoutMillis = 10000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 2
+    }
+    composeTestRule.waitForIdle()
+
+    // Composer inputText MUST be empty after clicking starter prompt!
+    assertEquals("Composer inputText must be empty after sending starter prompt", "", holderRef!!.inputText)
+
+    // Diagnosis for "ჩერდება ლოგოზე და აღარ ირთვება ბოლომდე" MUST be Bootloop / ლოგოზე გაჭედვა, NOT charging port!
+    val bootloopReply = holderRef!!.messages.last()
+    assertTrue(
+      "Bootloop prompt must be diagnosed as Bootloop / ლოგოზე გაჭედვა, was: ${bootloopReply.text}",
+      bootloopReply.text.contains("ლოგოზე") || bootloopReply.text.contains("Bootloop", ignoreCase = true)
+    )
+    assertFalse(
+      "Bootloop prompt must NOT be misclassified as charging port failure",
+      bootloopReply.text.contains("დამუხტვის პორტის, კაბელის ან კვების სისტემის გაუმართაობა")
+    )
+
+    // 2. Ask about a catalog product ("Canva Pro მინდა") inside the Diagnostics workspace
+    composeTestRule.runOnIdle {
+      holderRef!!.sendMessage(
+        overrideText = "Canva Pro მინდა, რა ღირს და რა პირობებია?",
+        catalogProducts = fullCatalog
+      )
+    }
+    composeTestRule.waitUntil(timeoutMillis = 10000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 4
+    }
+    composeTestRule.waitForIdle()
+
+    val canvaReply = holderRef!!.messages.last()
+    assertTrue("Catalog query for Canva Pro must recommend product 118", canvaReply.recommendedProductIds.contains(118))
+    assertTrue("Catalog query must mention Canva Pro details", canvaReply.text.contains("Canva Pro", ignoreCase = true))
+
+    // 3. Ask a general tech question ("რა განსხვავებაა OLED და LCD ეკრანებს შორის?")
+    composeTestRule.runOnIdle {
+      holderRef!!.sendMessage(
+        overrideText = "რა განსხვავებაა OLED და LCD ეკრანებს შორის?",
+        catalogProducts = fullCatalog
+      )
+    }
+    composeTestRule.waitUntil(timeoutMillis = 10000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 6
+    }
+    composeTestRule.waitForIdle()
+
+    val oledReply = holderRef!!.messages.last()
+    assertTrue("General OLED vs LCD question must explain OLED and IPS/LCD", oledReply.text.contains("OLED") && oledReply.text.contains("LCD"))
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `diagnostics intro card is compact with concise Georgian copy, Glassmorphism composer anchors without double bottom gap, supports ImeAction Send and Light Dark themes`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    DiagnosticsSessionRepository.clearAllSessions(context)
+    AppPreferencesManager.init(context)
+    AppPreferencesManager.setLanguage(context, AppLanguage.KA)
+    AppPreferencesManager.setDarkMode(context, true)
+    val catalog = ProductRepository.getAllProducts().take(8)
+    var holderRef: DiagnosticsWorkspaceStateHolder? = null
+    var capturedDarkPalette: DiagnosticsThemePalette? = null
+    var capturedLightPalette: DiagnosticsThemePalette? = null
+
+    val bottomNavClearance = 108.dp
+
+    composeTestRule.setContent {
+      val scope = androidx.compose.runtime.rememberCoroutineScope()
+      val holder = androidx.compose.runtime.remember {
+        DiagnosticsWorkspaceStateHolder(context = context, coroutineScope = scope)
+      }
+      holderRef = holder
+      if (AppPreferencesManager.isDarkMode) {
+        capturedDarkPalette = rememberDiagnosticsThemePalette()
+      } else {
+        capturedLightPalette = rememberDiagnosticsThemePalette()
+      }
+      RepairProTheme(darkTheme = AppPreferencesManager.isDarkMode) {
+        DiagnosticsWorkspaceScreen(
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 64.dp, bottom = bottomNavClearance),
+          onProductClick = {},
+          products = catalog,
+          externalStateHolder = holder
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Verify compact intro card title, exact concise Georgian description, and secondary feature pills
+    val introCardNode = composeTestRule.onNodeWithTag("diag_intro_card").assertIsDisplayed()
+    composeTestRule.onNodeWithText("რა პრობლემა აქვს ტელეფონს?", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText(
+      "აღწერე სიმპტომი ან ატვირთე ფოტო. დაგეხმარები სავარაუდო მიზეზების, შემოწმების ნაბიჯებისა და შეკეთების ვარიანტების განსაზღვრაში.",
+      useUnmergedTree = true
+    ).assertIsDisplayed()
+    composeTestRule.onNodeWithText("ფოტოს ანალიზი", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("ტექნიკური რჩევა", useUnmergedTree = true).assertIsDisplayed()
+
+    // Verify the old redundant multi-line orange mode subtitle paragraph is removed from the intro card
+    assertEquals(
+      0,
+      composeTestRule.onAllNodes(
+        androidx.compose.ui.test.hasText("აქტიური რეჟიმი:", substring = true),
+        useUnmergedTree = true
+      ).fetchSemanticsNodes().size
+    )
+
+    // 2. Verify composer Glassmorphism pill, concise placeholder, and proper bottom anchoring (no double bottom padding)
+    val rootBounds = composeTestRule.onNodeWithTag("diagnostics_workspace_root").fetchSemanticsNode().boundsInRoot
+    val composerContainerBounds = composeTestRule.onNodeWithTag("diag_composer_container").fetchSemanticsNode().boundsInRoot
+    val glassPillNode = composeTestRule.onNodeWithTag("diag_composer_glass_pill").assertIsDisplayed()
+    val glassPillBounds = glassPillNode.fetchSemanticsNode().boundsInRoot
+
+    composeTestRule.onNodeWithText("აღწერე ტელეფონის პრობლემა...", useUnmergedTree = true).assertIsDisplayed()
+
+    // Because testTag("diagnostics_workspace_root") is after .padding(top = topPadding, bottom = effectiveBottomInset),
+    // rootBounds.bottom is the exact top edge of bottomNavClearance, and composerContainerBounds.bottom must sit flush with it!
+    val density = context.resources.displayMetrics.density
+    assertEquals(
+      "Composer container bottom must sit flush with workspace inner bottom above bottomNavClearance",
+      rootBounds.bottom,
+      composerContainerBounds.bottom,
+      2.0f
+    )
+    assertTrue(
+      "Glass pill must sit flush inside composer container without floating gap",
+      (composerContainerBounds.bottom - glassPillBounds.bottom) <= (10f * density)
+    )
+
+    // 3. Verify placeholder updates when an image is attached
+    val testBitmap = android.graphics.Bitmap.createBitmap(120, 120, android.graphics.Bitmap.Config.ARGB_8888)
+    composeTestRule.runOnIdle {
+      holderRef!!.attachBitmapDirect(testBitmap, "sample_photo.jpg")
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("დაამატე კომენტარი ფოტოზე...", useUnmergedTree = true).assertIsDisplayed()
+
+    // Remove attachment and verify placeholder reverts
+    val attId = holderRef!!.pendingAttachments.first().id
+    composeTestRule.onNodeWithTag("remove_attachment_$attId").performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithText("აღწერე ტელეფონის პრობლემა...", useUnmergedTree = true).assertIsDisplayed()
+
+    // 4. Verify multiline input and submitting via keyboard ImeAction.Send
+    val inputNode = composeTestRule.onNodeWithTag("diag_message_input")
+    inputNode.performClick()
+    inputNode.performTextReplacement("ეკრანი ციმციმებს\nდა სენსორი ზოგჯერ არ რეაგირებს")
+    composeTestRule.waitForIdle()
+    assertEquals("ეკრანი ციმციმებს\nდა სენსორი ზოგჯერ არ რეაგირებს", holderRef!!.inputText)
+
+    // Trigger keyboard Send action
+    inputNode.performImeAction()
+    composeTestRule.waitUntil(timeoutMillis = 10000L) {
+      !holderRef!!.isAnalyzing && holderRef!!.messages.size >= 2
+    }
+    composeTestRule.waitForIdle()
+    assertEquals("Input must clear after ImeAction.Send", "", holderRef!!.inputText)
+    assertEquals(2, holderRef!!.messages.size)
+
+    // 5. Verify Dark Mode and Light Mode theme palettes provide high contrast
+    assertNotNull(capturedDarkPalette)
+    assertTrue(capturedDarkPalette!!.isDark)
+    assertEquals(androidx.compose.ui.graphics.Color(0xFF0D0F12), capturedDarkPalette!!.pageBg)
+    assertEquals(androidx.compose.ui.graphics.Color(0xFFF8FAFC), capturedDarkPalette!!.textPrimary)
+
+    composeTestRule.runOnIdle {
+      AppPreferencesManager.setDarkMode(context, false)
+    }
+    composeTestRule.waitForIdle()
+    assertNotNull(capturedLightPalette)
+    assertFalse(capturedLightPalette!!.isDark)
+    assertEquals(androidx.compose.ui.graphics.Color(0xFFF3F6FB), capturedLightPalette!!.pageBg)
+    assertEquals(androidx.compose.ui.graphics.Color(0xFF0F172A), capturedLightPalette!!.textPrimary)
+
+    // Restore Dark Mode
+    composeTestRule.runOnIdle {
+      AppPreferencesManager.setDarkMode(context, true)
+    }
+    composeTestRule.waitForIdle()
+  }
+}
 

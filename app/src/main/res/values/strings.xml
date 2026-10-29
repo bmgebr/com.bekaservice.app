@@ -1,3 +1,26 @@
 <resources>
     <string name="app_name">ბექასერვისი</string>
+    <string name="onboarding_brand_subtitle">შენი ციფრული სერვისები</string>
+    <string name="onboarding_welcome_title">მოგესალმები!</string>
+    <string name="onboarding_welcome_subtitle">ყველაფერი, რაც გჭირდება — ერთ სივრცეში.</string>
+    <string name="onboarding_lang_title">აირჩიეთ ენა</string>
+    <string name="onboarding_lang_subtitle">Select language</string>
+    <string name="onboarding_next">შემდეგი</string>
+    <string name="onboarding_auth_title">შესვლა ანგარიშით</string>
+    <string name="onboarding_auth_subtitle">აირჩიე შენთვის მოსახერხებელი გზა ან გააგრძელე ანგარიშის გარეშე.</string>
+    <string name="onboarding_google_sign_in">Google-ით შესვლა</string>
+    <string name="onboarding_apple_sign_in">Apple-ით შესვლა</string>
+    <string name="onboarding_email_sign_in">ელ. ფოსტით</string>
+    <string name="onboarding_skip_auth">ავტორიზაციის გამოტოვება</string>
+    <string name="onboarding_ready_title">მზად ხარ!</string>
+    <string name="onboarding_ready_subtitle">გაეცანი ციფრულ სერვისებს BEKASERVICE-ში.</string>
+    <string name="onboarding_benefit_nav_title">მარტივი ნავიგაცია</string>
+    <string name="onboarding_benefit_nav_desc">სწრაფი ძიება და კატეგორიები ერთ სივრცეში</string>
+    <string name="onboarding_benefit_trust_title">სანდოობა</string>
+    <string name="onboarding_benefit_trust_desc">გარანტირებული ხარისხი და ოფიციალური სერვისი</string>
+    <string name="onboarding_benefit_digital_title">ციფრული სერვისები</string>
+    <string name="onboarding_benefit_digital_desc">AI პაკეტები, პროგრამული უზრუნველყოფა და ტექნიკა</string>
+    <string name="onboarding_start_action">დაიწყე →</string>
+    <string name="onboarding_home_action">მთავარ გვერდზე</string>
 </resources>
+

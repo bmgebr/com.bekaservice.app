@@ -56,6 +56,7 @@ object AppPreferencesManager {
     private const val PREFS_NAME = "bekaservice_ui_prefs"
     private const val KEY_DARK_MODE = "is_dark_mode"
     private const val KEY_APP_LANG = "app_language_code"
+    private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 
     var isDarkMode by mutableStateOf(true)
         private set
@@ -63,14 +64,14 @@ object AppPreferencesManager {
     var currentLanguage by mutableStateOf(AppLanguage.KA)
         private set
 
-    private var initialized = false
+    var isOnboardingCompleted by mutableStateOf(false)
+        private set
 
     fun init(context: Context) {
-        if (initialized) return
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         isDarkMode = prefs.getBoolean(KEY_DARK_MODE, true)
         currentLanguage = AppLanguage.fromCode(prefs.getString(KEY_APP_LANG, AppLanguage.KA.code))
-        initialized = true
+        isOnboardingCompleted = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
     }
 
     fun setDarkMode(context: Context, dark: Boolean) {
@@ -90,6 +91,14 @@ object AppPreferencesManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_APP_LANG, language.code)
+            .apply()
+    }
+
+    fun setOnboardingCompleted(context: Context, completed: Boolean = true) {
+        isOnboardingCompleted = completed
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ONBOARDING_COMPLETED, completed)
             .apply()
     }
 }
@@ -373,7 +382,65 @@ object AppLocaleManager {
         "მუქი რეჟიმი (Dark)" to "Dark Mode",
         "ნათელი რეჟიმი (Light)" to "Light Mode",
         "აპლიკაციის ენა" to "App Language",
-        "სწრაფი კონტაქტი" to "Quick Contact"
+        "სწრაფი კონტაქტი" to "Quick Contact",
+
+        // Onboarding Flow
+        "შენი ციფრული სერვისები" to "Your Digital Services",
+        "მოგესალმები!" to "Welcome!",
+        "ყველაფერი, რაც გჭირდება — ერთ სივრცეში." to "Everything you need — in one place.",
+        "აირჩიეთ ენა" to "Select Language",
+        "აირჩიეთ აპლიკაციის სასურველი ენა" to "Choose your preferred app language",
+        "შემდეგი" to "Next",
+        "შესვლა ანგარიშით" to "Sign in with Account",
+        "აირჩიე შენთვის მოსახერხებელი გზა ან გააგრძელე ანგარიშის გარეშე." to "Choose a convenient way for you or continue without an account.",
+        "ანგარიშით შესვლა საშუალებას გაძლევთ შეინახოთ ფავორიტები და აკონტროლოთ შეკვეთების ისტორია." to "Signing in lets you save favorites and track your order history.",
+        "Google-ით შესვლა" to "Sign in with Google",
+        "Apple-ით შესვლა" to "Sign in with Apple",
+        "Apple ID-ით შესვლა" to "Sign in with Apple ID",
+        "Apple ID ავტორიზაცია" to "Sign in with Apple ID",
+        "Apple ID (ელ. ფოსტა)" to "Apple ID (Email)",
+        "დამალე ჩემი ელ. ფოსტა (Private Relay)" to "Hide My Email (Private Relay)",
+        "Apple ID ავტორიზაცია წარმატებულია!" to "Apple ID sign-in successful!",
+        "გთხოვთ შეიყვანოთ სწორი Apple ID ელ. ფოსტა" to "Please enter a valid Apple ID email",
+        "ელ. ფოსტით" to "With Email",
+        "ელ. ფოსტით შესვლა" to "Sign in with Email",
+        "ავტორიზაციის გამოტოვება" to "Skip authorization",
+        "გაგრძელება" to "Continue",
+        "გააგრძელეთ ანგარიშის გარეშე" to "Continue without an account",
+        "შეგიძლიათ გამოიყენოთ აპლიკაცია ანგარიშის გარეშე — დაათვალიეროთ და შეუკვეთოთ სერვისები." to "You can use the app without an account — browse and order services freely.",
+        "მზად ხარ!" to "You're Ready!",
+        "გაეცანი ციფრულ სერვისებს BEKASERVICE-ში." to "Explore digital services in BEKASERVICE.",
+        "მარტივი ნავიგაცია" to "Easy Navigation",
+        "სწრაფი ძიება და კატეგორიები ერთ სივრცეში" to "Fast search and categories in one place",
+        "სანდოობა" to "Reliability",
+        "გარანტირებული ხარისხი და ოფიციალური სერვისი" to "Guaranteed quality and official service",
+        "ციფრული სერვისები" to "Digital Services",
+        "AI პაკეტები, პროგრამული უზრუნველყოფა და ტექნიკა" to "AI packages, software, and hardware parts",
+        "დაიწყე →" to "Get Started →",
+        "დაიწყე" to "Get Started",
+        "აპლიკაციაში გადასვლა" to "Enter App",
+        "მთავარ გვერდზე" to "Go to Home",
+        "გამოტოვება" to "Skip",
+        "დაბრუნება" to "Go Back",
+        "თქვენ უკვე შესული ხართ სისტემაში" to "You are already signed in",
+        "ავტორიზებული ანგარიში" to "Signed-in Account",
+        "სხვა ანგარიშით შესვლა" to "Switch Account",
+        "თქვენი სახელი და გვარი" to "Your Full Name",
+        "ელ. ფოსტა" to "Email",
+        "პაროლი" to "Password",
+        "Google ავტორიზაცია გაუქმდა" to "Google sign-in was cancelled",
+        "Google ავტორიზაცია წარმატებულია!" to "Google sign-in successful!",
+        "Google ავტორიზაცია ვერ მოხერხდა" to "Google sign-in failed",
+        "გთხოვთ შეიყვანოთ სწორი ელ. ფოსტა" to "Please enter a valid email address",
+        "პაროლი უნდა შედგებოდეს მინიმუმ 6 სიმბოლოსგან" to "Password must be at least 6 characters",
+        "პაროლი უნდა იყოს მინიმუმ 6 სიმბოლო" to "Password must be at least 6 characters",
+        "გთხოვთ მიუთითოთ თქვენი სახელი" to "Please enter your name",
+        "ტექნიკა" to "Hardware",
+        "პროგრამული" to "Software",
+        "ქლაუდი" to "Cloud",
+        "AI სერვისები" to "AI Services",
+        "დიზაინი" to "Design",
+        "და სხვა..." to "And more..."
     )
 
     private val exactTranslationsRu = mapOf(
@@ -510,7 +577,65 @@ object AppLocaleManager {
         "მუქი რეჟიმი (Dark)" to "Тёмная тема",
         "ნათელი რეჟიმი (Light)" to "Светлая тема",
         "აპლიკაციის ენა" to "Язык приложения",
-        "სწრაფი კონტაქტი" to "Быстрый контакт"
+        "სწრაფი კონტაქტი" to "Быстрый контакт",
+
+        // Onboarding Flow
+        "შენი ციფრული სერვისები" to "Ваши цифровые сервисы",
+        "მოგესალმები!" to "Добро пожаловать!",
+        "ყველაფერი, რაც გჭირდება — ერთ სივრცეში." to "Всё, что вам нужно — в одном месте.",
+        "აირჩიეთ ენა" to "Выберите язык",
+        "აირჩიეთ აპლიკაციის სასურველი ენა" to "Выберите предпочитаемый язык приложения",
+        "შემდეგი" to "Далее",
+        "შესვლა ანგარიშით" to "Вход в аккаунт",
+        "აირჩიე შენთვის მოსახერხებელი გზა ან გააგრძელე ანგარიშის გარეშე." to "Выберите удобный способ или продолжите без аккаунта.",
+        "ანგარიშით შესვლა საშუალებას გაძლევთ შეინახოთ ფავორიტები და აკონტროლოთ შეკვეთების ისტორია." to "Вход в аккаунт позволяет сохранять избранное и отслеживать историю заказов.",
+        "Google-ით შესვლა" to "Войти через Google",
+        "Apple-ით შესვლა" to "Войти через Apple",
+        "Apple ID-ით შესვლა" to "Войти через Apple ID",
+        "Apple ID ავტორიზაცია" to "Вход через Apple ID",
+        "Apple ID (ელ. ფოსტა)" to "Apple ID (Эл. почта)",
+        "დამალე ჩემი ელ. ფოსტა (Private Relay)" to "Скрыть мой email (Private Relay)",
+        "Apple ID ავტორიზაცია წარმატებულია!" to "Вход через Apple ID выполнен успешно!",
+        "გთხოვთ შეიყვანოთ სწორი Apple ID ელ. ფოსტა" to "Пожалуйста, введите корректный email Apple ID",
+        "ელ. ფოსტით" to "По эл. почте",
+        "ელ. ფოსტით შესვლა" to "Вход по эл. почте",
+        "ავტორიზაციის გამოტოვება" to "Пропустить авторизацию",
+        "გაგრძელება" to "Продолжить",
+        "გააგრძელეთ ანგარიშის გარეშე" to "Продолжить без аккаунта",
+        "შეგიძლიათ გამოიყენოთ აპლიკაცია ანგარიშის გარეშე — დაათვალიეროთ და შეუკვეთოთ სერვისები." to "Вы можете пользоваться приложением без аккаунта — просматривать и заказывать сервисы.",
+        "მზად ხარ!" to "Всё готово!",
+        "გაეცანი ციფრულ სერვისებს BEKASERVICE-ში." to "Откройте цифровые сервисы в BEKASERVICE.",
+        "მარტივი ნავიგაცია" to "Простая навигация",
+        "სწრაფი ძიება და კატეგორიები ერთ სივრცეში" to "Быстрый поиск и категории в одном месте",
+        "სანდოობა" to "Надёжность",
+        "გარანტირებული ხარისხი და ოფიციალური სერვისი" to "Гарантированное качество и официальный сервис",
+        "ციფრული სერვისები" to "Цифровые сервисы",
+        "AI პაკეტები, პროგრამული უზრუნველყოფა და ტექნიკა" to "AI пакеты, программы и комплектующие",
+        "დაიწყე →" to "Начать →",
+        "დაიწყე" to "Начать",
+        "აპლიკაციაში გადასვლა" to "Перейти в приложение",
+        "მთავარ გვერდზე" to "На главную",
+        "გამოტოვება" to "Пропустить",
+        "დაბრუნება" to "Назад",
+        "თქვენ უკვე შესული ხართ სისტემაში" to "Вы уже вошли в систему",
+        "ავტორიზებული ანგარიში" to "Авторизованный аккаунт",
+        "სხვა ანგარიშით შესვლა" to "Войти в другой аккаунт",
+        "თქვენი სახელი და გვარი" to "Ваше имя и фамилия",
+        "ელ. ფოსტა" to "Эл. почта",
+        "პაროლი" to "Пароль",
+        "Google ავტორიზაცია გაუქმდა" to "Вход через Google отменён",
+        "Google ავტორიზაცია წარმატებულია!" to "Вход через Google выполнен успешно!",
+        "Google ავტორიზაცია ვერ მოხერხდა" to "Не удалось войти через Google",
+        "გთხოვთ შეიყვანოთ სწორი ელ. ფოსტა" to "Пожалуйста, введите корректный email",
+        "პაროლი უნდა შედგებოდეს მინიმუმ 6 სიმბოლოსგან" to "Пароль должен содержать минимум 6 символов",
+        "პაროლი უნდა იყოს მინიმუმ 6 სიმბოლო" to "Пароль должен содержать минимум 6 символов",
+        "გთხოვთ მიუთითოთ თქვენი სახელი" to "Пожалуйста, укажите ваше имя",
+        "ტექნიკა" to "Техника",
+        "პროგრამული" to "Программы",
+        "ქლაუდი" to "Облако",
+        "AI სერვისები" to "AI Сервисы",
+        "დიზაინი" to "Дизайн",
+        "და სხვა..." to "И другое..."
     )
 
     private val phraseReplacementsEn = listOf(

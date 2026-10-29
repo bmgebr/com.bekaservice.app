@@ -1,0 +1,24 @@
+<resources>
+    <string name="onboarding_brand_subtitle">Your Digital Services</string>
+    <string name="onboarding_welcome_title">Welcome!</string>
+    <string name="onboarding_welcome_subtitle">Everything you need — in one place.</string>
+    <string name="onboarding_lang_title">Select Language</string>
+    <string name="onboarding_lang_subtitle">Choose your preferred language</string>
+    <string name="onboarding_next">Next</string>
+    <string name="onboarding_auth_title">Sign in with Account</string>
+    <string name="onboarding_auth_subtitle">Choose a convenient way for you or continue without an account.</string>
+    <string name="onboarding_google_sign_in">Sign in with Google</string>
+    <string name="onboarding_apple_sign_in">Sign in with Apple</string>
+    <string name="onboarding_email_sign_in">With Email</string>
+    <string name="onboarding_skip_auth">Skip authorization</string>
+    <string name="onboarding_ready_title">You\'re Ready!</string>
+    <string name="onboarding_ready_subtitle">Explore digital services in BEKASERVICE.</string>
+    <string name="onboarding_benefit_nav_title">Easy Navigation</string>
+    <string name="onboarding_benefit_nav_desc">Fast search and categories in one place</string>
+    <string name="onboarding_benefit_trust_title">Reliability</string>
+    <string name="onboarding_benefit_trust_desc">Guaranteed quality and official service</string>
+    <string name="onboarding_benefit_digital_title">Digital Services</string>
+    <string name="onboarding_benefit_digital_desc">AI packages, software, and hardware parts</string>
+    <string name="onboarding_start_action">Get Started →</string>
+    <string name="onboarding_home_action">Go to Home</string>
+</resources>

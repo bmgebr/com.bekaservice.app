@@ -4,7 +4,11 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -327,7 +331,7 @@ fun AdminPanelScreen(
     var selectedSubcategoryFilter by remember { mutableStateOf("ყველა") }
     var selectedBrandFilter by remember { mutableStateOf("ყველა") }
 
-    val allCategories = listOf(
+    val baseCategories = listOf(
         "ყველა",
         "პროგრამული სერვისები",
         "ეკრანები",
@@ -337,8 +341,18 @@ fun AdminPanelScreen(
         "კორპუსები",
         "დინამიკები"
     )
-    val softwareSubcategories = remember { SoftwareCatalogData.softwareSubcategories }
-    val allBrands = listOf(
+    val allCategories = remember(products) {
+        val dynamicCats = products.map { it.category.trim() }.filter { it.isNotBlank() }
+        (baseCategories + dynamicCats).distinct()
+    }
+    val softwareSubcategories = remember(products) {
+        val dynamicSubcats = products
+            .filter { it.category == "პროგრამული სერვისები" || it.type == "software" }
+            .map { it.subcategory.trim() }
+            .filter { it.isNotBlank() }
+        (SoftwareCatalogData.softwareSubcategories + dynamicSubcats).distinct()
+    }
+    val baseBrands = listOf(
         "ყველა",
         "Apple",
         "Samsung",
@@ -360,6 +374,10 @@ fun AdminPanelScreen(
         "Spotify",
         "Microsoft"
     )
+    val allBrands = remember(products) {
+        val dynamicBrands = products.map { it.brand.trim() }.filter { it.isNotBlank() }
+        (baseBrands + dynamicBrands).distinct()
+    }
 
     Scaffold(
         containerColor = Color(0xFF0D0F12),
@@ -935,6 +953,8 @@ fun AdminPanelScreen(
         ProductEditDialog(
             product = editingProduct!!,
             isNew = false,
+            existingCategories = allCategories.filter { it != "ყველა" },
+            existingBrands = allBrands.filter { it != "ყველა" },
             onDismiss = { editingProduct = null },
             onSave = { updatedItem ->
                 coroutineScope.launch {
@@ -972,10 +992,10 @@ fun AdminPanelScreen(
             category = defaultCat,
             type = if (isSw) "software" else "product",
             subcategory = if (isSw) (if (selectedSubcategoryFilter != "ყველა") selectedSubcategoryFilter else SoftwareCatalogData.SUBCAT_AI) else "",
-            imageUrl = "https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=600",
+            imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER,
             shortDescription = "",
             description = if (isSw) "პროგრამული სერვისი სრული მხარდაჭერით და გარანტიით." else "ორიგინალი სათადარიგო ნაწილი გარანტიით.",
-            brand = if (isSw) "OpenAI" else "Apple",
+            brand = if (selectedBrandFilter != "ყველა") selectedBrandFilter else if (isSw) "OpenAI" else "Apple",
             compatibleModels = "",
             warranty = "6 თვე",
             inStock = true
@@ -983,6 +1003,8 @@ fun AdminPanelScreen(
         ProductEditDialog(
             product = newItem,
             isNew = true,
+            existingCategories = allCategories.filter { it != "ყველა" },
+            existingBrands = allBrands.filter { it != "ყველა" },
             onDismiss = { isAddingNewProduct = false },
             onSave = { addedItem ->
                 coroutineScope.launch {
@@ -1090,28 +1112,17 @@ fun AdminProductRowItem(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // ვიზუალი / სურათი
-                if (SoftwareCatalogData.isDigitalSoftwareService(item)) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                    ) {
-                        SoftwareBrandVisualHeader(
-                            product = item,
-                            modifier = Modifier.fillMaxSize(),
-                            compact = true
-                        )
-                    }
-                } else {
-                    AsyncImage(
-                        model = item.imageUrl.ifBlank { "https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=600" },
-                        contentDescription = item.title,
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF222630))),
-                        contentScale = ContentScale.Crop
+                // ვიზუალი / სურათი (მხარს უჭერს როგორც მიბმულ ფოტოს ლინკით/მეხსიერებიდან, ისე ავტო-გენერირებულ ბრენდ-ვიზუალს)
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF222630)))
+                ) {
+                    ProductSmartVisual(
+                        product = item,
+                        modifier = Modifier.fillMaxSize(),
+                        compact = true
                     )
                 }
 
@@ -1258,9 +1269,14 @@ fun AdminProductRowItem(
 fun ProductEditDialog(
     product: ProductItem,
     isNew: Boolean,
+    existingCategories: List<String> = emptyList(),
+    existingBrands: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (ProductItem) -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var title by remember { mutableStateOf(product.title) }
     var price by remember { mutableStateOf(product.price) }
     var brand by remember { mutableStateOf(product.brand) }
@@ -1276,25 +1292,79 @@ fun ProductEditDialog(
     var activationTerms by remember { mutableStateOf(product.activationTerms) }
     var compatibleModels by remember { mutableStateOf(product.compatibleModels) }
     var warranty by remember { mutableStateOf(product.warranty) }
-    var imageUrl by remember { mutableStateOf(product.imageUrl) }
+    var searchKeywords by remember { mutableStateOf(product.searchKeywords) }
+
+    val initialHasCustomPhoto = remember(product) { ProductImageManager.hasCustomAttachedPhoto(product) }
+    var imageUrl by remember {
+        mutableStateOf(
+            if (initialHasCustomPhoto) product.imageUrl else ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+        )
+    }
+    var urlInputText by remember {
+        mutableStateOf(
+            if (initialHasCustomPhoto && !ProductImageManager.isLocalOrEmbeddedImage(product.imageUrl)) {
+                product.imageUrl
+            } else {
+                ""
+            }
+        )
+    }
+    var showUrlInputBox by remember {
+        mutableStateOf(initialHasCustomPhoto && !ProductImageManager.isLocalOrEmbeddedImage(product.imageUrl))
+    }
+
     var inStock by remember { mutableStateOf(product.inStock) }
     var isFeatured by remember { mutableStateOf(product.isFeatured) }
     var displayOrderInput by remember { mutableStateOf(product.displayOrder.toString()) }
 
-    val isSoftwareService = category == "პროგრამული სერვისები" || product.type == "software"
+    var isAiGenerating by remember { mutableStateOf(false) }
+    var aiStatusMessage by remember { mutableStateOf<String?>(null) }
 
-    val brands = listOf(
+    // ტელეფონის მეხსიერებიდან ფოტოს არჩევის ლანჩერი (Zero-permission Android Photo Picker)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                val savedPath = ProductImageManager.copyPickerUriToInternalStorage(context, uri)
+                if (!savedPath.isNullOrBlank()) {
+                    imageUrl = savedPath
+                    showUrlInputBox = false
+                    Toast.makeText(context, "✅ ფოტო ტელეფონის მეხსიერებიდან წარმატებით მიება!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "⚠️ ფოტოს წაკითხვა ვერ მოხერხდა, სცადეთ სხვა სურათი", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    val isSoftwareService = category == "პროგრამული სერვისები" ||
+        product.type == "software" ||
+        shortDescription.isNotBlank() ||
+        featuresText.isNotBlank()
+
+    val baseBrands = listOf(
         "OpenAI", "Google", "Anthropic", "xAI", "Perplexity", "Cursor", "Lovable",
         "Canva", "CapCut", "Adobe", "YouTube", "Spotify", "Microsoft",
         "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor"
     )
-    val categories = listOf(
+    val brands = remember(existingBrands, brand) {
+        (baseBrands + existingBrands + listOfNotNull(brand.trim().takeIf { it.isNotBlank() })).distinct()
+    }
+
+    val baseCategories = listOf(
         "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები",
         "კამერები", "კორპუსები", "დინამიკები"
     )
-    val softwareSubcategories = remember {
-        SoftwareCatalogData.softwareSubcategories.filter { it != "ყველა" }
+    val categories = remember(existingCategories, category) {
+        (baseCategories + existingCategories + listOfNotNull(category.trim().takeIf { it.isNotBlank() })).distinct()
     }
+
+    val softwareSubcategories = remember(subcategory) {
+        (SoftwareCatalogData.softwareSubcategories.filter { it != "ყველა" } +
+            listOfNotNull(subcategory.trim().takeIf { it.isNotBlank() })).distinct()
+    }
+
     val quickPrices = listOf(
         "ფასი შეთანხმებით", "15 ₾", "20 ₾", "25 ₾", "30 ₾", "35 ₾",
         "45 ₾", "50 ₾", "65 ₾", "80 ₾", "95 ₾", "120 ₾", "150 ₾"
@@ -1307,20 +1377,40 @@ fun ProductEditDialog(
         "Retail ლიცენზიის გასაღები"
     )
 
-    Dialog(onDismissRequest = onDismiss) {
+    // ცოცხალი გადახედვის ობიექტი ქარდის ვიზუალისთვის
+    val previewProduct = remember(
+        title, price, brand, category, subcategory, shortDescription, description, duration, imageUrl
+    ) {
+        product.copy(
+            title = title.ifBlank { "ახალი პროდუქტი" },
+            price = price,
+            brand = brand,
+            category = category,
+            subcategory = subcategory,
+            shortDescription = shortDescription,
+            description = description,
+            duration = duration,
+            imageUrl = imageUrl
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             color = Color(0xFF16191E),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.5f)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.55f)),
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.92f)
                 .imePadding()
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1339,37 +1429,420 @@ fun ProductEditDialog(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "ფასისა და აღწერის ცვლილება მყისიერად აისახება და შეინახება",
+                            text = "ფასის, ფოტოსა და აღწერის ცვლილება მყისიერად აისახება",
                             color = Color(0xFFFF9E40),
                             fontSize = 10.5.sp
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFA0A5B0))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFFA0A5B0))
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("product_edit_lazy_column"),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 20.dp)
                 ) {
-                    // 1. დასახელება
+                    // 1. დასახელება + AI ავტო-შევსების ღილაკი
                     item {
-                        OutlinedTextField(
-                            value = title,
-                            onValueChange = { title = it },
-                            label = { Text("დასახელება (Title)") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF6A00),
-                                unfocusedBorderColor = Color(0xFF2E3440)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = title,
+                                onValueChange = { title = it },
+                                label = { Text("დასახელება (Title)") },
+                                placeholder = { Text("მაგ: Adobe Acrobat Pro, ChatGPT Plus, iPhone 15 ეკრანი...", fontSize = 12.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFFFF6A00),
+                                    unfocusedBorderColor = Color(0xFF2E3440)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("product_title_input")
+                            )
+
+                            // ✨ AI-ით ყველა ველის ავტომატური ძებნა და შევსება
+                            Button(
+                                onClick = {
+                                    if (title.trim().isBlank()) {
+                                        Toast.makeText(context, "⚠️ ჯერ მიუთითეთ პროდუქტის დასახელება!", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    if (isAiGenerating) return@Button
+                                    isAiGenerating = true
+                                    aiStatusMessage = "🤖 AI ეძებს და აგენერირებს პროდუქტის სრულ მონაცემებს..."
+                                    coroutineScope.launch {
+                                        val generated = AdminProductAiGenerator.generateForTitle(
+                                            rawTitle = title,
+                                            existingCategories = categories,
+                                            existingBrands = brands
+                                        )
+                                        price = generated.price
+                                        shortDescription = generated.shortDescription
+                                        description = generated.description
+                                        category = generated.category
+                                        brand = generated.brand
+                                        subcategory = generated.subcategory
+                                        offerType = generated.offerType
+                                        duration = generated.duration
+                                        accountType = generated.accountType
+                                        if (generated.features.isNotEmpty()) {
+                                            featuresText = generated.features.joinToString("\n")
+                                        }
+                                        targetAudience = generated.targetAudience
+                                        activationTerms = generated.activationTerms
+                                        compatibleModels = generated.compatibleModels
+                                        warranty = generated.warranty
+                                        searchKeywords = generated.searchKeywords
+                                        isAiGenerating = false
+                                        aiStatusMessage = "✨ ყველა ველი წარმატებით შეივსო AI-ის მიერ! (${generated.category} • ${generated.brand})"
+                                    }
+                                },
+                                enabled = !isAiGenerating,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF1E293B),
+                                    disabledContainerColor = Color(0xFF161C28)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("ai_autofill_product_button")
+                            ) {
+                                if (isAiGenerating) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFFFF7A00),
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "AI ამუშავებს ინფორმაციას...",
+                                        color = Color(0xFFFF9E40),
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = "AI Auto Fill",
+                                        tint = Color(0xFFFF7A00),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "✨ AI-ით ყველა ველის ავტო-შევსება",
+                                        color = Color.White,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            if (!aiStatusMessage.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFF0F2618),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1B4E2E)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(if (isAiGenerating) "ai_status_loading" else "ai_status_completed")
+                                ) {
+                                    Text(
+                                        text = aiStatusMessage!!,
+                                        color = Color(0xFF4ADE80),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 1.5 პროდუქტის ფოტოს / ქარდის ვიზუალის მართვა (ყველა პროდუქტისთვის: ავტო-გენერაცია + ტელეფონის მეხსიერება + რეალური ლინკი)
+                    item {
+                        val isDark = AppPreferencesManager.isDarkMode
+                        val isUsingCustomPhoto = ProductImageManager.hasCustomAttachedPhoto(previewProduct)
+                        val isLocalGalleryPhoto = isUsingCustomPhoto && ProductImageManager.isLocalOrEmbeddedImage(imageUrl)
+
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isDark) Color(0xFF28303E) else Color(0xFFCBD5E1)
                             ),
                             modifier = Modifier.fillMaxWidth()
-                        )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "🖼️ ქარდის ფოტო / ვიზუალი:",
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = when {
+                                            isUsingCustomPhoto && isDark -> Color(0x264ADE80)
+                                            isUsingCustomPhoto && !isDark -> Color(0xFFDCFCE7)
+                                            isDark -> Color(0x26FF7A00)
+                                            else -> Color(0xFFFFEDD5)
+                                        },
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            when {
+                                                isUsingCustomPhoto && isDark -> Color(0x404ADE80)
+                                                isUsingCustomPhoto && !isDark -> Color(0xFF86EFAC)
+                                                isDark -> Color(0x40FF7A00)
+                                                else -> Color(0xFFFDBA74)
+                                            }
+                                        )
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isLocalGalleryPhoto -> "📱 გალერეიდან"
+                                                isUsingCustomPhoto -> "🔗 მიბმული ლინკით"
+                                                else -> "🎨 ავტო-გენერაცია"
+                                            },
+                                            color = when {
+                                                isUsingCustomPhoto && isDark -> Color(0xFF4ADE80)
+                                                isUsingCustomPhoto && !isDark -> Color(0xFF15803D)
+                                                isDark -> Color(0xFFFF9E40)
+                                                else -> Color(0xFFEA580C)
+                                            },
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                // ცოცხალი გადახედვა (Live Card Visual Preview)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(116.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF0D1017))
+                                        .border(1.dp, Color(0xFF262D3B), RoundedCornerShape(12.dp))
+                                ) {
+                                    ProductSmartVisual(
+                                        product = previewProduct,
+                                        modifier = Modifier.fillMaxSize(),
+                                        compact = false
+                                    )
+                                }
+
+                                // 3 რეჟიმის ღილაკი: ავტო-გენერაცია | მეხსიერებიდან (გალერეა) | ლინკით
+                                val isAutoSelected = !isUsingCustomPhoto && !showUrlInputBox
+                                val isGallerySelected = isLocalGalleryPhoto
+                                val isUrlSelected = showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)
+
+                                val unselectedBtnBg = if (isDark) Color(0xFF1E2430) else Color(0xFFFFFFFF)
+                                val unselectedBtnBorder = if (isDark) Color(0xFF333B4D) else Color(0xFFCBD5E1)
+                                val unselectedBtnText = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
+                                val unselectedBtnIcon = if (isDark) Color(0xFFFF9E40) else Color(0xFFEA580C)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // 1) ავტო-გენერაცია
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+                                                showUrlInputBox = false
+                                            }
+                                            .testTag("photo_mode_auto_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AutoAwesome,
+                                                contentDescription = "Auto Photo",
+                                                tint = if (isAutoSelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "ავტო-ფოტო",
+                                                color = if (isAutoSelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+
+                                    // 2) ტელეფონის მეხსიერებიდან არჩევა (ცენტრირებული ხატულა + ტექსტი, Dark/Light მოუდის სრული მხარდაჭერით)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                photoPickerLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            }
+                                            .testTag("photo_mode_gallery_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AddPhotoAlternate,
+                                                contentDescription = "Pick Photo From Phone Memory",
+                                                tint = if (isGallerySelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "გალერეა",
+                                                color = if (isGallerySelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+
+                                    // 3) რეალური ლინკით მიბმა
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                showUrlInputBox = true
+                                                if (urlInputText.isNotBlank()) {
+                                                    imageUrl = urlInputText.trim()
+                                                }
+                                            }
+                                            .testTag("photo_mode_url_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Link,
+                                                contentDescription = "Photo URL Link",
+                                                tint = if (isUrlSelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "ლინკით",
+                                                color = if (isUrlSelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // ლინკის ჩასაწერი ველი (ყოველთვის ხელმისაწვდომია როცა არჩეულია "ლინკით" ან უკვე ჩაწერილია URL)
+                                if (showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)) {
+                                    OutlinedTextField(
+                                        value = urlInputText,
+                                        onValueChange = { newUrl ->
+                                            urlInputText = newUrl
+                                            imageUrl = newUrl.trim().ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
+                                        },
+                                        label = { Text("ფოტოს რეალური ლინკი (https://...)") },
+                                        placeholder = { Text("ჩასვით სურათის პირდაპირი URL ბმული...", fontSize = 11.5.sp) },
+                                        singleLine = true,
+                                        trailingIcon = {
+                                            if (urlInputText.isNotBlank()) {
+                                                IconButton(onClick = {
+                                                    urlInputText = ""
+                                                    imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+                                                }) {
+                                                    Icon(Icons.Default.Clear, contentDescription = "Clear URL", tint = Color(0xFFA0A5B0))
+                                                }
+                                            }
+                                        },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = Color(0xFFFF6A00),
+                                            unfocusedBorderColor = Color(0xFF2E3440)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("product_image_url_input")
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // 2. ფასი + სწრაფი არჩევის ღილაკები
@@ -1407,7 +1880,7 @@ fun ProductEditDialog(
                                             color = Color.White,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                         )
                                     }
                                 }
@@ -1452,49 +1925,93 @@ fun ProductEditDialog(
                         )
                     }
 
-                    // 5. კატეგორიის არჩევა
+                    // 5. კატეგორიის არჩევა + ხელით მითითება
                     item {
-                        Text("კატეგორია:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(categories) { c ->
-                                val isSelected = category == c
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630),
-                                    modifier = Modifier.clickable { category = c }
-                                ) {
-                                    Text(
-                                        text = c,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("კატეგორია (აირჩიეთ ან ჩაწერეთ ხელით):", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(categories) { c ->
+                                    val isSelected = category.trim().equals(c, ignoreCase = true)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isSelected) Color(0xFFFF6A00) else Color(0xFF2E3440)
+                                        ),
+                                        modifier = Modifier.clickable { category = c }
+                                    ) {
+                                        Text(
+                                            text = c,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                        )
+                                    }
                                 }
                             }
+                            OutlinedTextField(
+                                value = category,
+                                onValueChange = { category = it },
+                                label = { Text("კატეგორია (ხელით მითითება / ახალი კატეგორია)") },
+                                placeholder = { Text("მაგ: აქსესუარები, PDF ხელსაწყოები, პროგრამული სერვისები...", fontSize = 11.5.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFFFF6A00),
+                                    unfocusedBorderColor = Color(0xFF2E3440)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("custom_category_input")
+                            )
                         }
                     }
 
-                    // 6. ბრენდის არჩევა
+                    // 6. ბრენდის არჩევა + ხელით მითითება
                     item {
-                        Text("ბრენდი:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(brands) { b ->
-                                val isSelected = brand == b
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630),
-                                    modifier = Modifier.clickable { brand = b }
-                                ) {
-                                    Text(
-                                        text = b,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("ბრენდი (აირჩიეთ ან ჩაწერეთ ხელით):", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(brands) { b ->
+                                    val isSelected = brand.trim().equals(b, ignoreCase = true)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isSelected) Color(0xFFFF6A00) else Color(0xFF2E3440)
+                                        ),
+                                        modifier = Modifier.clickable { brand = b }
+                                    ) {
+                                        Text(
+                                            text = b,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                        )
+                                    }
                                 }
                             }
+                            OutlinedTextField(
+                                value = brand,
+                                onValueChange = { brand = it },
+                                label = { Text("ბრენდი / მწარმოებელი (ხელით მითითება)") },
+                                placeholder = { Text("მაგ: Adobe, OpenAI, Apple, Netflix, Midjourney...", fontSize = 11.5.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFFFF6A00),
+                                    unfocusedBorderColor = Color(0xFF2E3440)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("custom_brand_input")
+                            )
                         }
                     }
 
@@ -1521,6 +2038,21 @@ fun ProductEditDialog(
                                         }
                                     }
                                 }
+                                OutlinedTextField(
+                                    value = subcategory,
+                                    onValueChange = { subcategory = it },
+                                    label = { Text("ქვეკატეგორია (ხელით მითითება)") },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFFFF6A00),
+                                        unfocusedBorderColor = Color(0xFF2E3440)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("custom_subcategory_input")
+                                )
                             }
                         }
 
@@ -1660,13 +2192,15 @@ fun ProductEditDialog(
                                 )
                             }
                         }
-                    } else {
-                        // სათადარიგო ნაწილების ველები
-                        item {
+                    }
+
+                    // თავსებადი მოდელები / პლატფორმები და გარანტია (ყველა პოზიციისთვის)
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
                                 value = compatibleModels,
                                 onValueChange = { compatibleModels = it },
-                                label = { Text("თავსებადი მოდელები") },
+                                label = { Text(if (isSoftwareService) "თავსებადი პლატფორმები (Windows, Mac, iOS, Android...)" else "თავსებადი მოდელები") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -1676,13 +2210,11 @@ fun ProductEditDialog(
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
-                        }
 
-                        item {
                             OutlinedTextField(
                                 value = warranty,
                                 onValueChange = { warranty = it },
-                                label = { Text("გარანტია (მაგ: 6 თვე)") },
+                                label = { Text("გარანტია (მაგ: 6 თვე ან სრული ვადით)") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -1692,48 +2224,6 @@ fun ProductEditDialog(
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             )
-                        }
-
-                        item {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("სურათის მართვა:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    AsyncImage(
-                                        model = imageUrl.ifBlank { "https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=600" },
-                                        contentDescription = null,
-                                        modifier = Modifier
-                                            .size(60.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF222630))),
-                                        contentScale = ContentScale.Crop
-                                    )
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        OutlinedTextField(
-                                            value = imageUrl,
-                                            onValueChange = { imageUrl = it },
-                                            label = { Text("სურათის URL") },
-                                            singleLine = true,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = Color(0xFFFF6A00),
-                                                unfocusedBorderColor = Color(0xFF2E3440)
-                                            ),
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-
-                                        if (imageUrl.isNotBlank()) {
-                                            TextButton(onClick = { imageUrl = "" }) {
-                                                Text("ფოტოს წაშლა (ცარიელი)", color = Color(0xFFFF4D4F), fontSize = 11.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
 
@@ -1794,14 +2284,17 @@ fun ProductEditDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA0A5B0))
                     ) {
-                        Text("გაუქმება")
+                        Text("გაუქმება", fontWeight = FontWeight.SemiBold)
                     }
 
                     Button(
@@ -1817,32 +2310,47 @@ fun ProductEditDialog(
                                 .map { it.trim().removePrefix("•").removePrefix("-").trim() }
                                 .filter { it.isNotBlank() }
 
+                            val normalizedCategory = category.trim().ifBlank {
+                                if (isSoftwareService) "პროგრამული სერვისები" else "ეკრანები"
+                            }
+                            val normalizedBrand = brand.trim().ifBlank {
+                                if (isSoftwareService) "OpenAI" else "Apple"
+                            }
+                            val savedImageUrl = imageUrl.trim().ifBlank {
+                                ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+                            }
+
                             val finalItem = product.copy(
                                 title = title.trim().ifBlank { if (isSoftwareService) "პროგრამული სერვისი" else "სათადარიგო ნაწილი" },
                                 price = normalizedPrice,
-                                brand = brand,
-                                category = category,
-                                type = if (isSoftwareService) "software" else product.type,
-                                subcategory = if (isSoftwareService) subcategory else product.subcategory,
+                                brand = normalizedBrand,
+                                category = normalizedCategory,
+                                type = if (normalizedCategory == "პროგრამული სერვისები" || isSoftwareService) "software" else "product",
+                                subcategory = subcategory.trim(),
                                 shortDescription = shortDescription.trim(),
                                 description = description.trim().ifBlank { shortDescription.trim() },
-                                features = if (isSoftwareService && parsedFeatures.isNotEmpty()) parsedFeatures else product.features,
-                                targetAudience = if (isSoftwareService) targetAudience.trim() else product.targetAudience,
-                                offerType = if (isSoftwareService) offerType.trim() else product.offerType,
-                                duration = if (isSoftwareService) duration.trim() else product.duration,
-                                accountType = if (isSoftwareService) accountType.trim() else product.accountType,
-                                activationTerms = if (isSoftwareService) activationTerms.trim() else product.activationTerms,
+                                features = if (parsedFeatures.isNotEmpty()) parsedFeatures else product.features,
+                                targetAudience = targetAudience.trim(),
+                                offerType = offerType.trim(),
+                                duration = duration.trim(),
+                                accountType = accountType.trim(),
+                                activationTerms = activationTerms.trim(),
                                 compatibleModels = compatibleModels.trim(),
-                                warranty = warranty.trim(),
-                                imageUrl = imageUrl.ifBlank { "https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=600" },
+                                warranty = warranty.trim().ifBlank { "6 თვე" },
+                                searchKeywords = searchKeywords.trim(),
+                                imageUrl = savedImageUrl,
                                 inStock = inStock,
                                 isFeatured = isFeatured,
                                 displayOrder = displayOrderInput.toIntOrNull() ?: product.displayOrder
                             )
                             onSave(finalItem)
                         },
+                        shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("save_product_button")
                     ) {
                         Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold)
                     }

@@ -754,7 +754,7 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             category = category,
             type = type,
             subcategory = subcat,
-            imageUrl = if (image.isBlank()) "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600" else image,
+            imageUrl = if (image.isBlank()) ProductImageManager.AUTO_GENERATED_IMAGE_MARKER else image,
             shortDescription = shortDesc,
             description = fullDesc,
             features = featuresList,
@@ -980,77 +980,78 @@ class FirestoreRepository(val db: FirebaseFirestore) {
      * - თუ მომხმარებელი ვერიფიცირებული ადმინისტრატორია და Firestore-ში კატალოგი ცარიელია ან ნაწილობრივაა
      *   ატვირთული, უსაფრთხო WriteBatch ნაწილებით (<= 400) ტვირთავს მხოლოდ ნაკლულ პროდუქტებს.
      */
-    suspend fun performSafeInitialMigrationIfNeeded(context: Context): Result<MigrationOutcome> {
-        return try {
-            val snapshot = db.collection("products").get().await()
-            val existingRemote = snapshot.documents.mapNotNull { parseProductDocument(it) }
-            val existingDocIds = snapshot.documents.map { it.id }.toSet()
-            val existingProductIds = existingRemote.map { it.id }.toSet()
+    suspend fun performSafeInitialMigrationIfNeeded(context: Context): Result<MigrationOutcome> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val snapshot = db.collection("products").get().await()
+                val existingRemote = snapshot.documents.mapNotNull { parseProductDocument(it) }
+                val existingDocIds = snapshot.documents.map { it.id }.toSet()
+                val existingProductIds = existingRemote.map { it.id }.toSet()
 
-            val deletedIds = AdminStorage.getDeletedProductIds(context)
-            val knownCloudDocIds = AdminStorage.getKnownCloudDocIds(context)
-            val localCatalog = AdminStorage.loadProducts(context)
+                val deletedIds = AdminStorage.getDeletedProductIds(context)
+                val knownCloudDocIds = AdminStorage.getKnownCloudDocIds(context)
+                val localCatalog = AdminStorage.loadProducts(context)
 
-            // გამოვთვალოთ მხოლოდ ის პროდუქტები, რომლებიც ჯერ საერთოდ არ არსებობს Firestore-ში
-            // და არც წინა სინქრონიზაციისას წაშლილა Cloud-იდან.
-            val missingProducts = localCatalog.filter { item ->
-                val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
-                item.id !in deletedIds &&
-                    docId !in existingDocIds &&
-                    item.id !in existingProductIds &&
-                    docId !in knownCloudDocIds
-            }.distinctBy { it.firestoreDocId.ifBlank { "prod_${it.id}" } }
+                // გამოვთვალოთ მხოლოდ ის პროდუქტები, რომლებიც ჯერ საერთოდ არ არსებობს Firestore-ში
+                // და არც წინა სინქრონიზაციისას წაშლილა Cloud-იდან.
+                val missingProducts = localCatalog.filter { item ->
+                    val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
+                    item.id !in deletedIds &&
+                        docId !in existingDocIds &&
+                        item.id !in existingProductIds &&
+                        docId !in knownCloudDocIds
+                }.distinctBy { it.firestoreDocId.ifBlank { "prod_${it.id}" } }
 
-            if (missingProducts.isEmpty()) {
-                val conflicts = AdminStorage.detectLocalVsCloudConflicts(context, existingRemote)
-                AdminStorage.setInitialCloudMigrationCompleted(context, true)
-                return Result.success(
-                    MigrationOutcome.AlreadyPopulated(
-                        remoteCount = existingRemote.size,
-                        conflicts = conflicts
-                    )
-                )
-            }
-
-            // შევამოწმოთ არის თუ არა მომხმარებელი ვერიფიცირებული ადმინი
-            val isAdmin = checkIsCurrentUserAdmin()
-            if (!isAdmin) {
-                return if (existingRemote.isNotEmpty()) {
+                if (missingProducts.isEmpty()) {
                     val conflicts = AdminStorage.detectLocalVsCloudConflicts(context, existingRemote)
-                    Result.success(
+                    AdminStorage.setInitialCloudMigrationCompleted(context, true)
+                    return@withContext Result.success(
                         MigrationOutcome.AlreadyPopulated(
                             remoteCount = existingRemote.size,
                             conflicts = conflicts
                         )
                     )
-                } else {
-                    Result.success(MigrationOutcome.SkippedNotAdmin)
                 }
-            }
 
-            var uploaded = 0
-            for (chunk in missingProducts.chunked(400)) {
-                val batch = db.batch()
-                for (item in chunk) {
-                    val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
-                    val docRef = db.collection("products").document(docId)
-                    val payload = buildProductPayload(item, includeCreatedAt = true)
-                    batch.set(docRef, payload, SetOptions.merge())
-                    uploaded++
+                // შევამოწმოთ არის თუ არა მომხმარებელი ვერიფიცირებული ადმინი
+                val isAdmin = checkIsCurrentUserAdmin()
+                if (!isAdmin) {
+                    return@withContext if (existingRemote.isNotEmpty()) {
+                        val conflicts = AdminStorage.detectLocalVsCloudConflicts(context, existingRemote)
+                        Result.success(
+                            MigrationOutcome.AlreadyPopulated(
+                                remoteCount = existingRemote.size,
+                                conflicts = conflicts
+                            )
+                        )
+                    } else {
+                        Result.success(MigrationOutcome.SkippedNotAdmin)
+                    }
                 }
-                batch.commit().await()
-            }
 
-            AdminStorage.setInitialCloudMigrationCompleted(context, true)
-            if (existingRemote.isEmpty()) {
-                AdminStorage.markLocalEditsSynced(context)
+                var uploaded = 0
+                for (chunk in missingProducts.chunked(400)) {
+                    val batch = db.batch()
+                    for (item in chunk) {
+                        val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
+                        val docRef = db.collection("products").document(docId)
+                        val payload = buildProductPayload(item, includeCreatedAt = true)
+                        batch.set(docRef, payload, SetOptions.merge())
+                        uploaded++
+                    }
+                    batch.commit().await()
+                }
+
+                AdminStorage.setInitialCloudMigrationCompleted(context, true)
+                if (existingRemote.isEmpty()) {
+                    AdminStorage.markLocalEditsSynced(context)
+                }
+                Result.success(MigrationOutcome.Migrated(uploaded))
+            } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.LIST, "products")
+                Result.failure(e)
             }
-            Result.success(MigrationOutcome.Migrated(uploaded))
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.LIST, "products")
-            Result.failure(e)
         }
-    }
 
     suspend fun addProduct(
         title: String,
