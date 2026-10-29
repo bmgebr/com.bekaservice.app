@@ -86,12 +86,19 @@ object AppPreferencesManager {
         setDarkMode(context, !isDarkMode)
     }
 
+    val selectedLanguage: String
+        get() = currentLanguage.code
+
     fun setLanguage(context: Context, language: AppLanguage) {
         currentLanguage = language
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_APP_LANG, language.code)
             .apply()
+    }
+
+    fun setLanguage(context: Context, code: String) {
+        setLanguage(context, AppLanguage.fromCode(code))
     }
 
     fun setOnboardingCompleted(context: Context, completed: Boolean = true) {

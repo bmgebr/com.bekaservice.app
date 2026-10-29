@@ -13,6 +13,12 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.example.ui.theme.RepairProTheme
@@ -1215,5 +1221,194 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
   }
+
+  @Test
+  fun `diagnostic greeting message has no competitor names and matches required Georgian copy`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    AppPreferencesManager.setLanguage(context, "ka")
+
+    val catalog = ProductRepository.getAllProducts()
+    val greetingTurn = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = DiagnosticMessage(role = "user", text = "გამარჯობა"),
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    // Must NOT contain competitor model names
+    assertFalse("Greeting must not mention ChatGPT", greetingTurn.text.contains("ChatGPT", ignoreCase = true))
+    assertFalse("Greeting must not mention Gemini", greetingTurn.text.contains("Gemini", ignoreCase = true))
+
+    // Must match required Georgian copy
+    val expectedGeorgianGreeting = "გამარჯობა! მე ვარ BEKASERVICE-ის AI დიაგნოსტიკური ასისტენტი. აღწერე ტელეფონის პრობლემა ან ატვირთე ფოტო და დაგეხმარები შესაძლო მიზეზებისა და შემოწმების ნაბიჯების განსაზღვრაში."
+    assertEquals(expectedGeorgianGreeting, greetingTurn.text.trim())
+    assertTrue("Greeting should not have unsolicited recommended products", greetingTurn.recommendedProductIds.isEmpty())
+
+    // Test English and Russian localized greetings
+    AppPreferencesManager.setLanguage(context, "en")
+    val enTurn = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = DiagnosticMessage(role = "user", text = "hello"),
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+    assertTrue(enTurn.text.contains("BEKASERVICE AI Diagnostics Assistant"))
+    assertFalse(enTurn.text.contains("ChatGPT"))
+
+    AppPreferencesManager.setLanguage(context, "ru")
+    val ruTurn = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = DiagnosticMessage(role = "user", text = "привет"),
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+    assertTrue(ruTurn.text.contains("AI-ассистент диагностики BEKASERVICE"))
+    assertFalse(ruTurn.text.contains("ChatGPT"))
+
+    // Reset back to Georgian
+    AppPreferencesManager.setLanguage(context, "ka")
+  }
+
+  @Test
+  fun `multi-turn conversation preserves active device and domain context on follow-up questions`() {
+    val catalog = ProductRepository.getAllProducts()
+
+    // Turn 1: User describes iPhone 13 screen flickering
+    val userTurn1 = DiagnosticMessage(role = "user", text = "iPhone 13 ეკრანი ციმციმებს და მწვანე ზოლები აქვს")
+    val assistantTurn1 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = userTurn1,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    assertNotNull(assistantTurn1.structuredSection)
+    assertEquals("iPhone 13", assistantTurn1.structuredSection?.deviceIdentification)
+    assertTrue(assistantTurn1.text.contains("iPhone 13") || assistantTurn1.text.contains("ეკრან"))
+    // Digital software like Canva/CapCut must NOT be recommended
+    val turn1Recs = assistantTurn1.recommendedProductIds.mapNotNull { id -> catalog.find { it.id == id } }
+    assertFalse("Hardware diagnosis must not recommend digital software", turn1Recs.any { SoftwareCatalogData.isDigitalSoftwareService(it) })
+
+    val historyAfterTurn1 = listOf(userTurn1, assistantTurn1)
+
+    // Turn 2: Follow-up question "რა შეიძლება იყოს მიზეზი?"
+    val userTurn2 = DiagnosticMessage(role = "user", text = "რა შეიძლება იყოს მიზეზი?")
+    val assistantTurn2 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = historyAfterTurn1,
+      currentMessage = userTurn2,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    // Must NOT ask for device model or symptoms again
+    assertFalse("Must not ask for device model again", assistantTurn2.text.contains("ტელეფონის ზუსტი მოდელი"))
+    assertFalse("Must not ask for symptoms again", assistantTurn2.text.contains("რა სიმპტომი აქვს"))
+    // Must retain iPhone 13 context and explain reasons for display problem
+    assertTrue("Must address reasons", assistantTurn2.text.contains("მიზეზ") || assistantTurn2.text.contains("გამომწვევი"))
+    assertTrue("Must retain active device iPhone 13", assistantTurn2.text.contains("iPhone 13"))
+    assertEquals("iPhone 13", assistantTurn2.structuredSection?.deviceIdentification)
+
+    val historyAfterTurn2 = historyAfterTurn1 + listOf(userTurn2, assistantTurn2)
+
+    // Turn 3: Follow-up question "როგორ შევამოწმო ეს?"
+    val userTurn3 = DiagnosticMessage(role = "user", text = "როგორ შევამოწმო ეს?")
+    val assistantTurn3 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = historyAfterTurn2,
+      currentMessage = userTurn3,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    assertFalse(assistantTurn3.text.contains("ტელეფონის ზუსტი მოდელი"))
+    assertTrue("Must provide verification steps", assistantTurn3.text.contains("ტესტ") || assistantTurn3.text.contains("შემოწმ"))
+    assertTrue(assistantTurn3.text.contains("iPhone 13"))
+
+    val historyAfterTurn3 = historyAfterTurn2 + listOf(userTurn3, assistantTurn3)
+
+    // Turn 4: User sends diagnostic test observation
+    val userTurn4 = DiagnosticMessage(role = "user", text = "ტესტის შედეგი: სატესტო ეკრანზეც ციმციმებს")
+    val assistantTurn4 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = historyAfterTurn3,
+      currentMessage = userTurn4,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    assertTrue("Must acknowledge test result", assistantTurn4.text.contains("ტესტის შედეგი") || assistantTurn4.text.contains("გაანალიზებულია"))
+    assertTrue(assistantTurn4.text.contains("iPhone 13"))
+
+    val historyAfterTurn4 = historyAfterTurn3 + listOf(userTurn4, assistantTurn4)
+
+    // Turn 5: User asks about data loss safety
+    val userTurn5 = DiagnosticMessage(role = "user", text = "მონაცემები წამეშლება?")
+    val assistantTurn5 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = historyAfterTurn4,
+      currentMessage = userTurn5,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    assertTrue("Must address user data safety", assistantTurn5.text.contains("მონაცემ") || assistantTurn5.text.contains("უსაფრთხო"))
+    assertTrue(assistantTurn5.text.contains("iPhone 13"))
+
+    val historyAfterTurn5 = historyAfterTurn4 + listOf(userTurn5, assistantTurn5)
+
+    // Turn 6: User switches topic to a different device
+    val userTurn6 = DiagnosticMessage(role = "user", text = "ახლა სხვა ტელეფონზე მაქვს კითხვა: Samsung Galaxy S23 არ იტენება")
+    val assistantTurn6 = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = historyAfterTurn5,
+      currentMessage = userTurn6,
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = catalog
+    )
+
+    // Must switch to Samsung Galaxy S23 and charging domain
+    assertTrue("Must identify Samsung Galaxy S23", assistantTurn6.text.contains("Samsung") || assistantTurn6.text.contains("S23"))
+    assertTrue("Must address charging domain", assistantTurn6.text.contains("დამუხტვ") || assistantTurn6.text.contains("დამტენ") || assistantTurn6.text.contains("პორტ"))
+    assertEquals("Samsung Galaxy S23", assistantTurn6.structuredSection?.deviceIdentification)
+  }
+
+  @Test
+  fun `intro card feature chips are aligned in 2-column equal-weight row with exact 28dp height`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        val palette = rememberDiagnosticsThemePalette()
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          DiagnosticCompactFeatureChip(
+            modifier = Modifier.weight(1f),
+            palette = palette,
+            icon = Icons.Default.Search,
+            label = "ფოტოს ანალიზი",
+            testTag = "diag_feature_chip_photo"
+          )
+          DiagnosticCompactFeatureChip(
+            modifier = Modifier.weight(1f),
+            palette = palette,
+            icon = Icons.Default.CheckCircle,
+            label = "ტექნიკური რჩევა",
+            testTag = "diag_feature_chip_tech"
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    val photoChipNode = composeTestRule.onNodeWithTag("diag_feature_chip_photo").assertIsDisplayed()
+    val techChipNode = composeTestRule.onNodeWithTag("diag_feature_chip_tech").assertIsDisplayed()
+
+    val photoBounds = photoChipNode.fetchSemanticsNode().boundsInRoot
+    val techBounds = techChipNode.fetchSemanticsNode().boundsInRoot
+
+    assertEquals(photoBounds.height, techBounds.height)
+    assertEquals(photoBounds.width, techBounds.width, 1.0f)
+  }
 }
+
 

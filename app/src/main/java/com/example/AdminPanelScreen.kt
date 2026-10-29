@@ -379,8 +379,10 @@ fun AdminPanelScreen(
         (baseBrands + dynamicBrands).distinct()
     }
 
+    val isDark = AppPreferencesManager.isDarkMode
+
     Scaffold(
-        containerColor = Color(0xFF0D0F12),
+        containerColor = AppThemeColorAdapter.adaptPageBackground(Color(0xFF0D0F12)),
         topBar = {
             TopAppBar(
                 title = {
@@ -396,7 +398,12 @@ fun AdminPanelScreen(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("ADMIN მართვის პანელი", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "ADMIN მართვის პანელი",
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                             Text("BEKASERVICE • სრული კონტროლი", color = Color(0xFFFF7A00), fontSize = 10.sp)
                         }
                     }
@@ -406,10 +413,12 @@ fun AdminPanelScreen(
                         Icon(Icons.Default.VpnKey, contentDescription = "Change PIN", tint = Color(0xFFFF6A00))
                     }
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = if (isDark) Color.White else Color(0xFF1E293B))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF16191E))
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (isDark) Color(0xFF16191E) else Color.White
+                )
             )
         }
     ) { innerPadding ->
@@ -420,8 +429,8 @@ fun AdminPanelScreen(
         ) {
             // ტაბების ზოლი
             Surface(
-                color = Color(0xFF12151B),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF222630)),
+                color = if (isDark) Color(0xFF12151B) else Color.White,
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF222630) else Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -451,13 +460,15 @@ fun AdminPanelScreen(
                                 .clickable { adminTab = index }
                                 .padding(horizontal = 2.dp)
                         ) {
-                            Text(
-                                text = title,
-                                color = if (isSelected) Color.White else Color(0xFFA0A5B0),
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                            )
+                            CompositionLocalProvider(LocalPreserveWhiteText provides isSelected) {
+                                Text(
+                                    text = title,
+                                    color = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -550,10 +561,10 @@ fun AdminPanelScreen(
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
-                                        color = Color(0xFF16191E),
+                                        color = if (isDark) Color(0xFF16191E) else Color.White,
                                         border = androidx.compose.foundation.BorderStroke(
                                             1.dp,
-                                            if (productSearch.isNotEmpty()) Color(0xFFFF6A00) else Color(0xFF222630)
+                                            if (productSearch.isNotEmpty()) Color(0xFFFF6A00) else if (isDark) Color(0xFF222630) else Color(0xFFCBD5E1)
                                         ),
                                         modifier = Modifier
                                             .weight(1f)
@@ -568,7 +579,7 @@ fun AdminPanelScreen(
                                             Icon(
                                                 Icons.Default.Search,
                                                 contentDescription = null,
-                                                tint = if (productSearch.isNotEmpty()) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
+                                                tint = if (productSearch.isNotEmpty()) Color(0xFFFF6A00) else if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                                 modifier = Modifier.size(17.dp)
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
@@ -588,7 +599,7 @@ fun AdminPanelScreen(
                                                         Text(
                                                             text = "ძებნა: ChatGPT, Google AI, iPhone...",
                                                             fontSize = 11.5.sp,
-                                                            color = Color(0xFF6E7582),
+                                                            color = if (isDark) Color(0xFF6E7582) else Color(0xFF94A3B8),
                                                             maxLines = 1,
                                                             softWrap = false,
                                                             overflow = TextOverflow.Ellipsis
@@ -605,7 +616,7 @@ fun AdminPanelScreen(
                                                     Icon(
                                                         Icons.Default.Clear,
                                                         contentDescription = "Clear",
-                                                        tint = Color(0xFFA0A5B0),
+                                                        tint = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                                         modifier = Modifier.size(15.dp)
                                                     )
                                                 }
@@ -615,10 +626,10 @@ fun AdminPanelScreen(
 
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
-                                        color = if (showFiltersExpanded) Color(0xFFFF6A00).copy(alpha = 0.2f) else Color(0xFF16191E),
+                                        color = if (showFiltersExpanded) Color(0xFFFF6A00).copy(alpha = if (isDark) 0.2f else 0.12f) else if (isDark) Color(0xFF16191E) else Color.White,
                                         border = androidx.compose.foundation.BorderStroke(
                                             1.dp,
-                                            if (showFiltersExpanded) Color(0xFFFF6A00) else Color(0xFF222630)
+                                            if (showFiltersExpanded) Color(0xFFFF6A00) else if (isDark) Color(0xFF222630) else Color(0xFFCBD5E1)
                                         ),
                                         modifier = Modifier
                                             .size(44.dp)
@@ -628,7 +639,7 @@ fun AdminPanelScreen(
                                             Icon(
                                                 imageVector = Icons.Default.FilterList,
                                                 contentDescription = "ფილტრები",
-                                                tint = if (showFiltersExpanded) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
+                                                tint = if (showFiltersExpanded) Color(0xFFFF6A00) else if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -664,15 +675,15 @@ fun AdminPanelScreen(
                                                 shape = RoundedCornerShape(16.dp),
                                                 color = when {
                                                     isSelected -> Color(0xFFFF6A00)
-                                                    isSoftwareCat -> Color(0xFF1E222D)
-                                                    else -> Color(0xFF16191E)
+                                                    isSoftwareCat -> if (isDark) Color(0xFF1E222D) else Color(0xFFFFF7ED)
+                                                    else -> if (isDark) Color(0xFF16191E) else Color.White
                                                 },
                                                 border = androidx.compose.foundation.BorderStroke(
                                                     1.dp,
                                                     when {
                                                         isSelected -> Color(0xFFFF7A00)
                                                         isSoftwareCat -> Color(0xFFFF7A00).copy(alpha = 0.55f)
-                                                        else -> Color(0xFF242830)
+                                                        else -> if (isDark) Color(0xFF242830) else Color(0xFFCBD5E1)
                                                     }
                                                 ),
                                                 modifier = Modifier.clickable {
@@ -682,13 +693,15 @@ fun AdminPanelScreen(
                                                     }
                                                 }
                                             ) {
-                                                Text(
-                                                    text = if (isSoftwareCat) "💻 $cat" else cat,
-                                                    color = if (isSelected) Color.White else if (isSoftwareCat) Color(0xFFFF9E40) else Color(0xFFA0A5B0),
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = if (isSelected || isSoftwareCat) FontWeight.Bold else FontWeight.Medium,
-                                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
-                                                )
+                                                CompositionLocalProvider(LocalPreserveWhiteText provides isSelected) {
+                                                    Text(
+                                                        text = if (isSoftwareCat) "💻 $cat" else cat,
+                                                        color = if (isSelected) Color.White else if (isSoftwareCat) Color(0xFFFF7A00) else if (isDark) Color(0xFFA0A5B0) else Color(0xFF475569),
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = if (isSelected || isSoftwareCat) FontWeight.Bold else FontWeight.Medium,
+                                                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -700,16 +713,16 @@ fun AdminPanelScreen(
                                                 val isSelected = selectedSubcategoryFilter == subcat
                                                 Surface(
                                                     shape = RoundedCornerShape(14.dp),
-                                                    color = if (isSelected) Color(0xFFFF7A00).copy(alpha = 0.22f) else Color(0xFF12151B),
+                                                    color = if (isSelected) Color(0xFFFF7A00).copy(alpha = if (isDark) 0.22f else 0.15f) else if (isDark) Color(0xFF12151B) else Color.White,
                                                     border = androidx.compose.foundation.BorderStroke(
                                                         1.dp,
-                                                        if (isSelected) Color(0xFFFF7A00) else Color(0xFF262B36)
+                                                        if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF262B36) else Color(0xFFE2E8F0)
                                                     ),
                                                     modifier = Modifier.clickable { selectedSubcategoryFilter = subcat }
                                                 ) {
                                                     Text(
                                                         text = subcat,
-                                                        color = if (isSelected) Color(0xFFFF7A00) else Color(0xFFCBD5E1),
+                                                        color = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
                                                         fontSize = 10.5.sp,
                                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
@@ -725,15 +738,15 @@ fun AdminPanelScreen(
                                             val isSelected = selectedBrandFilter == brand
                                             Surface(
                                                 shape = RoundedCornerShape(16.dp),
-                                                color = if (isSelected) Color(0xFFFF6A00).copy(alpha = 0.2f) else Color(0xFF16191E),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF242830)),
+                                                color = if (isSelected) Color(0xFFFF6A00).copy(alpha = if (isDark) 0.2f else 0.12f) else if (isDark) Color(0xFF16191E) else Color.White,
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else if (isDark) Color(0xFF242830) else Color(0xFFCBD5E1)),
                                                 modifier = Modifier.clickable { selectedBrandFilter = brand }
                                             ) {
                                                 Text(
                                                     text = brand,
-                                                    color = if (isSelected) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
+                                                    color = if (isSelected) Color(0xFFFF6A00) else if (isDark) Color(0xFFA0A5B0) else Color(0xFF475569),
                                                     fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Medium,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                                 )
                                             }
@@ -744,8 +757,8 @@ fun AdminPanelScreen(
                                 if (cloudSyncStatusMessage != null) {
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFF1E293B),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF60A5FA).copy(alpha = 0.45f)),
+                                        color = if (isDark) Color(0xFF1E293B) else Color(0xFFEFF6FF),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF60A5FA).copy(alpha = 0.45f) else Color(0xFF93C5FD)),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Row(
@@ -755,7 +768,7 @@ fun AdminPanelScreen(
                                         ) {
                                             Text(
                                                 text = cloudSyncStatusMessage ?: "",
-                                                color = Color(0xFF93C5FD),
+                                                color = if (isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8),
                                                 fontSize = 10.5.sp,
                                                 modifier = Modifier.weight(1f)
                                             )
@@ -763,7 +776,7 @@ fun AdminPanelScreen(
                                                 onClick = { cloudSyncStatusMessage = null },
                                                 modifier = Modifier.size(20.dp)
                                             ) {
-                                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Color(0xFF93C5FD), modifier = Modifier.size(14.dp))
+                                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = if (isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8), modifier = Modifier.size(14.dp))
                                             }
                                         }
                                     }
@@ -776,14 +789,14 @@ fun AdminPanelScreen(
                                 ) {
                                     Text(
                                         text = "სულ: ${filteredList.size} / ${products.size} პოზიცია",
-                                        color = Color(0xFFA0A5B0),
+                                        color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                         fontSize = 11.sp,
                                         modifier = Modifier.weight(1f)
                                     )
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFF1F2A38),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF60A5FA).copy(alpha = 0.5f)),
+                                        color = if (isDark) Color(0xFF1F2A38) else Color(0xFFEFF6FF),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF60A5FA).copy(alpha = 0.5f) else Color(0xFF93C5FD)),
                                         modifier = Modifier.clickable(enabled = !isCloudOperationInProgress) {
                                             isCloudOperationInProgress = true
                                             coroutineScope.launch {
@@ -807,11 +820,11 @@ fun AdminPanelScreen(
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(14.dp))
+                                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB), modifier = Modifier.size(14.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
                                                 text = if (isCloudOperationInProgress) "იტვირთება..." else "Cloud სინქრონიზაცია",
-                                                color = Color(0xFF60A5FA),
+                                                color = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB),
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -1394,14 +1407,16 @@ fun ProductEditDialog(
         )
     }
 
+    val isDark = AppPreferencesManager.isDarkMode
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
             shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF16191E),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.55f)),
+            color = if (isDark) Color(0xFF16191E) else Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = if (isDark) 0.55f else 0.45f)),
             modifier = Modifier
                 .fillMaxWidth(0.95f)
                 .fillMaxHeight(0.92f)
@@ -1424,7 +1439,7 @@ fun ProductEditDialog(
                                 isSoftwareService -> "✏️ პროგრამული სერვისის რედაქტირება"
                                 else -> "✏️ პროდუქტის რედაქტირება"
                             },
-                            color = Color.White,
+                            color = if (isDark) Color.White else Color(0xFF0F172A),
                             fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -1435,7 +1450,7 @@ fun ProductEditDialog(
                         )
                     }
                     IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFFA0A5B0))
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B))
                     }
                 }
 
@@ -1458,10 +1473,12 @@ fun ProductEditDialog(
                                 placeholder = { Text("მაგ: Adobe Acrobat Pro, ChatGPT Plus, iPhone 15 ეკრანი...", fontSize = 12.sp) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                    unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
                                     focusedBorderColor = Color(0xFFFF6A00),
-                                    unfocusedBorderColor = Color(0xFF2E3440)
+                                    unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1),
+                                    focusedContainerColor = if (isDark) Color.Transparent else Color(0xFFF8FAFC),
+                                    unfocusedContainerColor = if (isDark) Color.Transparent else Color(0xFFF8FAFC)
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1507,8 +1524,9 @@ fun ProductEditDialog(
                                 },
                                 enabled = !isAiGenerating,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF1E293B),
-                                    disabledContainerColor = Color(0xFF161C28)
+                                    containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFFFF7ED),
+                                    contentColor = if (isDark) Color.White else Color(0xFFC2410C),
+                                    disabledContainerColor = if (isDark) Color(0xFF161C28) else Color(0xFFF1F5F9)
                                 ),
                                 shape = RoundedCornerShape(12.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00)),
@@ -1526,7 +1544,7 @@ fun ProductEditDialog(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         "AI ამუშავებს ინფორმაციას...",
-                                        color = Color(0xFFFF9E40),
+                                        color = if (isDark) Color(0xFFFF9E40) else Color(0xFFC2410C),
                                         fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -1540,7 +1558,7 @@ fun ProductEditDialog(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         "✨ AI-ით ყველა ველის ავტო-შევსება",
-                                        color = Color.White,
+                                        color = if (isDark) Color.White else Color(0xFFC2410C),
                                         fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -1550,15 +1568,15 @@ fun ProductEditDialog(
                             if (!aiStatusMessage.isNullOrBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF0F2618),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1B4E2E)),
+                                    color = if (isDark) Color(0xFF0F2618) else Color(0xFFDCFCE7),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF1B4E2E) else Color(0xFF86EFAC)),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .testTag(if (isAiGenerating) "ai_status_loading" else "ai_status_completed")
                                 ) {
                                     Text(
                                         text = aiStatusMessage!!,
-                                        color = Color(0xFF4ADE80),
+                                        color = if (isDark) Color(0xFF4ADE80) else Color(0xFF166534),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
@@ -3704,11 +3722,12 @@ fun AdminOrdersManagementView() {
     ) {
         item(key = "orders_header") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val isDark = AppPreferencesManager.isDarkMode
                 // ჰედერი
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF16191E),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF282D37)),
+                    color = if (isDark) Color(0xFF16191E) else Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF282D37) else Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -3717,10 +3736,15 @@ fun AdminOrdersManagementView() {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("📦 შეკვეთების მართვა", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                "📦 შეკვეთების მართვა",
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                             Text(
                                 text = "სულ შეკვეთები: ${ordersList.size} | ნაჩვენებია: ${filteredOrders.size}",
-                                color = Color(0xFFA0A5B0),
+                                color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                 fontSize = 11.5.sp
                             )
                         }
@@ -3741,20 +3765,22 @@ fun AdminOrdersManagementView() {
                         val isSelected = selectedStatusFilter == status
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1C2026),
+                            color = if (isSelected) Color(0xFFFF6A00) else if (isDark) Color(0xFF1C2026) else Color.White,
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
-                                if (isSelected) Color(0xFFFF7A00) else Color(0xFF2E3440)
+                                if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
                             ),
                             modifier = Modifier.clickable { selectedStatusFilter = status }
                         ) {
-                            Text(
-                                text = status,
-                                color = Color.White,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                            )
+                            CompositionLocalProvider(LocalPreserveWhiteText provides isSelected) {
+                                Text(
+                                    text = status,
+                                    color = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF475569),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
                         }
                     }
                 }

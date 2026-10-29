@@ -228,7 +228,7 @@ fun ProductSmartVisual(
  * AI-ით პროდუქტის ყველა ველის ავტომატური მოძიება და შევსება დასახელების მიხედვით.
  */
 object AdminProductAiGenerator {
-    private val candidateModels = listOf("gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest")
+    private val candidateModels = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -408,10 +408,11 @@ object AdminProductAiGenerator {
             lower.contains("6 თვ") || lower.contains("6 month") -> "6 თვე"
             lower.contains("3 თვ") || lower.contains("3 month") -> "3 თვე"
             lower.contains("უვადო") || lower.contains("lifetime") || lower.contains("სამუდამო") -> "უვადო (Lifetime)"
+            lower.contains("ყოველთვიურ") || lower.contains("1 თვ") || lower.contains("month") -> "1 თვე"
             else -> "1 თვე"
         }
 
-        // ბრენდის ავტომატური ამოცნობა (მათ შორის არასტანდარტული/ახალი ბრენდების!)
+        // ბრენდის ავტომატური ამოცნობა (მათ შორის Samsung S20-S25, Apple, Xiaomi, Adobe, AI და სხვ.)
         val detectedBrand = when {
             lower.contains("chatgpt") || lower.contains("openai") || lower.contains("gpt") || lower.contains("sora") -> "OpenAI"
             lower.contains("claude") || lower.contains("anthropic") -> "Anthropic"
@@ -429,7 +430,6 @@ object AdminProductAiGenerator {
             lower.contains("canva") || lower.contains("კანვა") -> "Canva"
             lower.contains("capcut") || lower.contains("კაპკატ") -> "CapCut"
             lower.contains("adobe") || lower.contains("photoshop") || lower.contains("premiere") || lower.contains("acrobat") || lower.contains("illustrator") -> "Adobe"
-            lower.contains("pdf") && !lower.contains("adobe") -> "PDF Pro"
             lower.contains("figma") -> "Figma"
             lower.contains("youtube") || lower.contains("იუთუბ") -> "YouTube"
             lower.contains("spotify") || lower.contains("სპოტიფაი") -> "Spotify"
@@ -446,7 +446,9 @@ object AdminProductAiGenerator {
             lower.contains("kaspersky") -> "Kaspersky"
             lower.contains("nordvpn") || lower.contains("vpn") -> "NordVPN"
             lower.contains("iphone") || lower.contains("აიფონ") || lower.contains("ipad") || lower.contains("macbook") || lower.contains("airpods") || lower.contains("apple") || lower.contains("icloud") || lower.contains("magsafe") -> "Apple"
-            lower.contains("samsung") || lower.contains("სამსუნგ") || lower.contains("galaxy") -> "Samsung"
+            lower.contains("samsung") || lower.contains("სამსუნგ") || lower.contains("galaxy") ||
+                lower.contains("s25") || lower.contains("s24") || lower.contains("s23") || lower.contains("s22") || lower.contains("s21") || lower.contains("s20") ||
+                lower.contains("z fold") || lower.contains("z flip") || lower.contains("a55") || lower.contains("a54") || lower.contains("a35") || lower.contains("a15") -> "Samsung"
             lower.contains("xiaomi") || lower.contains("შაომი") || lower.contains("redmi") || lower.contains("poco") -> "Xiaomi"
             lower.contains("oneplus") -> "OnePlus"
             lower.contains("honor") || lower.contains("ჰონორ") -> "Honor"
@@ -458,10 +460,75 @@ object AdminProductAiGenerator {
             lower.contains("sony") -> "Sony"
             lower.contains("jbl") -> "JBL"
             else -> {
-                // პირველი ლათინური ან ქართული სიტყვის ამოღება ბრენდად, თუ სპეციფიკური სახელია
                 val firstWord = title.split(" ", "-", "/").firstOrNull { it.length >= 2 } ?: "BEKASERVICE"
                 firstWord.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
             }
+        }
+
+        // განბლოკვის / პროგრამული სერვისის შემოწმება (მათ შორის Carrier Unlock, FRP, iCloud, CPID, EDL)
+        val isUnlockService = lower.contains("unlock") || lower.contains("განბლოკვ") || lower.contains("frp") ||
+            lower.contains("icloud") || lower.contains("t-mobile") || lower.contains("verizon") || lower.contains("at&t") ||
+            lower.contains("carrier") || lower.contains("cpid") || lower.contains("mdm") || lower.contains("knox") ||
+            lower.contains("sim lock") || lower.contains("edl") || lower.contains("flashing")
+
+        // 1. მობილურის პროგრამული განბლოკვა / Carrier Unlock
+        if (isUnlockService) {
+            val detectedModel = when {
+                lower.contains("s25 ultra") -> "Samsung Galaxy S25 Ultra"
+                lower.contains("s25") -> "Samsung Galaxy S25"
+                lower.contains("s24 ultra") -> "Samsung Galaxy S24 Ultra"
+                lower.contains("s24") -> "Samsung Galaxy S24"
+                lower.contains("s23 ultra") -> "Samsung Galaxy S23 Ultra"
+                lower.contains("s23") -> "Samsung Galaxy S23"
+                lower.contains("16 pro max") -> "iPhone 16 Pro Max"
+                lower.contains("16 pro") -> "iPhone 16 Pro"
+                lower.contains("16") -> "iPhone 16"
+                lower.contains("15 pro max") -> "iPhone 15 Pro Max"
+                lower.contains("15 pro") -> "iPhone 15 Pro"
+                lower.contains("15") -> "iPhone 15"
+                else -> title.replace("unlock", "", ignoreCase = true)
+                    .replace("t-mobile", "", ignoreCase = true)
+                    .replace("verizon", "", ignoreCase = true)
+                    .replace("at&t", "", ignoreCase = true)
+                    .replace("cpid", "", ignoreCase = true)
+                    .trim().ifBlank { "$detectedBrand სმარტფონი" }
+            }
+
+            val unlockPrice = when {
+                lower.contains("s25") -> "389 ₾"
+                lower.contains("s24") -> "280 ₾"
+                lower.contains("s23") -> "210 ₾"
+                lower.contains("16") -> "320 ₾"
+                lower.contains("15") -> "240 ₾"
+                lower.contains("icloud") -> "95 ₾"
+                lower.contains("frp") -> "45 ₾"
+                else -> "65 ₾"
+            }
+
+            return GeneratedProductFields(
+                title = title,
+                price = unlockPrice,
+                shortDescription = "$title — ოფიციალური ქარხნული განბლოკვა (Factory/Carrier Unlock), SIM შეზღუდვების მოხსნა და სისტემის სრული აღდგენა მუდმივი გარანტიით.",
+                description = "$title წარმოადგენს BEKASERVICE-ის ოფიციალურ სერვერულ და USB პროგრამულ მომსახურებას. განბლოკვის შემდეგ ტელეფონი მუშაობს Silknet, Magti და Cellfie ქსელებზე შეუზღუდავად, ინარჩუნებს სისტემურ განახლებებს და არ იბლოკება ქარხნული გადატვირთვის დროს.",
+                category = "პროგრამული სერვისები",
+                brand = detectedBrand,
+                isSoftware = true,
+                subcategory = "მობილურის პროგრამირება და განბლოკვა",
+                offerType = "დისტანციური USB / Official Unlock",
+                duration = "სამუდამო (Permanent Unlock)",
+                accountType = "სერვერული CPID / USB Remote Flash",
+                features = listOf(
+                    "მოწყობილობის მუდმივი (Permanent) ოფიციალური განბლოკვა",
+                    "ყველა ქართული და საერთაშორისო SIM ბარათის მხარდაჭერა (Silknet, Magti, Cellfie)",
+                    "ქარხნული OTA განახლებებისა და სისტემური ფუნქციების სრული შენარჩუნება",
+                    "დისტანციური მომსახურება BEKASERVICE-ის ინჟინრის მიერ"
+                ),
+                targetAudience = "$detectedModel-ის მფლობელები, რომელთა მოწყობილობაც დაბლოკილია ქსელზე ან ოპერატორზე.",
+                activationTerms = "განბლოკვა ხორციელდება დისტანციურად კომპიუტერთან (USB კაბელით) ან ოფიციალური სერვერული მოთხოვნით IMEI-ს მეშვეობით 15-45 წუთში.",
+                compatibleModels = detectedModel,
+                warranty = "უვადო გარანტია (ქარხნულ გადატვირთვაზე/განახლებაზე არ იბლოკება)",
+                searchKeywords = "${title.lowercase()}, ${detectedBrand.lowercase()}, unlock, sim lock, cpid, t-mobile, frp, imei"
+            )
         }
 
         // არის თუ არა აპარატურული ნაწილი ან აქსესუარი
@@ -492,10 +559,10 @@ object AdminProductAiGenerator {
             }
 
             val estimatedPrice = when {
-                isDisplay && (lower.contains("16 pro") || lower.contains("s24 ultra")) -> "350 ₾"
+                isDisplay && (lower.contains("16 pro") || lower.contains("s25 ultra") || lower.contains("s24 ultra")) -> "350 ₾"
                 isDisplay && (lower.contains("15 pro") || lower.contains("14 pro") || lower.contains("s23 ultra")) -> "270 ₾"
                 isDisplay -> "160 ₾"
-                isBattery && (lower.contains("15") || lower.contains("16") || lower.contains("s24")) -> "95 ₾"
+                isBattery && (lower.contains("15") || lower.contains("16") || lower.contains("s25") || lower.contains("s24")) -> "95 ₾"
                 isBattery -> "75 ₾"
                 isCamera -> "180 ₾"
                 isHousing -> "190 ₾"
@@ -544,56 +611,71 @@ object AdminProductAiGenerator {
         }
 
         // პროგრამული სერვისის / ციფრული გამოწერის ანალიზი
-        val isPdfOrDoc = lower.contains("pdf") || lower.contains("acrobat") || lower.contains("foxit") || lower.contains("დოკუმენტ")
+        val isAcrobatOrPdf = lower.contains("acrobat") || lower.contains("pdf")
         val isAiService = lower.contains("ai") || lower.contains("gpt") || lower.contains("claude") || lower.contains("gemini") ||
             lower.contains("grok") || lower.contains("perplexity") || lower.contains("cursor") || lower.contains("lovable") ||
             lower.contains("midjourney") || lower.contains("runway") || lower.contains("suno") || lower.contains("elevenlabs") || lower.contains("deepseek")
         val isDesignOrMedia = lower.contains("canva") || lower.contains("capcut") || lower.contains("adobe") || lower.contains("photoshop") ||
             lower.contains("premiere") || lower.contains("figma") || lower.contains("youtube") || lower.contains("spotify") ||
             lower.contains("netflix") || lower.contains("disney")
-        val isUnlockService = lower.contains("frp") || lower.contains("icloud") || lower.contains("unlock") || lower.contains("განბლოკვ") ||
-            lower.contains("edl") || lower.contains("flashing")
+        val isOfficeOrWin = lower.contains("office") || lower.contains("windows") || lower.contains("365") || lower.contains("word") || lower.contains("excel")
 
         val subcategory = when {
             isAiService -> SoftwareCatalogData.SUBCAT_AI
-            isDesignOrMedia -> SoftwareCatalogData.SUBCAT_CREATIVE
-            isUnlockService -> SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK
+            isOfficeOrWin -> SoftwareCatalogData.SUBCAT_LICENSES
+            isDesignOrMedia || isAcrobatOrPdf -> SoftwareCatalogData.SUBCAT_CREATIVE
             lower.contains("gmail") || lower.contains("google storage") || lower.contains("google one") -> SoftwareCatalogData.SUBCAT_GOOGLE
             else -> SoftwareCatalogData.SUBCAT_LICENSES
         }
 
         val price = when {
-            isPdfOrDoc -> "25 ₾"
+            isAcrobatOrPdf -> "25 ₾"
+            lower.contains("claude") -> "39 ₾"
             lower.contains("chatgpt plus") -> "65 ₾"
+            lower.contains("chatgpt pro") -> "550 ₾"
             lower.contains("canva") -> "25 ₾"
             lower.contains("capcut") -> "35 ₾"
             lower.contains("youtube") || lower.contains("spotify") || lower.contains("netflix") || lower.contains("telegram") -> "25 ₾"
-            lower.contains("office") || lower.contains("windows") -> "45 ₾"
+            isOfficeOrWin -> "45 ₾"
             lower.contains("adobe") -> "65 ₾"
-            isUnlockService -> "45 ₾"
             detectedDuration.contains("12 თვე") -> "120 ₾"
             else -> "35 ₾"
         }
 
         val shortDesc = when {
-            isPdfOrDoc -> "$title — პროფესიონალური PDF რედაქტირების, კონვერტაციის (Word/Excel), OCR ტექსტის ამოცნობისა და ელექტრონული ხელმოწერის სრული პრემიუმ პაკეტი."
+            isAcrobatOrPdf -> "$title — პროფესიონალური PDF რედაქტირების, კონვერტაციის (Word/Excel), OCR ტექსტის ამოცნობისა და ელექტრონული ხელმოწერის სრული პრემიუმ პაკეტი."
+            lower.contains("claude") -> "$title — უახლესი Claude 3.7 Sonnet მოდელი გაზრდილი ლიმიტებით, Extended Thinking გაღრმავებული აზროვნებითა და კოდის უმაღლესი სიზუსტით."
             isAiService -> "$title — უახლესი თაობის AI მოდელებზე სრული პრემიუმ წვდომა გაზრდილი ლიმიტებით, სწრაფი გენერაციითა და პროფესიონალური ინსტრუმენტებით."
+            isOfficeOrWin -> "$title — ოფიციალური საოფისე პაკეტისა და სისტემის ლიცენზია სრული განახლებებით, დისტანციური გააქტიურებითა და გარანტიით."
             isDesignOrMedia -> "$title — ოფიციალური პრემიუმ გამოწერა შეუზღუდავი რესურსებით, რეკლამების გარეშე და უმაღლესი ხარისხის ექსპორტით ყველა მოწყობილობაზე."
-            isUnlockService -> "$title — მოწყობილობის უსაფრთხო, ოფიციალური პროგრამული განბლოკვა და სისტემური აღდგენა მონაცემთა დაზიანების გარეშე."
             else -> "$title — ოფიციალური პროგრამული სერვისი და პრემიუმ ლიცენზია სრული ფუნქციონალით, სწრაფი აქტივაციითა და გარანტიით."
         }
 
         val fullDesc = when {
-            isPdfOrDoc -> "$title გაძლევთ სრულ წვდომას PDF დოკუმენტების რედაქტირების, შექმნის, გაერთიანების, დაცვისა და Word/Excel/PowerPoint ფორმატებში უზუსტესი კონვერტაციის ინსტრუმენტებზე. მოიცავს OCR სკანირებული ტექსტის ამოცნობას, ციფრულ ხელმოწერასა და ღრუბლოვან სინქრონიზაციას კომპიუტერსა და მობილურზე."
+            isAcrobatOrPdf -> "$title გაძლევთ სრულ წვდომას PDF დოკუმენტების რედაქტირების, შექმნის, გაერთიანების, დაცვისა და Word/Excel/PowerPoint ფორმატებში უზუსტესი კონვერტაციის ინსტრუმენტებზე. მოიცავს OCR სკანირებული ტექსტის ამოცნობას, ციფრულ ხელმოწერასა და ღრუბლოვან სინქრონიზაციას კომპიუტერსა და მობილურზე."
+            lower.contains("claude") -> "$title წარმოადგენს Anthropic-ის ოფიციალურ პრემიუმ გამოწერას. იძლევა სრულ წვდომას Claude 3.7 Sonnet-ის წამყვან ინტელექტუალურ შესაძლებლობებზე, რთული დოკუმენტებისა და კოდის ბაზების ანალიზზე. BEKASERVICE უზრუნველყოფს სწრაფ აქტივაციასა და სრულ საგარანტიო მხარდაჭერას."
+            isOfficeOrWin -> "$title წარმოადგენს Microsoft-ის ოფიციალურ ლიცენზიას, რომელიც მოიცავს ყველა აუცილებელ საოფისე ინსტრუმენტს (Word, Excel, PowerPoint, Outlook) ან Windows 11 Pro-ს ოფიციალურ Retail აქტივაციას. BEKASERVICE-ის ინჟინერი უზრუნველყოფს დისტანციურ ინსტალაციასა და მუდმივ გარანტიას."
             else -> "$title წარმოადგენს ოფიციალურ პრემიუმ პროგრამულ სერვისს, რომელიც უზრუნველყოფს სრულ წვდომას პლატფორმის ყველა პროფესიონალურ ფუნქციაზე. BEKASERVICE უზრუნველყოფს სწრაფ დისტანციურ აქტივაციას, უსაფრთხო კონფიგურაციასა და სრულ ტექნიკურ მხარდაჭერას გამოწერის მთელი პერიოდის განმავლობაში."
         }
 
         val features = when {
-            isPdfOrDoc -> listOf(
+            isAcrobatOrPdf -> listOf(
                 "PDF ფაილების სრული ტექსტური და გრაფიკული რედაქტირება",
                 "მყისიერი კონვერტაცია PDF ↔ Word, Excel, PowerPoint და სურათებში",
                 "OCR ოპტიკური ამოცნობა სკანირებული დოკუმენტებისთვის",
                 "დოკუმენტების გაერთიანება, დაყოფა, პაროლით დაცვა და ხელმოწერა"
+            )
+            lower.contains("claude") -> listOf(
+                "სრული წვდომა Claude 3.7 Sonnet-სა და Extended Thinking რეჟიმზე",
+                "დიდი მოცულობის დოკუმენტებისა და რთული კოდის სიღრმისეული ანალიზი",
+                "Artifacts ინტერაქტიული სამუშაო სივრცე და სწრაფი გენერაცია",
+                "მუშაობს ვებ-ბრაუზერში, iOS, Android, Mac და Windows-ზე"
+            )
+            isOfficeOrWin -> listOf(
+                "Word, Excel, PowerPoint, Outlook და OneNote-ის სრული პაკეტი",
+                "ოფიციალური ონლაინ აქტივაცია Microsoft-ის სერვერებიდან",
+                "ქარხნული უსაფრთხოების განახლებების სრული მხარდაჭერა",
+                "BEKASERVICE-ის დისტანციური დახმარება და ოფიციალური გარანტია"
             )
             isAiService -> listOf(
                 "სრული წვდომა ფლაგმანურ AI მოდელებსა და სწრაფ რეჟიმზე",
@@ -609,6 +691,12 @@ object AdminProductAiGenerator {
             )
         }
 
+        val accountType = when {
+            lower.contains("shared") -> "Shared ანგარიში"
+            isOfficeOrWin -> "Retail ლიცენზიის გასაღები (Key)"
+            else -> "პირადი ანგარიში (Private)"
+        }
+
         return GeneratedProductFields(
             title = title,
             price = price,
@@ -620,11 +708,11 @@ object AdminProductAiGenerator {
             subcategory = subcategory,
             offerType = if (detectedDuration.contains("უვადო")) "უვადო ლიცენზია (Lifetime)" else "პრემიუმ გამოწერა ($detectedDuration)",
             duration = detectedDuration,
-            accountType = "პირადი ანგარიში (Private) ან ლიცენზია",
+            accountType = accountType,
             features = features,
             targetAudience = "სტუდენტები, ოფისის თანამშრომლები, დიზაინერები და პროფესიონალები, რომლებსაც სჭირდებათ $title-ის სრული პრემიუმ შესაძლებლობები.",
             activationTerms = "აქტივაცია სრულდება დისტანციურად 10-15 წუთში BEKASERVICE-ის სრული გარანტიითა და მხარდაჭერით.",
-            compatibleModels = "Windows, macOS, iOS, Android, Web",
+            compatibleModels = if (isOfficeOrWin) "Windows 10/11, macOS" else "Windows, macOS, iOS, Android, Web",
             warranty = "აქტიური გამოწერის სრული პერიოდი",
             searchKeywords = "${title.lowercase()}, ${detectedBrand.lowercase()}, ${subcategory.lowercase()}"
         )

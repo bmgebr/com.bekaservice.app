@@ -933,20 +933,27 @@ private fun DiagnosticsEmptyStateContent(
                         modifier = Modifier.testTag("diag_intro_description")
                     )
 
-                    // Compact secondary feature pills ("ფოტოს ანალიზი", "ტექნიკური რჩევა")
+                    // Compact secondary feature chips ("ფოტოს ანალიზი", "ტექნიკური რჩევა")
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        DiagnosticCompactFeaturePill(
+                        DiagnosticCompactFeatureChip(
+                            modifier = Modifier.weight(1f),
                             palette = palette,
                             icon = Icons.Default.ImageSearch,
-                            label = "ფოტოს ანალიზი"
+                            label = "ფოტოს ანალიზი",
+                            testTag = "diag_feature_chip_photo"
                         )
-                        DiagnosticCompactFeaturePill(
+                        DiagnosticCompactFeatureChip(
+                            modifier = Modifier.weight(1f),
                             palette = palette,
                             icon = Icons.Default.Verified,
-                            label = "ტექნიკური რჩევა"
+                            label = "ტექნიკური რჩევა",
+                            testTag = "diag_feature_chip_tech"
                         )
                     }
 
@@ -1097,32 +1104,42 @@ private fun DiagnosticsEmptyStateContent(
 }
 
 @Composable
-private fun DiagnosticCompactFeaturePill(
+internal fun DiagnosticCompactFeatureChip(
     palette: DiagnosticsThemePalette,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String
+    label: String,
+    modifier: Modifier = Modifier,
+    testTag: String? = null
 ) {
     Surface(
-        shape = RoundedCornerShape(7.dp),
-        color = BrandOrange.copy(alpha = 0.10f),
-        border = BorderStroke(1.dp, BrandOrange.copy(alpha = 0.30f))
+        modifier = modifier
+            .height(28.dp)
+            .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
+        shape = RoundedCornerShape(9.dp),
+        color = BrandOrange.copy(alpha = if (palette.isDark) 0.12f else 0.08f),
+        border = BorderStroke(1.dp, BrandOrange.copy(alpha = if (palette.isDark) 0.35f else 0.28f))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.Center
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = BrandOrange,
-                modifier = Modifier.size(11.5.dp)
+                modifier = Modifier.size(13.dp)
             )
+            Spacer(modifier = Modifier.width(5.dp))
             Text(
                 text = label,
                 color = BrandOrange,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
