@@ -111,6 +111,12 @@ service cloud.firestore {
              (!('rating' in data) || data.rating == null || (data.rating is string && data.rating.size() <= 20) || (data.rating is number && data.rating >= 0 && data.rating <= 5)) &&
              (!('image' in data) || data.image == null || (data.image is string && data.image.size() <= 2000)) &&
              (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
+             (!('images' in data) || data.images == null || (data.images is list && data.images.size() <= 15)) &&
+             (!('primaryImageUrl' in data) || data.primaryImageUrl == null || (data.primaryImageUrl is string && data.primaryImageUrl.size() <= 2000)) &&
+             (!('specifications' in data) || data.specifications == null || data.specifications is map) &&
+             (!('productType' in data) || data.productType == null || (data.productType is string && data.productType.size() <= 50)) &&
+             (!('condition' in data) || data.condition == null || (data.condition is string && data.condition.size() <= 50)) &&
+             (!('exactModel' in data) || data.exactModel == null || (data.exactModel is string && data.exactModel.size() <= 100)) &&
              (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 100)) &&
              (!('subcategory' in data) || data.subcategory == null || (data.subcategory is string && data.subcategory.size() <= 150)) &&
              (!('type' in data) || data.type == null || (data.type is string && data.type.size() <= 50)) &&
@@ -139,6 +145,21 @@ service cloud.firestore {
              (!('updatedByAdmin' in data) || data.updatedByAdmin == null || data.updatedByAdmin is bool || (data.updatedByAdmin is string && data.updatedByAdmin.size() <= 128)) &&
              (!('isDeleted' in data) || data.isDeleted == null || data.isDeleted is bool) &&
              (!('createdAt' in data) || data.createdAt == null || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidCategory(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             (!('id' in data) || data.id == null || (data.id is string && data.id.size() <= 100)) &&
+             (!('localizedName' in data) || data.localizedName == null || (data.localizedName is string && data.localizedName.size() <= 100)) &&
+             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 500)) &&
+             (!('icon' in data) || data.icon == null || (data.icon is string && data.icon.size() <= 20)) &&
+             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
+             (!('displayOrder' in data) || data.displayOrder == null || data.displayOrder is number) &&
+             (!('isActive' in data) || data.isActive == null || data.isActive is bool) &&
+             (!('isPopular' in data) || data.isPopular == null || data.isPopular is bool) &&
+             (!('popularOrder' in data) || data.popularOrder == null || data.popularOrder is number) &&
+             (!('categoryType' in data) || data.categoryType == null || (data.categoryType is string && data.categoryType.size() <= 50)) &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
     }
 
@@ -265,6 +286,13 @@ service cloud.firestore {
       allow get, list: if true;
       allow create, update: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
       allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    // Dynamic Categories Catalog (Public read, verified Admin-only write)
+    match /categories/{categoryId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
+      allow delete: if isAdmin() && isValidId(categoryId);
     }
 
     // App Configuration: Home Screen Slider Banners, Bank Requisites & App Update Config (Public read, verified Admin-only write)

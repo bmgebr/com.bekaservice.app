@@ -21,6 +21,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -717,28 +718,36 @@ object AppLocaleManager {
         "წუთი" to "мин."
     )
 
+    private val translationCacheEn = android.util.LruCache<String, String>(512)
+    private val translationCacheRu = android.util.LruCache<String, String>(512)
+
     fun translate(raw: String, lang: AppLanguage = AppPreferencesManager.currentLanguage): String {
-        if (lang == AppLanguage.KA || raw.isBlank()) return raw
+        if (lang == AppLanguage.KA || raw.isEmpty()) return raw
         val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return raw
         when (lang) {
             AppLanguage.EN -> {
                 exactTranslationsEn[trimmed]?.let { return it }
+                translationCacheEn.get(raw)?.let { return it }
                 var result = raw
                 for ((ka, en) in phraseReplacementsEn) {
                     if (result.contains(ka)) {
                         result = result.replace(ka, en)
                     }
                 }
+                translationCacheEn.put(raw, result)
                 return result
             }
             AppLanguage.RU -> {
                 exactTranslationsRu[trimmed]?.let { return it }
+                translationCacheRu.get(raw)?.let { return it }
                 var result = raw
                 for ((ka, ru) in phraseReplacementsRu) {
                     if (result.contains(ka)) {
                         result = result.replace(ka, ru)
                     }
                 }
+                translationCacheRu.put(raw, result)
                 return result
             }
             else -> return raw
@@ -768,12 +777,15 @@ fun Surface(
     border: BorderStroke? = null,
     content: @Composable () -> Unit
 ) {
-    val adaptedColor = AppThemeColorAdapter.adaptSurfaceColor(color)
-    val adaptedBorder = AppThemeColorAdapter.adaptBorderStroke(border)
-    val preserveWhite = AppThemeColorAdapter.isVividAccentColor(color) ||
-        (color.alpha in 0.45f..0.85f && color.luminance() < 0.08f)
+    val isDark = AppPreferencesManager.isDarkMode
+    val adaptedColor = remember(color, isDark) { AppThemeColorAdapter.adaptSurfaceColor(color) }
+    val adaptedBorder = remember(border, isDark) { AppThemeColorAdapter.adaptBorderStroke(border) }
+    val preserveWhite = remember(color) {
+        AppThemeColorAdapter.isVividAccentColor(color) ||
+            (color.alpha in 0.45f..0.85f && color.luminance() < 0.08f)
+    }
 
-    CompositionLocalProvider(LocalPreserveWhiteText provides preserveWhite) {
+    if (LocalPreserveWhiteText.current == preserveWhite) {
         androidx.compose.material3.Surface(
             modifier = modifier,
             shape = shape,
@@ -784,6 +796,19 @@ fun Surface(
             border = adaptedBorder,
             content = content
         )
+    } else {
+        CompositionLocalProvider(LocalPreserveWhiteText provides preserveWhite) {
+            androidx.compose.material3.Surface(
+                modifier = modifier,
+                shape = shape,
+                color = adaptedColor,
+                contentColor = contentColor,
+                tonalElevation = tonalElevation,
+                shadowElevation = shadowElevation,
+                border = adaptedBorder,
+                content = content
+            )
+        }
     }
 }
 
@@ -801,12 +826,15 @@ fun Surface(
     interactionSource: MutableInteractionSource? = null,
     content: @Composable () -> Unit
 ) {
-    val adaptedColor = AppThemeColorAdapter.adaptSurfaceColor(color)
-    val adaptedBorder = AppThemeColorAdapter.adaptBorderStroke(border)
-    val preserveWhite = AppThemeColorAdapter.isVividAccentColor(color) ||
-        (color.alpha in 0.45f..0.85f && color.luminance() < 0.08f)
+    val isDark = AppPreferencesManager.isDarkMode
+    val adaptedColor = remember(color, isDark) { AppThemeColorAdapter.adaptSurfaceColor(color) }
+    val adaptedBorder = remember(border, isDark) { AppThemeColorAdapter.adaptBorderStroke(border) }
+    val preserveWhite = remember(color) {
+        AppThemeColorAdapter.isVividAccentColor(color) ||
+            (color.alpha in 0.45f..0.85f && color.luminance() < 0.08f)
+    }
 
-    CompositionLocalProvider(LocalPreserveWhiteText provides preserveWhite) {
+    if (LocalPreserveWhiteText.current == preserveWhite) {
         androidx.compose.material3.Surface(
             onClick = onClick,
             modifier = modifier,
@@ -820,6 +848,22 @@ fun Surface(
             interactionSource = interactionSource,
             content = content
         )
+    } else {
+        CompositionLocalProvider(LocalPreserveWhiteText provides preserveWhite) {
+            androidx.compose.material3.Surface(
+                onClick = onClick,
+                modifier = modifier,
+                enabled = enabled,
+                shape = shape,
+                color = adaptedColor,
+                contentColor = contentColor,
+                tonalElevation = tonalElevation,
+                shadowElevation = shadowElevation,
+                border = adaptedBorder,
+                interactionSource = interactionSource,
+                content = content
+            )
+        }
     }
 }
 
@@ -843,15 +887,26 @@ fun Text(
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
     style: TextStyle = LocalTextStyle.current
 ) {
-    val translatedText = AppLocaleManager.translate(text, AppPreferencesManager.currentLanguage)
+    val currentLang = AppPreferencesManager.currentLanguage
+    val translatedText = if (currentLang == AppLanguage.KA) {
+        text
+    } else {
+        remember(text, currentLang) { AppLocaleManager.translate(text, currentLang) }
+    }
+    val isDark = AppPreferencesManager.isDarkMode
+    val localPreserve = LocalPreserveWhiteText.current
     val localContent = LocalContentColor.current
-    val isInsideOrangeOrAccentButton = localContent == Color.White &&
-        color == Color.White &&
-        LocalPreserveWhiteText.current
-    val adaptedColor = AppThemeColorAdapter.adaptTextColor(
-        color = color,
-        preserveWhite = LocalPreserveWhiteText.current || isInsideOrangeOrAccentButton
-    )
+    val preserveFlag = localPreserve || (localContent == Color.White && color == Color.White && localPreserve)
+    val adaptedColor = if (isDark) {
+        color
+    } else {
+        remember(color, isDark, preserveFlag) {
+            AppThemeColorAdapter.adaptTextColor(
+                color = color,
+                preserveWhite = preserveFlag
+            )
+        }
+    }
 
     androidx.compose.material3.Text(
         text = translatedText,

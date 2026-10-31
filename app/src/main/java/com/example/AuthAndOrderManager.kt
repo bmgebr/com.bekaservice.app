@@ -278,6 +278,9 @@ object AuthAndOrderManager {
 
         // Update local session cache ONLY — never overwrite an existing Firestore user document on login!
         saveLocalSessionOnly(context, user)
+        if (email.equals("beqa1994@gmail.com", ignoreCase = true)) {
+            AdminStorage.setAdminSessionActive(context, true, email)
+        }
 
         // Merge any guest favorites & cloud favorites into the authenticated account's favorites
         val localAccountFavs = readFavoritesSetFromKey(prefs, userKey(KEY_FAVORITES_JSON, uid))
@@ -544,14 +547,26 @@ object AuthAndOrderManager {
     }
 
     fun logout(context: Context) {
-        try {
-            FirebaseAuth.getInstance().signOut()
-        } catch (_: Exception) {}
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                CredentialManager.create(context.applicationContext)
-                    .clearCredentialState(ClearCredentialStateRequest())
-            } catch (_: Exception) {}
+        AdminStorage.clearAdminSession(context)
+        val hadFirebaseUser = try {
+            val auth = FirebaseAuth.getInstance()
+            val hasUser = auth.currentUser != null
+            if (hasUser) {
+                auth.signOut()
+            }
+            hasUser
+        } catch (_: Throwable) {
+            false
+        }
+        if (hadFirebaseUser) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                        CredentialManager.create(context.applicationContext)
+                            .clearCredentialState(ClearCredentialStateRequest())
+                    }
+                } catch (_: Throwable) {}
+            }
         }
         getPrefs(context).edit()
             .putBoolean(KEY_IS_LOGGED_IN, false)

@@ -73,11 +73,16 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -153,8 +158,57 @@ data class ProductItem(
     val warranty: String = "6 თვე",
     val firestoreDocId: String = "",
     val brandColorHex: String = "#FF7A00",
-    val brandBadgeText: String = ""
+    val brandBadgeText: String = "",
+    val images: List<String> = emptyList(),
+    val primaryImageUrl: String? = null,
+    val specifications: Map<String, String> = emptyMap(),
+    val productType: String = "",
+    val condition: String = "ახალი",
+    val exactModel: String = ""
+) {
+    val allImages: List<String>
+        get() {
+            val primary = primaryImageUrl?.trim()?.takeIf { ProductImageManager.isValidRenderableImage(it) }
+            val list = mutableListOf<String>()
+            if (primary != null) {
+                list.add(primary)
+            }
+            list.addAll(
+                images.map { it.trim() }
+                    .filter { ProductImageManager.isValidRenderableImage(it) && it != primary }
+            )
+            if (list.isEmpty() && ProductImageManager.isValidRenderableImage(imageUrl)) {
+                list.add(imageUrl.trim())
+            }
+            return list.distinct()
+        }
+
+    val displayPrimaryImage: String
+        get() {
+            val primary = primaryImageUrl?.trim()?.takeIf { ProductImageManager.isValidRenderableImage(it) }
+            if (primary != null) return primary
+            val firstValid = images.map { it.trim() }.firstOrNull { ProductImageManager.isValidRenderableImage(it) }
+            if (firstValid != null) return firstValid
+            return if (ProductImageManager.isValidRenderableImage(imageUrl)) imageUrl.trim() else ""
+        }
+}
+
+data class CategoryItem(
+    val id: String,
+    val name: String,
+    val localizedName: String = "",
+    val description: String = "",
+    val icon: String = "📦",
+    val imageUrl: String = "",
+    val displayOrder: Int = 0,
+    val isActive: Boolean = true,
+    val isPopular: Boolean = false,
+    val popularOrder: Int = 0,
+    val categoryType: String = "general",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
+
 
 data class CartItem(
     val product: ProductItem,
@@ -370,38 +424,168 @@ fun VideoSplashScreen(
 // ==============================================================================
 // საძიებო სისტემის ოპტიმიზაცია (Smart Transliteration, Stemming & Multi-Field Search)
 // ==============================================================================
+private val GEO_TO_LAT_MAP = mapOf(
+    'ა' to "a", 'ბ' to "b", 'გ' to "g", 'დ' to "d", 'ე' to "e", 'ვ' to "v", 'ზ' to "z",
+    'თ' to "t", 'ი' to "i", 'კ' to "k", 'ლ' to "l", 'მ' to "m", 'ნ' to "n", 'ო' to "o",
+    'პ' to "p", 'ჟ' to "zh", 'რ' to "r", 'ს' to "s", 'ტ' to "t", 'უ' to "u", 'ფ' to "p",
+    'ქ' to "k", 'ღ' to "gh", 'ყ' to "q", 'შ' to "sh", 'ჩ' to "ch", 'ც' to "ts", 'ძ' to "dz",
+    'წ' to "ts", 'ჭ' to "ch", 'ხ' to "kh", 'ჯ' to "j", 'ჰ' to "h"
+)
+
+private val LAT_TO_GEO_MULTI_MAP = listOf(
+    "sh" to "შ", "ch" to "ჩ", "zh" to "ჟ", "gh" to "ღ", "kh" to "ხ", "dz" to "ძ", "ts" to "ც"
+)
+
+private val LAT_TO_GEO_SINGLE_MAP = mapOf(
+    'a' to 'ა', 'b' to 'ბ', 'g' to 'გ', 'd' to 'დ', 'e' to 'ე', 'v' to 'ვ', 'z' to 'ზ',
+    't' to 'თ', 'i' to 'ი', 'k' to 'კ', 'l' to 'ლ', 'm' to 'მ', 'n' to 'ნ', 'o' to 'ო',
+    'p' to 'პ', 'r' to 'რ', 's' to 'ს', 'u' to 'უ', 'f' to 'ფ', 'q' to 'ქ', 'x' to 'ხ',
+    'j' to 'ჯ', 'h' to 'ჰ', 'y' to 'ყ', 'w' to 'წ', 'c' to 'ც'
+)
+
+private val PHONETIC_SYNONYMS_MAP = mapOf(
+    "aifon" to listOf("iphone", "apple", "აიფონ"),
+    "aifoni" to listOf("iphone", "apple", "აიფონ"),
+    "айфон" to listOf("iphone", "apple", "აიფონ"),
+    "აიფონ" to listOf("iphone", "apple"),
+    "iphone" to listOf("აიფონ", "apple"),
+    "apple" to listOf("აიფონ", "iphone"),
+    "samsung" to listOf("სამსუნგ", "galaxy"),
+    "სამსუნგ" to listOf("samsung", "galaxy"),
+    "galaxy" to listOf("სამსუნგ", "samsung"),
+    "xiaomi" to listOf("შაომი", "redmi", "poco"),
+    "შაომი" to listOf("xiaomi", "redmi", "poco"),
+    "redmi" to listOf("რედმი", "xiaomi"),
+    "poco" to listOf("პოკო", "xiaomi"),
+    "pixel" to listOf("პიქსელ", "google"),
+    "ekrani" to listOf("ეკრან", "oled", "display", "screen"),
+    "ekran" to listOf("ეკრან", "oled", "display", "screen"),
+    "ეკრან" to listOf("oled", "screen", "display", "დისპლეი", "amoled", "lcd"),
+    "დისპლეი" to listOf("oled", "screen", "display", "ეკრან", "amoled"),
+    "display" to listOf("ეკრან", "oled", "amoled", "დისპლეი"),
+    "screen" to listOf("ეკრან", "oled", "amoled", "დისპლეი"),
+    "oled" to listOf("ეკრან", "დისპლეი", "amoled", "screen"),
+    "amoled" to listOf("ეკრან", "oled", "დისპლეი", "screen"),
+    "elementi" to listOf("ელემენტ", "battery", "ბატარე"),
+    "batarea" to listOf("ელემენტ", "battery", "ბატარე"),
+    "ელემენტ" to listOf("battery", "ბატარე", "აკუმულატორ"),
+    "ბატარე" to listOf("battery", "ელემენტ", "აკუმულატორ"),
+    "battery" to listOf("ელემენტ", "ბატარე", "აკუმულატორ"),
+    "damteni" to listOf("type-c", "port", "charger", "დამტენ", "პორტ"),
+    "dasteni" to listOf("type-c", "port", "charger", "დამტენ", "პორტ"),
+    "პორტ" to listOf("type-c", "port", "charger", "დამტენ", "შლიფ"),
+    "დამტენ" to listOf("type-c", "port", "charger", "პორტ"),
+    "kamera" to listOf("camera", "კამერ", "ობიექტივ", "ლინზ"),
+    "კამერ" to listOf("camera", "ობიექტივ", "ლინზ"),
+    "camera" to listOf("კამერ", "ობიექტივ"),
+    "korpusi" to listOf("case", "housing", "ჩარჩო", "ხუფ", "შუშ", "კორპუს"),
+    "კორპუს" to listOf("case", "housing", "ჩარჩო", "ხუფ", "შუშ"),
+    "shusha" to listOf("glass", "back glass", "კორპუს", "შუშ"),
+    "შუშ" to listOf("glass", "back glass", "კორპუს"),
+    "glass" to listOf("შუშ", "კორპუს"),
+    "dinamiki" to listOf("speaker", "დინამიკ", "აუდიო"),
+    "დინამიკ" to listOf("speaker", "აუდიო"),
+    "speaker" to listOf("დინამიკ", "აუდიო"),
+    "vibro" to listOf("taptic", "ვიბრო", "ვიბრაცი"),
+    "ვიბრო" to listOf("taptic", "ვიბრაცი"),
+    "taptic" to listOf("ვიბრო", "ვიბრაცი"),
+    "pro" to listOf("პრო"),
+    "პრო" to listOf("pro"),
+    "max" to listOf("მაქს"),
+    "მაქს" to listOf("max"),
+    "plus" to listOf("პლუს"),
+    "პლუს" to listOf("plus"),
+    "ultra" to listOf("ულტრა"),
+    "ულტრა" to listOf("ultra"),
+    "chatgpt" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "ჩატჯიპიტი", "ჯიპიტი", "openai", "gpt-4o", "o3"),
+    "ჩატჯიპიტ" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "openai", "ჯიპიტი"),
+    "ჯიპიტ" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "openai", "ჩატჯიპიტი"),
+    "openai" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "ოპენაი"),
+    "ოპენა" to listOf("openai", "chatgpt", "chatgpt plus", "chatgpt pro"),
+    "google" to listOf("გუგლ", "google ai", "google storage", "gmail", "gemini", "pixel"),
+    "გუგლ" to listOf("google", "google ai", "google storage", "gmail", "gemini", "pixel"),
+    "ჯემინ" to listOf("gemini", "google ai pro", "google ai ultra", "გუგლ აი"),
+    "gemini" to listOf("ჯემინი", "google ai pro", "google ai ultra"),
+    "grok" to listOf("გროკი", "სუპერგროკი", "supergrok", "supergrok heavy", "xai"),
+    "გროკ" to listOf("grok", "supergrok", "supergrok heavy", "xai"),
+    "სუპერგროკ" to listOf("supergrok", "grok", "supergrok heavy", "xai"),
+    "claude" to listOf("კლოდი", "claude pro", "private account", "shared account", "anthropic", "sonnet"),
+    "კლოდ" to listOf("claude", "claude pro", "anthropic", "sonnet", "კლოდი"),
+    "perplexity" to listOf("პერპლექსიტი", "perplexity pro"),
+    "პერპლექსიტ" to listOf("perplexity", "perplexity pro"),
+    "cursor" to listOf("კურსორი", "cursor ai pro", "ide"),
+    "კურსორ" to listOf("cursor", "cursor ai pro", "ide"),
+    "lovable" to listOf("ლავაბლ", "lovable pro"),
+    "ლავაბლ" to listOf("lovable", "lovable pro"),
+    "gmail" to listOf("ჯიმეილი", "gmail phone verified account", "ელფოსტა", "მეილი"),
+    "ჯიმეილ" to listOf("gmail", "gmail phone verified account", "ელფოსტა", "მეილი"),
+    "storage" to listOf("მეხსიერება", "სტორეჯი", "google storage", "2tb", "5tb", "bundle"),
+    "მეხსიერებ" to listOf("storage", "google storage", "2tb", "5tb", "google one"),
+    "სტორეჯ" to listOf("storage", "google storage", "2tb", "5tb", "მეხსიერება"),
+    "bundle" to listOf("ბანდლი", "google ai pro + storage bundle"),
+    "ბანდლ" to listOf("bundle", "google ai pro + storage bundle"),
+    "capcut" to listOf("კაპკატი", "capcut pro", "ვიდეო მონტაჟი"),
+    "კაპკატ" to listOf("capcut", "capcut pro", "ვიდეო მონტაჟი"),
+    "adobe" to listOf("ადობე", "adobe creative cloud", "photoshop", "illustrator", "premiere", "ფოტოშოპი"),
+    "ადობ" to listOf("adobe", "adobe creative cloud", "photoshop", "illustrator", "premiere"),
+    "ფოტოშოპ" to listOf("photoshop", "adobe", "adobe creative cloud"),
+    "canva" to listOf("კანვა", "canva pro", "დიზაინი"),
+    "კანვ" to listOf("canva", "canva pro", "დიზაინი"),
+    "youtube" to listOf("იუთუბი", "youtube premium", "youtube music"),
+    "იუთუბ" to listOf("youtube", "youtube premium", "youtube music"),
+    "spotify" to listOf("სპოტიფაი", "spotify premium", "მუსიკა"),
+    "სპოტიფა" to listOf("spotify", "spotify premium", "მუსიკა"),
+    "windows" to listOf("ვინდოუსი", "windows 11 pro retail key", "microsoft"),
+    "ვინდოუს" to listOf("windows", "windows 11", "windows 11 pro", "retail key"),
+    "office" to listOf("ოფისი", "office ltsc 2024", "office 2019", "microsoft 365", "word", "excel"),
+    "ოფის" to listOf("office", "office ltsc 2024", "office 2019", "microsoft 365", "word", "excel"),
+    "microsoft" to listOf("მაიკროსოფტი", "microsoft 365", "windows 11", "office"),
+    "მაიკროსოფტ" to listOf("microsoft", "microsoft 365", "windows 11", "office"),
+    "ლიცენზი" to listOf("license", "key", "retail key", "windows 11", "office", "გასაღები"),
+    "გასაღებ" to listOf("key", "retail key", "windows 11", "office", "ლიცენზია")
+)
+
+private val SEARCH_TOKEN_SPLIT_REGEX = Regex("[\\s,.-]+")
+private val productSearchContentCache = android.util.LruCache<ProductItem, String>(256)
+
+private fun getCachedProductSearchContent(item: ProductItem): String {
+    productSearchContentCache.get(item)?.let { return it }
+    val built = buildString(256) {
+        append(item.title).append(' ')
+        append(item.category).append(' ')
+        append(item.subcategory).append(' ')
+        append(item.brand).append(' ')
+        append(item.shortDescription).append(' ')
+        append(item.compatibleModels).append(' ')
+        append(item.description).append(' ')
+        append(item.offerType).append(' ')
+        append(item.duration).append(' ')
+        append(item.accountType).append(' ')
+        append(item.searchKeywords).append(' ')
+        append(item.features.joinToString(" "))
+    }.lowercase()
+    productSearchContentCache.put(item, built)
+    return built
+}
+
 fun transliterateGeoToLat(input: String): String {
-    val map = mapOf(
-        'ა' to "a", 'ბ' to "b", 'გ' to "g", 'დ' to "d", 'ე' to "e", 'ვ' to "v", 'ზ' to "z",
-        'თ' to "t", 'ი' to "i", 'კ' to "k", 'ლ' to "l", 'მ' to "m", 'ნ' to "n", 'ო' to "o",
-        'პ' to "p", 'ჟ' to "zh", 'რ' to "r", 'ს' to "s", 'ტ' to "t", 'უ' to "u", 'ფ' to "p",
-        'ქ' to "k", 'ღ' to "gh", 'ყ' to "q", 'შ' to "sh", 'ჩ' to "ch", 'ც' to "ts", 'ძ' to "dz",
-        'წ' to "ts", 'ჭ' to "ch", 'ხ' to "kh", 'ჯ' to "j", 'ჰ' to "h"
-    )
-    val sb = StringBuilder()
+    val sb = StringBuilder(input.length)
     for (ch in input) {
-        sb.append(map[ch] ?: ch)
+        sb.append(GEO_TO_LAT_MAP[ch] ?: ch)
     }
     return sb.toString()
 }
 
 fun transliterateLatToGeo(input: String): String {
     var res = input
-    val multiMap = listOf(
-        "sh" to "შ", "ch" to "ჩ", "zh" to "ჟ", "gh" to "ღ", "kh" to "ხ", "dz" to "ძ", "ts" to "ც"
-    )
-    for ((lat, geo) in multiMap) {
-        res = res.replace(lat, geo)
+    for ((lat, geo) in LAT_TO_GEO_MULTI_MAP) {
+        if (res.contains(lat)) {
+            res = res.replace(lat, geo)
+        }
     }
-    val singleMap = mapOf(
-        'a' to 'ა', 'b' to 'ბ', 'g' to 'გ', 'd' to 'დ', 'e' to 'ე', 'v' to 'ვ', 'z' to 'ზ',
-        't' to 'თ', 'i' to 'ი', 'k' to 'კ', 'l' to 'ლ', 'm' to 'მ', 'n' to 'ნ', 'o' to 'ო',
-        'p' to 'პ', 'r' to 'რ', 's' to 'ს', 'u' to 'უ', 'f' to 'ფ', 'q' to 'ქ', 'x' to 'ხ',
-        'j' to 'ჯ', 'h' to 'ჰ', 'y' to 'ყ', 'w' to 'წ', 'c' to 'ც'
-    )
-    val sb = StringBuilder()
+    val sb = StringBuilder(res.length)
     for (ch in res) {
-        sb.append(singleMap[ch] ?: ch)
+        sb.append(LAT_TO_GEO_SINGLE_MAP[ch] ?: ch)
     }
     return sb.toString()
 }
@@ -454,150 +638,39 @@ fun optimizeSearchFilter(
         }
     }
 
-    val phoneticSynonyms = mapOf(
-        "aifon" to listOf("iphone", "apple", "აიფონ"),
-        "aifoni" to listOf("iphone", "apple", "აიფონ"),
-        "айфон" to listOf("iphone", "apple", "აიფონ"),
-        "აიფონ" to listOf("iphone", "apple"),
-        "iphone" to listOf("აიფონ", "apple"),
-        "apple" to listOf("აიფონ", "iphone"),
-        "samsung" to listOf("სამსუნგ", "galaxy"),
-        "სამსუნგ" to listOf("samsung", "galaxy"),
-        "galaxy" to listOf("სამსუნგ", "samsung"),
-        "xiaomi" to listOf("შაომი", "redmi", "poco"),
-        "შაომი" to listOf("xiaomi", "redmi", "poco"),
-        "redmi" to listOf("რედმი", "xiaomi"),
-        "poco" to listOf("პოკო", "xiaomi"),
-        "pixel" to listOf("პიქსელ", "google"),
-        "ekrani" to listOf("ეკრან", "oled", "display", "screen"),
-        "ekran" to listOf("ეკრან", "oled", "display", "screen"),
-        "ეკრან" to listOf("oled", "screen", "display", "დისპლეი", "amoled", "lcd"),
-        "დისპლეი" to listOf("oled", "screen", "display", "ეკრან", "amoled"),
-        "display" to listOf("ეკრან", "oled", "amoled", "დისპლეი"),
-        "screen" to listOf("ეკრან", "oled", "amoled", "დისპლეი"),
-        "oled" to listOf("ეკრან", "დისპლეი", "amoled", "screen"),
-        "amoled" to listOf("ეკრან", "oled", "დისპლეი", "screen"),
-        "elementi" to listOf("ელემენტ", "battery", "ბატარე"),
-        "batarea" to listOf("ელემენტ", "battery", "ბატარე"),
-        "ელემენტ" to listOf("battery", "ბატარე", "აკუმულატორ"),
-        "ბატარე" to listOf("battery", "ელემენტ", "აკუმულატორ"),
-        "battery" to listOf("ელემენტ", "ბატარე", "აკუმულატორ"),
-        "damteni" to listOf("type-c", "port", "charger", "დამტენ", "პორტ"),
-        "dasteni" to listOf("type-c", "port", "charger", "დამტენ", "პორტ"),
-        "პორტ" to listOf("type-c", "port", "charger", "დამტენ", "შლიფ"),
-        "დამტენ" to listOf("type-c", "port", "charger", "პორტ"),
-        "kamera" to listOf("camera", "კამერ", "ობიექტივ", "ლინზ"),
-        "კამერ" to listOf("camera", "ობიექტივ", "ლინზ"),
-        "camera" to listOf("კამერ", "ობიექტივ"),
-        "korpusi" to listOf("case", "housing", "ჩარჩო", "ხუფ", "შუშ", "კორპუს"),
-        "კორპუს" to listOf("case", "housing", "ჩარჩო", "ხუფ", "შუშ"),
-        "shusha" to listOf("glass", "back glass", "კორპუს", "შუშ"),
-        "შუშ" to listOf("glass", "back glass", "კორპუს"),
-        "glass" to listOf("შუშ", "კორპუს"),
-        "dinamiki" to listOf("speaker", "დინამიკ", "აუდიო"),
-        "დინამიკ" to listOf("speaker", "აუდიო"),
-        "speaker" to listOf("დინამიკ", "აუდიო"),
-        "vibro" to listOf("taptic", "ვიბრო", "ვიბრაცი"),
-        "ვიბრო" to listOf("taptic", "ვიბრაცი"),
-        "taptic" to listOf("ვიბრო", "ვიბრაცი"),
-        "pro" to listOf("პრო"),
-        "პრო" to listOf("pro"),
-        "max" to listOf("მაქს"),
-        "მაქს" to listOf("max"),
-        "plus" to listOf("პლუს"),
-        "პლუს" to listOf("plus"),
-        "ultra" to listOf("ულტრა"),
-        "ულტრა" to listOf("ultra"),
-        // 24 პროგრამული სერვისის სინონიმები
-        "chatgpt" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "ჩატჯიპიტი", "ჯიპიტი", "openai", "gpt-4o", "o3"),
-        "ჩატჯიპიტ" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "openai", "ჯიპიტი"),
-        "ჯიპიტ" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "openai", "ჩატჯიპიტი"),
-        "openai" to listOf("chatgpt", "chatgpt plus", "chatgpt pro", "ოპენაი"),
-        "ოპენა" to listOf("openai", "chatgpt", "chatgpt plus", "chatgpt pro"),
-        "google" to listOf("გუგლ", "google ai", "google storage", "gmail", "gemini", "pixel"),
-        "გუგლ" to listOf("google", "google ai", "google storage", "gmail", "gemini", "pixel"),
-        "ჯემინ" to listOf("gemini", "google ai pro", "google ai ultra", "გუგლ აი"),
-        "gemini" to listOf("ჯემინი", "google ai pro", "google ai ultra"),
-        "grok" to listOf("გროკი", "სუპერგროკი", "supergrok", "supergrok heavy", "xai"),
-        "გროკ" to listOf("grok", "supergrok", "supergrok heavy", "xai"),
-        "სუპერგროკ" to listOf("supergrok", "grok", "supergrok heavy", "xai"),
-        "claude" to listOf("კლოდი", "claude pro", "private account", "shared account", "anthropic", "sonnet"),
-        "კლოდ" to listOf("claude", "claude pro", "anthropic", "sonnet", "კლოდი"),
-        "perplexity" to listOf("პერპლექსიტი", "perplexity pro"),
-        "პერპლექსიტ" to listOf("perplexity", "perplexity pro"),
-        "cursor" to listOf("კურსორი", "cursor ai pro", "ide"),
-        "კურსორ" to listOf("cursor", "cursor ai pro", "ide"),
-        "lovable" to listOf("ლავაბლ", "lovable pro"),
-        "ლავაბლ" to listOf("lovable", "lovable pro"),
-        "gmail" to listOf("ჯიმეილი", "gmail phone verified account", "ელფოსტა", "მეილი"),
-        "ჯიმეილ" to listOf("gmail", "gmail phone verified account", "ელფოსტა", "მეილი"),
-        "storage" to listOf("მეხსიერება", "სტორეჯი", "google storage", "2tb", "5tb", "bundle"),
-        "მეხსიერებ" to listOf("storage", "google storage", "2tb", "5tb", "google one"),
-        "სტორეჯ" to listOf("storage", "google storage", "2tb", "5tb", "მეხსიერება"),
-        "bundle" to listOf("ბანდლი", "google ai pro + storage bundle"),
-        "ბანდლ" to listOf("bundle", "google ai pro + storage bundle"),
-        "capcut" to listOf("კაპკატი", "capcut pro", "ვიდეო მონტაჟი"),
-        "კაპკატ" to listOf("capcut", "capcut pro", "ვიდეო მონტაჟი"),
-        "adobe" to listOf("ადობე", "adobe creative cloud", "photoshop", "illustrator", "premiere", "ფოტოშოპი"),
-        "ადობ" to listOf("adobe", "adobe creative cloud", "photoshop", "illustrator", "premiere"),
-        "ფოტოშოპ" to listOf("photoshop", "adobe", "adobe creative cloud"),
-        "canva" to listOf("კანვა", "canva pro", "დიზაინი"),
-        "კანვ" to listOf("canva", "canva pro", "დიზაინი"),
-        "youtube" to listOf("იუთუბი", "youtube premium", "youtube music"),
-        "იუთუბ" to listOf("youtube", "youtube premium", "youtube music"),
-        "spotify" to listOf("სპოტიფაი", "spotify premium", "მუსიკა"),
-        "სპოტიფა" to listOf("spotify", "spotify premium", "მუსიკა"),
-        "windows" to listOf("ვინდოუსი", "windows 11 pro retail key", "microsoft"),
-        "ვინდოუს" to listOf("windows", "windows 11", "windows 11 pro", "retail key"),
-        "office" to listOf("ოფისი", "office ltsc 2024", "office 2019", "microsoft 365", "word", "excel"),
-        "ოფის" to listOf("office", "office ltsc 2024", "office 2019", "microsoft 365", "word", "excel"),
-        "microsoft" to listOf("მაიკროსოფტი", "microsoft 365", "windows 11", "office"),
-        "მაიკროსოფტ" to listOf("microsoft", "microsoft 365", "windows 11", "office"),
-        "ლიცენზი" to listOf("license", "key", "retail key", "windows 11", "office", "გასაღები"),
-        "გასაღებ" to listOf("key", "retail key", "windows 11", "office", "ლიცენზია")
-    )
-
-    val rawTokens = cleanQuery.split(Regex("[\\s,.-]+")).filter { it.isNotBlank() }
+    val rawTokens = cleanQuery.split(SEARCH_TOKEN_SPLIT_REGEX).filter { it.isNotBlank() }
+    val cleanQueryGeo = transliterateLatToGeo(cleanQuery)
+    val cleanQueryLat = transliterateGeoToLat(cleanQuery)
+    val tokenVariantsList: List<Set<String>> = rawTokens.map { token ->
+        val normToken = normalizeGeorgianWord(token)
+        val latToGeo = transliterateLatToGeo(token)
+        val variants = mutableSetOf(
+            token,
+            normToken,
+            transliterateGeoToLat(token),
+            latToGeo,
+            normalizeGeorgianWord(latToGeo)
+        )
+        PHONETIC_SYNONYMS_MAP.forEach { (key, synonyms) ->
+            if (token.contains(key) || key.contains(token) || normToken.contains(key) || key.contains(normToken)) {
+                variants.addAll(synonyms)
+            }
+        }
+        variants.filterTo(mutableSetOf()) { it.isNotBlank() }
+    }
 
     val filtered = products.filter { item ->
-        val itemSearchContent = buildString {
-            append(item.title).append(" ")
-            append(item.category).append(" ")
-            append(item.subcategory).append(" ")
-            append(item.brand).append(" ")
-            append(item.shortDescription).append(" ")
-            append(item.compatibleModels).append(" ")
-            append(item.description).append(" ")
-            append(item.offerType).append(" ")
-            append(item.duration).append(" ")
-            append(item.accountType).append(" ")
-            append(item.searchKeywords).append(" ")
-            append(item.features.joinToString(" "))
-        }.lowercase()
+        val itemSearchContent = getCachedProductSearchContent(item)
 
         // 1. პირდაპირი სრული დამთხვევა
         val directMatch = itemSearchContent.contains(cleanQuery) ||
-                itemSearchContent.contains(transliterateLatToGeo(cleanQuery)) ||
-                itemSearchContent.contains(transliterateGeoToLat(cleanQuery))
+                itemSearchContent.contains(cleanQueryGeo) ||
+                itemSearchContent.contains(cleanQueryLat)
 
         // 2. ტოკენების მიხედვით დამთხვევა (ყველა საძიებო სიტყვა უნდა მოიძებნოს)
-        val allTokensMatch = if (rawTokens.isNotEmpty()) {
-            rawTokens.all { token ->
-                val normToken = normalizeGeorgianWord(token)
-                val variants = mutableSetOf<String>()
-                variants.add(token)
-                variants.add(normToken)
-                variants.add(transliterateGeoToLat(token))
-                variants.add(transliterateLatToGeo(token))
-                variants.add(normalizeGeorgianWord(transliterateLatToGeo(token)))
-
-                phoneticSynonyms.forEach { (key, synonyms) ->
-                    if (token.contains(key) || key.contains(token) || normToken.contains(key) || key.contains(normToken)) {
-                        variants.addAll(synonyms)
-                    }
-                }
-
-                variants.any { v -> v.isNotBlank() && itemSearchContent.contains(v) }
+        val allTokensMatch = if (tokenVariantsList.isNotEmpty()) {
+            tokenVariantsList.all { variants ->
+                variants.any { v -> itemSearchContent.contains(v) }
             }
         } else false
 
@@ -1525,9 +1598,20 @@ fun BekaServiceApp(
         }
     }
 
+    val requestOpenAdminPanel: () -> Unit = {
+        focusManager.clearFocus()
+        isAdminOpen = false
+        if (AdminStorage.isAdminSessionActive(context)) {
+            showAdminPinDialog = false
+            showAdminPanelScreen = true
+        } else {
+            showAdminPinDialog = true
+        }
+    }
+
     // უკან ღილაკის მართვა ქვე-გვერდებიდან, Drawer-იდან, Splash-დან და მთავარ გვერდზე სქროლვიდან თავში დაბრუნება
     BackHandler(
-        enabled = showSplash || (isOnboardingCompleted && (drawerState.isOpen || isAdminOpen || showAdminPanelScreen || selectedProductForDetail != null || selectedTab != 0 || isHomeScrolledDown))
+        enabled = !showAdminPanelScreen && (showSplash || (isOnboardingCompleted && (drawerState.isOpen || isAdminOpen || selectedProductForDetail != null || selectedTab != 0 || isHomeScrolledDown)))
     ) {
         if (drawerState.isOpen) {
             coroutineScope.launch { drawerState.close() }
@@ -1536,8 +1620,6 @@ fun BekaServiceApp(
             showSplash = false
         } else if (isAdminOpen) {
             isAdminOpen = false
-        } else if (showAdminPanelScreen) {
-            showAdminPanelScreen = false
         } else if (selectedProductForDetail != null) {
             selectedProductForDetail = null
         } else if (selectedTab != 0) {
@@ -1622,8 +1704,7 @@ fun BekaServiceApp(
                             }
                         },
                         onOpenAdminPanel = {
-                            focusManager.clearFocus()
-                            showAdminPinDialog = true
+                            requestOpenAdminPanel()
                         },
                         onCloseDrawer = {
                             coroutineScope.launch { drawerState.close() }
@@ -1766,7 +1847,7 @@ fun BekaServiceApp(
                             4 -> ProfileScreen(
                                 contentPadding = screenScrollPadding,
                                 onOpenCart = { selectedTab = 5 },
-                                onOpenAdminPanel = { showAdminPinDialog = true },
+                                onOpenAdminPanel = { requestOpenAdminPanel() },
                                 products = currentProductsSnapshot,
                                 onProductClick = { selectedProductForDetail = it },
                                 onToggleFavorite = handleToggleFavorite,
@@ -1824,76 +1905,78 @@ fun BekaServiceApp(
             }
         }
 
-        // Layer 1: Glassmorphic Floating Top App Bar (Xiaomi HyperOS 4-inspired)
-        BekaGlassTopAppBar(
-            modifier = Modifier.align(Alignment.TopCenter),
-            isDark = isDark,
-            selectedTab = selectedTab,
-            unreadNotificationsCount = unreadNotificationsCount,
-            cartItemCount = cartList.sumOf { it.quantity },
-            onMenuClick = {
-                focusManager.clearFocus()
-                coroutineScope.launch {
-                    if (drawerState.isClosed) drawerState.open() else drawerState.close()
-                }
-            },
-            onTitleClick = {
-                focusManager.clearFocus()
-                selectedProductForDetail = null
-                if (selectedTab == 0) {
+        if (!showAdminPanelScreen) {
+            // Layer 1: Glassmorphic Floating Top App Bar (Xiaomi HyperOS 4-inspired)
+            BekaGlassTopAppBar(
+                modifier = Modifier.align(Alignment.TopCenter),
+                isDark = isDark,
+                selectedTab = selectedTab,
+                unreadNotificationsCount = unreadNotificationsCount,
+                cartItemCount = cartList.sumOf { it.quantity },
+                onMenuClick = {
+                    focusManager.clearFocus()
                     coroutineScope.launch {
-                        if (homeListState.firstVisibleItemIndex > 6) {
-                            homeListState.scrollToItem(6)
-                        }
-                        homeListState.animateScrollToItem(0)
+                        if (drawerState.isClosed) drawerState.open() else drawerState.close()
                     }
-                } else {
-                    selectedTab = 0
+                },
+                onTitleClick = {
+                    focusManager.clearFocus()
+                    selectedProductForDetail = null
+                    if (selectedTab == 0) {
+                        coroutineScope.launch {
+                            if (homeListState.firstVisibleItemIndex > 6) {
+                                homeListState.scrollToItem(6)
+                            }
+                            homeListState.animateScrollToItem(0)
+                        }
+                    } else {
+                        selectedTab = 0
+                    }
+                },
+                onNotificationsClick = {
+                    focusManager.clearFocus()
+                    selectedProductForDetail = null
+                    selectedTab = 6
+                    if (latestBroadcastNotifications.isNotEmpty()) {
+                        BekaNotificationManager.markAllNotificationsRead(context, latestBroadcastNotifications)
+                    }
+                },
+                onProfileClick = {
+                    focusManager.clearFocus()
+                    selectedProductForDetail = null
+                    selectedTab = 4
+                },
+                onCartClick = {
+                    focusManager.clearFocus()
+                    selectedProductForDetail = null
+                    selectedTab = 5
                 }
-            },
-            onNotificationsClick = {
-                focusManager.clearFocus()
-                selectedProductForDetail = null
-                selectedTab = 6
-                if (latestBroadcastNotifications.isNotEmpty()) {
-                    BekaNotificationManager.markAllNotificationsRead(context, latestBroadcastNotifications)
-                }
-            },
-            onProfileClick = {
-                focusManager.clearFocus()
-                selectedProductForDetail = null
-                selectedTab = 4
-            },
-            onCartClick = {
-                focusManager.clearFocus()
-                selectedProductForDetail = null
-                selectedTab = 5
-            }
-        )
+            )
 
-        // Layer 2: Glassmorphic Floating Bottom Navigation Bar (Xiaomi HyperOS 4-inspired)
-        BekaGlassBottomNavBar(
-            modifier = Modifier.align(Alignment.BottomCenter),
-            isDark = isDark,
-            selectedTab = selectedTab,
-            onSelectTab = { index ->
-                focusManager.clearFocus()
-                selectedProductForDetail = null
-                isAdminOpen = false
-                showAdminPanelScreen = false
-                showAdminPinDialog = false
-                if (selectedTab == index && index == 0) {
-                    coroutineScope.launch {
-                        if (homeListState.firstVisibleItemIndex > 6) {
-                            homeListState.scrollToItem(6)
+            // Layer 2: Glassmorphic Floating Bottom Navigation Bar (Xiaomi HyperOS 4-inspired)
+            BekaGlassBottomNavBar(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                isDark = isDark,
+                selectedTab = selectedTab,
+                onSelectTab = { index ->
+                    focusManager.clearFocus()
+                    selectedProductForDetail = null
+                    isAdminOpen = false
+                    showAdminPanelScreen = false
+                    showAdminPinDialog = false
+                    if (selectedTab == index && index == 0) {
+                        coroutineScope.launch {
+                            if (homeListState.firstVisibleItemIndex > 6) {
+                                homeListState.scrollToItem(6)
+                            }
+                            homeListState.animateScrollToItem(0)
                         }
-                        homeListState.animateScrollToItem(0)
+                    } else {
+                        selectedTab = index
                     }
-                } else {
-                    selectedTab = index
                 }
-            }
-        )
+            )
+        }
 
             // ==============================================================================
             // პროდუქტის გახსნის ფანჯარა (Product Detail Window)
@@ -1962,7 +2045,7 @@ fun BekaServiceApp(
                         }
                     },
                     onOpenFullAdmin = {
-                        showAdminPinDialog = true
+                        requestOpenAdminPanel()
                     }
                 )
             }
@@ -1975,10 +2058,7 @@ fun BekaServiceApp(
                     onDismiss = { showAdminPinDialog = false },
                     onSuccess = {
                         showAdminPinDialog = false
-                        coroutineScope.launch {
-                            kotlinx.coroutines.yield()
-                            showAdminPanelScreen = true
-                        }
+                        showAdminPanelScreen = true
                     }
                 )
             }
@@ -1990,14 +2070,19 @@ fun BekaServiceApp(
                 AdminPanelScreen(
                     products = currentProductsSnapshot,
                     onProductsUpdated = { updatedList ->
-                        AdminStorage.saveProductsFromCloud(context, updatedList)
                         productsList.clear()
                         productsList.addAll(updatedList)
                         if (selectedProductForDetail != null) {
                             selectedProductForDetail = updatedList.find { it.id == selectedProductForDetail?.id }
                         }
+                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            AdminStorage.saveProductsFromCloud(context, updatedList)
+                        }
                     },
-                    onClose = { showAdminPanelScreen = false }
+                    onClose = {
+                        showAdminPinDialog = false
+                        showAdminPanelScreen = false
+                    }
                 )
             }
                 }
@@ -2007,6 +2092,112 @@ fun BekaServiceApp(
     }
 }
 
+
+/**
+ * სურათების სრული ეკრანით დათვალიერება და გადიდება (Pinch-to-zoom / Pan).
+ */
+@Composable
+fun ProductImageViewerDialog(
+    images: List<String>,
+    initialIndex: Int = 0,
+    onDismiss: () -> Unit
+) {
+    if (images.isEmpty()) return
+    var currentIndex by remember { mutableIntStateOf(initialIndex.coerceIn(0, images.size - 1)) }
+    val pagerState = rememberPagerState(initialPage = currentIndex) { images.size }
+
+    LaunchedEffect(pagerState.currentPage) {
+        currentIndex = pagerState.currentPage
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        BackHandler { onDismiss() }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.96f))
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                var scale by remember { mutableFloatStateOf(1f) }
+                var offset by remember { mutableStateOf(Offset.Zero) }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 4f)
+                                offset = if (scale > 1f) {
+                                    Offset(offset.x + pan.x, offset.y + pan.y)
+                                } else {
+                                    Offset.Zero
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    val imgUrl = images[page]
+                    SafeProductAsyncImage(
+                        imageUrl = imgUrl,
+                        contentDescription = "Zoomed Product Image",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offset.x
+                                translationY = offset.y
+                            },
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+
+            // Top Bar: close button & page counter
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 36.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.6f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Text(
+                        text = "${currentIndex + 1} / ${images.size}",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
 
 // ==============================================================================
 // 1. პროდუქტის გახსნის ფანჯარა (Product Detail Window / Sheet)
@@ -2196,21 +2387,109 @@ fun ProductDetailModalWindow(
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         contentPadding = PaddingValues(top = 12.dp, bottom = 28.dp)
                     ) {
-                        // 1. პროდუქტის ჰერო სურათი ან პროგრამული ბრენდის ვიზუალი
+                        // 1. პროდუქტის ჰერო სურათი ან პროგრამული ბრენდის ვიზუალი (Multi-image Gallery & Zoom)
                         item {
+                            val allImages = remember(product) { product.allImages }
+                            var showZoomViewer by remember { mutableStateOf(false) }
+                            var zoomInitialIndex by remember { mutableIntStateOf(0) }
+
+                            if (showZoomViewer && allImages.isNotEmpty()) {
+                                ProductImageViewerDialog(
+                                    images = allImages,
+                                    initialIndex = zoomInitialIndex,
+                                    onDismiss = { showZoomViewer = false }
+                                )
+                            }
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(210.dp)
+                                    .height(230.dp)
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
                                     .border(1.dp, AppThemeColorAdapter.dividerColor(Color(0xFF282F3A)), RoundedCornerShape(16.dp))
                             ) {
-                                ProductSmartVisual(
-                                    product = product,
-                                    modifier = Modifier.fillMaxSize(),
-                                    compact = false
-                                )
+                                if (allImages.size > 1) {
+                                    val pagerState = rememberPagerState { allImages.size }
+                                    HorizontalPager(
+                                        state = pagerState,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) { page ->
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clickable {
+                                                    zoomInitialIndex = page
+                                                    showZoomViewer = true
+                                                }
+                                        ) {
+                                            SafeProductAsyncImage(
+                                                imageUrl = allImages[page],
+                                                contentDescription = "${product.title} - ${page + 1}",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+
+                                    // Page indicator badge ("1 / 4")
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color.Black.copy(alpha = 0.75f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 10.dp)
+                                    ) {
+                                        Text(
+                                            text = "${pagerState.currentPage + 1} / ${allImages.size}",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clickable(enabled = allImages.isNotEmpty()) {
+                                                zoomInitialIndex = 0
+                                                showZoomViewer = true
+                                            }
+                                    ) {
+                                        ProductSmartVisual(
+                                            product = product,
+                                            modifier = Modifier.fillMaxSize(),
+                                            compact = false
+                                        )
+                                    }
+                                }
+
+                                // Tap to zoom icon button
+                                if (allImages.isNotEmpty()) {
+                                    Surface(
+                                        onClick = {
+                                            zoomInitialIndex = 0
+                                            showZoomViewer = true
+                                        },
+                                        shape = CircleShape,
+                                        color = Color.Black.copy(alpha = 0.65f),
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(10.dp)
+                                            .size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.ZoomIn,
+                                                contentDescription = "Zoom In",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
 
                                 // გულის ღილაკი
                                 Surface(
@@ -2454,6 +2733,83 @@ fun ProductDetailModalWindow(
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(product.warranty, color = Color(0xFFFF7A00), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        // 5.1 ტექნიკური მახასიათებლები (Specifications Table)
+                        val hasSpecs = product.specifications.isNotEmpty() ||
+                            product.exactModel.isNotBlank() ||
+                            product.condition.isNotBlank() ||
+                            product.productType.isNotBlank()
+                        if (hasSpecs) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = Color(0xFF16191E),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF242830)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text("📋", fontSize = 14.sp)
+                                            Text(
+                                                "ტექნიკური მახასიათებლები",
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        HorizontalDivider(color = Color(0xFF242830), thickness = 1.dp)
+
+                                        if (product.exactModel.isNotBlank()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("ზუსტი მოდელი:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                                                Text(product.exactModel, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            }
+                                        }
+                                        if (product.condition.isNotBlank()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("მდგომარეობა:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                                                Text(product.condition, color = Color(0xFFFF7A00), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        if (product.productType.isNotBlank()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("კატეგორიის ტიპი:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                                                Text(product.productType, color = Color(0xFFCBD5E1), fontSize = 12.sp)
+                                            }
+                                        }
+                                        product.specifications.forEach { (specKey, specVal) ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text("$specKey:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                                                Text(specVal, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3168,7 +3524,7 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(horizontal = 2.dp)
                     ) {
-                        items(categories) { (catName, icon) ->
+                        items(categories, key = { it.first }) { (catName, icon) ->
                             val isSelected = (selectedCategory == catName) || (selectedCategory == "ყველა" && catName == "ყველა")
                             val isDark = AppPreferencesManager.isDarkMode
                             val chipBgColor by animateColorAsState(
@@ -3233,7 +3589,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(horizontal = 2.dp)
                         ) {
-                            items(SoftwareCatalogData.softwareSubcategories) { subcat ->
+                            items(SoftwareCatalogData.softwareSubcategories, key = { it }) { subcat ->
                                 val isSubSelected = selectedSubcategory == subcat
                                 val isDark = AppPreferencesManager.isDarkMode
                                 val subBgColor by animateColorAsState(
@@ -3470,9 +3826,7 @@ fun HomeScreen(
             key = { row -> row.joinToString("-") { "${it.id}" } }
         ) { rowItems ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateItemPlacement(),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 rowItems.forEach { product ->
@@ -3566,25 +3920,34 @@ fun BekaPullToRefreshIndicator(
     val clampedProgress = pullProgress.coerceIn(0f, 1f)
     val isReadyToRefresh = pullProgress >= 1f
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pullRefreshInfinite")
-    val spinAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 760, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "pullRefreshSpinAngle"
-    )
-    val pulseGlow by infiniteTransition.animateFloat(
-        initialValue = 0.65f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 620, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pullRefreshPulse"
-    )
+    val spinAngle: Float
+    val pulseGlow: Float
+    if (isRefreshing) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pullRefreshInfinite")
+        val animatedSpin by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 760, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "pullRefreshSpinAngle"
+        )
+        val animatedPulse by infiniteTransition.animateFloat(
+            initialValue = 0.65f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 620, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pullRefreshPulse"
+        )
+        spinAngle = animatedSpin
+        pulseGlow = animatedPulse
+    } else {
+        spinAngle = clampedProgress * 220f
+        pulseGlow = 0.65f + (clampedProgress * 0.35f)
+    }
 
     val readyScale by animateFloatAsState(
         targetValue = when {
@@ -3783,23 +4146,46 @@ fun CatalogScreen(
     onToggleFavorite: (ProductItem) -> Unit,
     contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
 ) {
-    val baseCategories = listOf("ყველა", "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები")
-    val categories = remember(products) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val dynamicCategories: List<CategoryItem> = remember { AdminStorage.getCategories(context) }
+    val categories = remember(dynamicCategories, products) {
+        val storedActive = dynamicCategories.filter { it.isActive }.sortedBy { it.displayOrder }.map { it.name }
         val dynamicCats = products.map { it.category.trim() }.filter { it.isNotBlank() }
-        (baseCategories + dynamicCats).distinct()
+        val baseCategories = listOf("ყველა", "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები")
+        (listOf("ყველა") + storedActive + baseCategories + dynamicCats).distinct()
     }
+    val popularCategories = remember(dynamicCategories) {
+        dynamicCategories.filter { it.isActive && it.isPopular }.sortedBy { it.displayOrder }
+    }
+
     var selectedBrand by remember { mutableStateOf("ყველა") }
     var selectedSubcategory by remember { mutableStateOf("ყველა") }
     var sortBy by remember { mutableStateOf("default") }
 
-    LaunchedEffect(selectedCategory) {
-        if (selectedCategory != "პროგრამული სერვისები") {
-            selectedSubcategory = "ყველა"
+    val initialIndex = remember(categories, selectedCategory) {
+        val idx = categories.indexOf(selectedCategory)
+        if (idx >= 0) idx else 0
+    }
+    val pagerState = rememberPagerState(initialPage = initialIndex) { categories.size }
+
+    // Sync pagerState -> selectedCategory
+    LaunchedEffect(pagerState.currentPage) {
+        val currentCat = categories.getOrNull(pagerState.currentPage)
+        if (currentCat != null && currentCat != selectedCategory) {
+            onCategoryChange(currentCat)
         }
     }
 
-    val filteredProducts = remember(products, searchQuery, selectedCategory, selectedBrand, sortBy, selectedSubcategory) {
-        optimizeSearchFilter(products, searchQuery, selectedCategory, selectedBrand, sortBy, selectedSubcategory)
+    // Sync selectedCategory -> pagerState
+    LaunchedEffect(selectedCategory) {
+        val targetIndex = categories.indexOf(selectedCategory)
+        if (targetIndex >= 0 && targetIndex != pagerState.currentPage) {
+            pagerState.animateScrollToPage(targetIndex)
+        }
+        if (selectedCategory != "პროგრამული სერვისები") {
+            selectedSubcategory = "ყველა"
+        }
     }
 
     val focusManager = LocalFocusManager.current
@@ -3811,16 +4197,18 @@ fun CatalogScreen(
         label = "catalogSearchBorder"
     )
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = contentPadding,
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp)
+            .padding(contentPadding)
     ) {
-        item(span = { GridItemSpan(maxLineSpan) }, key = "catalog_title_header") {
+        // 1. Header (Title & Search)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3832,11 +4220,15 @@ fun CatalogScreen(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Text("სულ: ${filteredProducts.size}", color = Color(0xFFFF7A00), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "სულ: ${products.size}",
+                    color = Color(0xFFFF7A00),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
-        }
 
-        item(span = { GridItemSpan(maxLineSpan) }, key = "catalog_search_box") {
+            // Search Bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3934,155 +4326,337 @@ fun CatalogScreen(
                     }
                 }
             }
-        }
-            item(span = { GridItemSpan(maxLineSpan) }, key = "catalog_filters_header") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // კატეგორიების ჰორიზონტალური ზოლი
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(categories) { cat ->
-                            val isSelected = selectedCategory == cat
-                            val catChipBg by animateColorAsState(
-                                targetValue = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF161922).copy(alpha = 0.75f) else Color(0xFFFFFFFF).copy(alpha = 0.85f),
-                                animationSpec = tween(200),
-                                label = "catalogCatBg_$cat"
-                            )
-                            val catChipBorder by animateColorAsState(
-                                targetValue = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF282F3C).copy(alpha = 0.75f) else Color(0xFFCBD5E1),
-                                animationSpec = tween(200),
-                                label = "catalogCatBorder_$cat"
-                            )
-                            val catChipText by animateColorAsState(
-                                targetValue = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF334155),
-                                animationSpec = tween(200),
-                                label = "catalogCatText_$cat"
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = catChipBg,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, catChipBorder),
-                                modifier = Modifier.clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { onCategoryChange(cat) }
+
+            // 2. Popular Categories 2-Row Compact Grid
+            if (popularCategories.isNotEmpty()) {
+                LazyHorizontalGrid(
+                    rows = GridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(88.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // "ყველა" (All) Button
+                    item {
+                        val isAllSelected = selectedCategory == "ყველა"
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isAllSelected) Color(0xFFFF7A00).copy(alpha = 0.22f) else if (isDark) Color(0xFF161922) else Color.White,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isAllSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1)),
+                            modifier = Modifier
+                                .width(130.dp)
+                                .height(40.dp)
+                                .clickable {
+                                    coroutineScope.launch {
+                                        val idx = categories.indexOf("ყველა")
+                                        if (idx >= 0) pagerState.animateScrollToPage(idx)
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    cat,
-                                    color = catChipText,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Text("🔥", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "ყველა",
+                                        color = if (isAllSelected) Color(0xFFFF7A00) else if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isAllSelected) Color(0xFFFF7A00) else Color(0x33A0A5B0)
+                                ) {
+                                    Text(
+                                        "${products.size}",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // ქვეკატეგორიები პროგრამული სერვისებისთვის ან ბრენდების ფილტრი ნაწილებისთვის
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (selectedCategory == "პროგრამული სერვისები") {
-                            val dynamicSubcats = remember(products) {
-                                val extra = products
-                                    .filter { it.category == "პროგრამული სერვისები" || it.type == "software" }
-                                    .map { it.subcategory.trim() }
-                                    .filter { it.isNotBlank() }
-                                (SoftwareCatalogData.softwareSubcategories + extra).distinct()
-                            }
-                            LazyRow(
-                                modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                items(dynamicSubcats) { subcat ->
-                                    val isSel = selectedSubcategory == subcat
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = if (isSel) Color(0x33FF7A00) else Color(0xFF14171D),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF7A00) else Color(0xFF20252F)),
-                                        modifier = Modifier.clickable { selectedSubcategory = subcat }
-                                    ) {
-                                        Text(
-                                            subcat,
-                                            color = if (isSel) Color(0xFFFF7A00) else Color(0xFF8A92A0),
-                                            fontSize = 10.sp,
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            val brands = remember(products) {
-                                val baseBrands = listOf("ყველა", "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor")
-                                val extraBrands = products.map { it.brand.trim() }.filter { it.isNotBlank() }
-                                (baseBrands + extraBrands).distinct()
-                            }
-                            LazyRow(
-                                modifier = Modifier.weight(1f).padding(end = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                items(brands) { brand ->
-                                    val isSel = selectedBrand == brand
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = if (isSel) Color(0x33FF7A00) else Color(0xFF14171D),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF7A00) else Color(0xFF20252F)),
-                                        modifier = Modifier.clickable { selectedBrand = brand }
-                                    ) {
-                                        Text(
-                                            brand,
-                                            color = if (isSel) Color(0xFFFF7A00) else Color(0xFF8A92A0),
-                                            fontSize = 10.sp,
-                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // სორტირების გადამრთველი
+                    // Popular Categories
+                    items(popularCategories, key = { it.id }) { cat ->
+                        val isSelected = selectedCategory == cat.name
+                        val catCount = products.count { it.category == cat.name }
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF14171D),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF20252F)),
-                            modifier = Modifier.clickable {
-                                sortBy = when (sortBy) {
-                                    "default" -> "price_asc"
-                                    "price_asc" -> "price_desc"
-                                    "price_desc" -> "rating"
-                                    else -> "default"
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) Color(0xFFFF7A00).copy(alpha = 0.22f) else if (isDark) Color(0xFF161922) else Color.White,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1)),
+                            modifier = Modifier
+                                .width(140.dp)
+                                .height(40.dp)
+                                .clickable {
+                                    coroutineScope.launch {
+                                        val idx = categories.indexOf(cat.name)
+                                        if (idx >= 0) pagerState.animateScrollToPage(idx)
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Text(cat.icon.ifBlank { "📦" }, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        cat.name,
+                                        color = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) Color(0xFFFF7A00) else Color(0x33A0A5B0)
+                                ) {
+                                    Text(
+                                        "$catCount",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                    )
                                 }
                             }
-                        ) {
-                            Text(
-                                when (sortBy) {
-                                    "price_asc" -> "ფასი: ↑"
-                                    "price_desc" -> "ფასი: ↓"
-                                    "rating" -> "რეიტინგი ⭐"
-                                    else -> "სორტირება ⇅"
-                                },
-                                color = Color(0xFFFF7A00),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
                         }
                     }
                 }
             }
 
-            items(filteredProducts, key = { it.id }) { product ->
-                ProductPhotoCard(
-                    product = product,
-                    onClick = { onProductClick(product) },
-                    onAddToCart = { onAddToCart(product) },
-                    onToggleFavorite = { onToggleFavorite(product) }
-                )
+            // 3. Category Chips LazyRow (Synchronized with HorizontalPager)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(categories, key = { it }) { cat ->
+                    val isSelected = selectedCategory == cat
+                    val catChipBg by animateColorAsState(
+                        targetValue = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF161922).copy(alpha = 0.75f) else Color(0xFFFFFFFF).copy(alpha = 0.85f),
+                        animationSpec = tween(200),
+                        label = "catalogCatBg_$cat"
+                    )
+                    val catChipBorder by animateColorAsState(
+                        targetValue = if (isSelected) Color(0xFFFF7A00) else if (isDark) Color(0xFF282F3C).copy(alpha = 0.75f) else Color(0xFFCBD5E1),
+                        animationSpec = tween(200),
+                        label = "catalogCatBorder_$cat"
+                    )
+                    val catChipText by animateColorAsState(
+                        targetValue = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF334155),
+                        animationSpec = tween(200),
+                        label = "catalogCatText_$cat"
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = catChipBg,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, catChipBorder),
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            coroutineScope.launch {
+                                val idx = categories.indexOf(cat)
+                                if (idx >= 0) pagerState.animateScrollToPage(idx)
+                            }
+                        }
+                    ) {
+                        Text(
+                            cat,
+                            color = catChipText,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            // 4. Subcategories / Brands + Sort Filter Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (selectedCategory == "პროგრამული სერვისები") {
+                    val dynamicSubcats = remember(products) {
+                        val extra = products
+                            .filter { it.category == "პროგრამული სერვისები" || it.type == "software" }
+                            .map { it.subcategory.trim() }
+                            .filter { it.isNotBlank() }
+                        (SoftwareCatalogData.softwareSubcategories + extra).distinct()
+                    }
+                    LazyRow(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(dynamicSubcats, key = { it }) { subcat ->
+                            val isSel = selectedSubcategory == subcat
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSel) Color(0x33FF7A00) else Color(0xFF14171D),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF7A00) else Color(0xFF20252F)),
+                                modifier = Modifier.clickable { selectedSubcategory = subcat }
+                            ) {
+                                Text(
+                                    subcat,
+                                    color = if (isSel) Color(0xFFFF7A00) else Color(0xFF8A92A0),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val brands = remember(products) {
+                        val baseBrands = listOf("ყველა", "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor")
+                        val extraBrands = products.map { it.brand.trim() }.filter { it.isNotBlank() }
+                        (baseBrands + extraBrands).distinct()
+                    }
+                    LazyRow(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(brands, key = { it }) { brand ->
+                            val isSel = selectedBrand == brand
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isSel) Color(0x33FF7A00) else Color(0xFF14171D),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF7A00) else Color(0xFF20252F)),
+                                modifier = Modifier.clickable { selectedBrand = brand }
+                            ) {
+                                Text(
+                                    brand,
+                                    color = if (isSel) Color(0xFFFF7A00) else Color(0xFF8A92A0),
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Sort toggle
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF14171D),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF20252F)),
+                    modifier = Modifier.clickable {
+                        sortBy = when (sortBy) {
+                            "default" -> "price_asc"
+                            "price_asc" -> "price_desc"
+                            "price_desc" -> "rating"
+                            else -> "default"
+                        }
+                    }
+                ) {
+                    Text(
+                        when (sortBy) {
+                            "price_asc" -> "ფასი: ↑"
+                            "price_desc" -> "ფასი: ↓"
+                            "rating" -> "რეიტინგი ⭐"
+                            else -> "სორტირება ⇅"
+                        },
+                        color = Color(0xFFFF7A00),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 5. HorizontalPager with synchronized Category Swiping (Zero Vertical Gesture Conflicts)
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) { page ->
+            val pageCat = categories.getOrElse(page) { "ყველა" }
+            val pageFilteredProducts = remember(products, searchQuery, pageCat, selectedBrand, sortBy, selectedSubcategory) {
+                optimizeSearchFilter(products, searchQuery, pageCat, selectedBrand, sortBy, selectedSubcategory)
+            }
+
+            if (pageFilteredProducts.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("🔍", fontSize = 36.sp)
+                        Text(
+                            "პროდუქტი ვერ მოიძებნა",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "სცადეთ სხვა საძიებო სიტყვა ან კატეგორია",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp)
+                ) {
+                    items(pageFilteredProducts, key = { it.id }) { product ->
+                        ProductPhotoCard(
+                            product = product,
+                            onClick = { onProductClick(product) },
+                            onAddToCart = { onAddToCart(product) },
+                            onToggleFavorite = { onToggleFavorite(product) }
+                        )
+                    }
+                }
             }
         }
     }
+}
 
 // ==============================================================================
 // 4. AI დიაგნოსტიკის სამუშაო სივრცე (Diagnostics Screen - Tab 2)
@@ -5335,7 +5909,7 @@ fun AiAssistantScreen(
             // სწრაფი შეკითხვების ჩიპები (Glassmorphic Translucent Chips)
             val isDark = AppPreferencesManager.isDarkMode
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(quickQuestions) { q ->
+                items(quickQuestions, key = { it }) { q ->
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = if (isDark) Color(0xFF161922).copy(alpha = 0.75f) else Color(0xFFFFFFFF).copy(alpha = 0.85f),
@@ -5772,7 +6346,7 @@ fun CartScreen(
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(cartList) { item ->
+                    items(cartList, key = { "${it.product.id}_${it.selectedQuality}" }) { item ->
                         val isSoft = SoftwareCatalogData.isDigitalSoftwareService(item.product)
                         Surface(
                             shape = RoundedCornerShape(14.dp),

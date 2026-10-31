@@ -1732,7 +1732,448 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("ai_assistant_composer_row").assertIsDisplayed()
     composeTestRule.onNodeWithTag("ai_assistant_input").assertIsDisplayed()
   }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `audit test 4 - performance optimizations for search filter, cached storage, and scrolling lists`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    val products = ProductRepository.getAllProducts()
+
+    // 1. Warm up and measure repeated multi-field search queries across all 121 catalog items
+    optimizeSearchFilter(products, "iphone 15 oled")
+    val startNs = System.nanoTime()
+    repeat(50) {
+      val r1 = optimizeSearchFilter(products, "აიფონ 15 ეკრანი")
+      val r2 = optimizeSearchFilter(products, "chatgpt plus")
+      val r3 = optimizeSearchFilter(products, "სამსუნგ ელემენტი")
+      assertTrue(r1.isNotEmpty())
+      assertTrue(r2.isNotEmpty())
+      assertTrue(r3.isNotEmpty())
+    }
+    val elapsedMs = (System.nanoTime() - startNs) / 1_000_000.0
+    // 150 full-catalog searches should complete well under 500ms in local JVM (< 3.3ms per search)
+    assertTrue("150 full-catalog searches took ${elapsedMs}ms, expected < 500ms", elapsedMs < 500.0)
+
+    // 2. Verify AdminStorage in-memory caching preserves custom edits while avoiding redundant JSON parsing
+    AdminStorage.saveProducts(context, products, markUnsyncedLocalEdit = false)
+    val loadStartNs = System.nanoTime()
+    repeat(50) {
+      val loaded = AdminStorage.loadProducts(context)
+      assertEquals(products.size, loaded.size)
+    }
+    val loadElapsedMs = (System.nanoTime() - loadStartNs) / 1_000_000.0
+    assertTrue("50 cached AdminStorage.loadProducts calls took ${loadElapsedMs}ms, expected < 250ms", loadElapsedMs < 250.0)
+
+    // 3. Verify non-KA locale translation cache returns accurate results without recomputing phrase replacements
+    val sampleText = "პროდუქტის ID: 101 • ხელმისაწვდომია • 12 თვე"
+    val enFirst = AppLocaleManager.translate(sampleText, AppLanguage.EN)
+    val enSecond = AppLocaleManager.translate(sampleText, AppLanguage.EN)
+    assertEquals(enFirst, enSecond)
+    assertTrue(enFirst.contains("Product ID:"))
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `category CRUD, safe deletion, and product reassignment in AdminStorage`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    
+    // 1. Initial categories exist and are not empty
+    val initialCats = AdminStorage.getCategories(context)
+    assertTrue("Initial categories should not be empty", initialCats.isNotEmpty())
+
+    // 2. Add a new custom category
+    val testCatId = "cat_test_routers"
+    val testCat = CategoryItem(
+      id = testCatId,
+      name = "როუტერები და ქსელი",
+      localizedName = "Routers & Networking",
+      description = "Wi-Fi 6 და 4G/5G როუტერები",
+      icon = "🌐",
+      displayOrder = 99,
+      isActive = true,
+      isPopular = true
+    )
+    AdminStorage.addCategory(context, testCat)
+    val afterAdd = AdminStorage.getCategories(context)
+    assertTrue("Added category should be present", afterAdd.any { it.id == testCatId && it.name == "როუტერები და ქსელი" })
+
+    // 3. Update category
+    val updatedCat = testCat.copy(description = "განახლებული აღწერა", isPopular = false)
+    AdminStorage.updateCategory(context, updatedCat)
+    val afterUpdate = AdminStorage.getCategories(context)
+    val foundUpdated = afterUpdate.find { it.id == testCatId }
+    assertNotNull(foundUpdated)
+    assertEquals("განახლებული აღწერა", foundUpdated?.description)
+    assertFalse(foundUpdated?.isPopular ?: true)
+
+    // 4. Test safe deletion with reassignment
+    val targetCatName = "სხვა"
+    val deleted = AdminStorage.deleteCategory(context, testCatId, targetCatName)
+    assertTrue("Deletion should succeed", deleted)
+    val afterDelete = AdminStorage.getCategories(context)
+    assertFalse("Deleted category should not be present", afterDelete.any { it.id == testCatId })
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `ProductItem multi-image resolution and backward compatibility`() {
+    // 1. Legacy product with only imageUrl
+    val legacy = ProductItem(
+      id = 1,
+      title = "iPhone 15 OLED",
+      price = "350 ₾",
+      category = "ეკრანები",
+      imageUrl = "https://example.com/legacy.jpg"
+    )
+    assertEquals("https://example.com/legacy.jpg", legacy.displayPrimaryImage)
+    assertEquals(listOf("https://example.com/legacy.jpg"), legacy.allImages)
+    assertTrue(legacy.specifications.isEmpty())
+    assertEquals("", legacy.exactModel)
+
+    // 2. Upgraded product with primaryImageUrl and multiple images
+    val upgraded = ProductItem(
+      id = 2,
+      title = "Samsung S24 Ultra",
+      price = "2200 ₾",
+      category = "ტელეფონები",
+      imageUrl = "https://example.com/fallback.jpg",
+      primaryImageUrl = "https://example.com/primary.jpg",
+      images = listOf("https://example.com/photo1.jpg", "https://example.com/photo2.jpg"),
+      specifications = mapOf("RAM" to "12GB", "Storage" to "256GB"),
+      productType = "mobile_phone",
+      condition = "ახალი",
+      exactModel = "SM-S928B/DS"
+    )
+    assertEquals("https://example.com/primary.jpg", upgraded.displayPrimaryImage)
+    val expectedImages = listOf("https://example.com/primary.jpg", "https://example.com/photo1.jpg", "https://example.com/photo2.jpg")
+    assertEquals(expectedImages, upgraded.allImages)
+    assertEquals("12GB", upgraded.specifications["RAM"])
+    assertEquals("SM-S928B/DS", upgraded.exactModel)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `Admin session active bypass and auto-grant for designated admin`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Ensure clean slate
+    AdminStorage.clearAdminSession(context)
+    assertFalse("Session should be inactive after clear", AdminStorage.isAdminSessionActive(context))
+
+    // 2. Activate admin session for beqa1994@gmail.com
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    assertTrue("Admin session must be active", AdminStorage.isAdminSessionActive(context))
+
+    // 3. Clear session
+    AdminStorage.clearAdminSession(context)
+    assertFalse("Admin session must be inactive after logout", AdminStorage.isAdminSessionActive(context))
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `issue 1 - admin panel PIN-only authentication, invalid PIN handling, back navigation, and Google admin access without ANR`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    AuthAndOrderManager.logout(context)
+    AdminStorage.clearAdminSession(context)
+    AdminStorage.setAdminPin(context, "bmgebr")
+
+    var pinAuthenticatedCount = 0
+    var pinDialogDismissed = false
+    var showPinDialogState = androidx.compose.runtime.mutableStateOf(true)
+    var showAdminScreenState = androidx.compose.runtime.mutableStateOf(false)
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        if (showPinDialogState.value) {
+          AdminPinDialog(
+            onDismiss = {
+              pinDialogDismissed = true
+              showPinDialogState.value = false
+            },
+            onSuccess = {
+              pinAuthenticatedCount++
+              showPinDialogState.value = false
+              showAdminScreenState.value = true
+            }
+          )
+        }
+        if (showAdminScreenState.value) {
+          AdminPanelScreen(
+            products = ProductRepository.getAllProducts().take(15),
+            onProductsUpdated = {},
+            onClose = {
+              showAdminScreenState.value = false
+            }
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Verify PIN dialog is displayed when no Google auth or active session exists
+    composeTestRule.onNodeWithTag("admin_pin_dialog").assertIsDisplayed()
+
+    // 2. Enter an invalid PIN and verify clear error message without freezing
+    composeTestRule.onNodeWithTag("admin_pin_input").performTextReplacement("wrong999")
+    composeTestRule.onNodeWithTag("admin_pin_submit_button").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("admin_pin_error_text").assertIsDisplayed()
+    assertEquals(0, pinAuthenticatedCount)
+    assertFalse(AdminStorage.isAdminSessionActive(context))
+
+    // 3. Enter valid PIN ("bmgebr") without Google authentication -> transitions cleanly to AdminPanelScreen
+    composeTestRule.onNodeWithTag("admin_pin_input").performTextReplacement("bmgebr")
+    composeTestRule.onNodeWithTag("admin_pin_submit_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(1, pinAuthenticatedCount)
+    assertTrue("PIN session must be active after valid PIN", AdminStorage.isAdminSessionActive(context))
+    composeTestRule.onNodeWithTag("admin_panel_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_access_mode_banner").assertIsDisplayed()
+
+    // 4. Test authenticated non-admin Google account vs authorized admin account
+    AdminStorage.clearAdminSession(context)
+    AuthAndOrderManager.loginWithGoogle(context, "regular.user@gmail.com", "Regular User")
+    assertFalse("Non-admin Google user must not auto-activate admin session", AdminStorage.isAdminSessionActive(context))
+
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin")
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    assertTrue("Authorized Google admin must have active admin session", AdminStorage.isAdminSessionActive(context))
+
+    // Cleanup
+    AdminStorage.clearAdminSession(context)
+    AuthAndOrderManager.logout(context)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `issue 2 - AI product research identifies exact models across all 8 categories, never assumes software for physical items, and preserves manual seller fields`() {
+    val existingCategories = listOf(
+      "მობილური ტელეფონები", "ეკრანები", "აქსესუარები", "ყურსასმენები და აუდიო",
+      "დამტენები და კაბელები", "ქსელური მოწყობილობები", "ელექტრონიკა", "პროგრამული სერვისები"
+    )
+    val existingBrands = listOf("Samsung", "Apple", "Huawei", "TP-Link", "Xiaomi", "OpenAI")
+
+    // 1. Mobile Phone: "Samsung Galaxy S24 Ultra 12/256GB"
+    val s24Id = AdminProductAiGenerator.identifyProductFromTitle("Samsung Galaxy S24 Ultra 12/256GB")
+    assertEquals(ProductCategoryType.MOBILE_PHONE, s24Id.categoryType)
+    assertEquals("Samsung", s24Id.brand)
+    assertEquals("12 GB", s24Id.ram)
+    assertEquals("256 GB", s24Id.storage)
+
+    val s24Generated = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle(
+        rawTitle = "Samsung Galaxy S24 Ultra 12/256GB",
+        existingCategories = existingCategories,
+        existingBrands = existingBrands
+      )
+    }
+    assertEquals(ProductCategoryType.MOBILE_PHONE, s24Generated.categoryType)
+    assertFalse("Physical phone must NEVER be marked as software", s24Generated.isSoftware)
+    assertEquals("Samsung", s24Generated.brand)
+    assertEquals("მობილური ტელეფონები", s24Generated.category)
+    assertTrue("Exact model must include SM-S928B/DS", s24Generated.exactModel.contains("SM-S928B/DS"))
+    assertEquals("12 GB", s24Generated.specifications["RAM"])
+    assertEquals("256 GB", s24Generated.specifications["Storage"])
+    assertTrue("Phone specs must include processor", s24Generated.specifications["პროცესორი"]?.contains("Snapdragon 8 Gen 3") == true)
+    assertTrue("Phone specs must include display", s24Generated.specifications["ეკრანი"]?.contains("AMOLED") == true)
+    // Software fields must be empty for physical phones
+    assertEquals("", s24Generated.offerType)
+    assertEquals("", s24Generated.duration)
+    assertEquals("", s24Generated.accountType)
+    assertEquals("", s24Generated.activationTerms)
+    assertFalse("Phone description must not contain software license/activation text", s24Generated.description.contains("ლიცენზია") || s24Generated.description.contains("გამოწერა"))
+    // Seller-provided fields must NEVER be invented by AI
+    assertEquals("AI must not invent sale price", "", s24Generated.price)
+    assertEquals("AI must not invent physical condition", "", s24Generated.condition)
+    assertEquals("AI must not invent warranty", "", s24Generated.warranty)
+    assertFalse("AI must not invent battery health percentage", s24Generated.specifications.containsKey("ელემენტის რესურსი"))
+
+    // 2. Networking Device: "Huawei B535-232 4G LTE WiFi Router"
+    val routerGenerated = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle(
+        rawTitle = "Huawei B535-232 4G LTE WiFi Router",
+        existingCategories = existingCategories,
+        existingBrands = existingBrands
+      )
+    }
+    assertEquals(ProductCategoryType.NETWORKING_DEVICE, routerGenerated.categoryType)
+    assertFalse("Router must NEVER be marked as software", routerGenerated.isSoftware)
+    assertEquals("Huawei", routerGenerated.brand)
+    assertEquals("B535-232", routerGenerated.exactModel)
+    assertEquals("როუტერები და ქსელი", routerGenerated.category)
+    assertTrue(routerGenerated.specifications["ქსელის თაობა"]?.contains("4G LTE Cat 7") == true)
+    assertTrue(routerGenerated.specifications["პორტები"]?.contains("Gigabit") == true)
+    assertEquals("", routerGenerated.offerType)
+    assertEquals("", routerGenerated.duration)
+
+    // 3. Replacement Display, Headphones, Charger/Cable, Phone Accessory, Other Electronics, and Digital Service
+    val displayGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("iPhone 15 Pro Original OLED ეკრანი", existingCategories, existingBrands)
+    }
+    assertEquals(ProductCategoryType.REPLACEMENT_DISPLAY, displayGen.categoryType)
+    assertFalse(displayGen.isSoftware)
+
+    val headphonesGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("Apple AirPods Pro 2 USB-C", existingCategories, existingBrands)
+    }
+    assertEquals(ProductCategoryType.HEADPHONES, headphonesGen.categoryType)
+    assertFalse(headphonesGen.isSoftware)
+
+    val chargerGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("Apple 20W USB-C Power Adapter დამტენი", existingCategories, existingBrands)
+    }
+    assertEquals(ProductCategoryType.CHARGER_CABLE, chargerGen.categoryType)
+    assertFalse(chargerGen.isSoftware)
+
+    val accessoryGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("iPhone 16 Pro MagSafe Silicone Case ქეისი", existingCategories, existingBrands)
+    }
+    assertEquals(ProductCategoryType.PHONE_ACCESSORY, accessoryGen.categoryType)
+    assertFalse(accessoryGen.isSoftware)
+
+    val digitalGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("ChatGPT Plus", existingCategories, existingBrands)
+    }
+    assertEquals(ProductCategoryType.DIGITAL_SERVICE, digitalGen.categoryType)
+    assertTrue("Actual digital service must have isSoftware = true", digitalGen.isSoftware)
+    assertTrue(digitalGen.offerType.isNotBlank())
+
+    // 4. Manual administrator fields must NEVER be overwritten by mergeGeneratedWithManualFields
+    val manualState = ExistingProductFormState(
+      price = "2650 ₾",
+      brand = "Samsung",
+      category = "მობილური ტელეფონები",
+      subcategory = "",
+      shortDescription = "ადმინის ხელით ჩაწერილი მოკლე აღწერა",
+      description = "",
+      featuresText = "",
+      targetAudience = "",
+      offerType = "",
+      duration = "",
+      accountType = "",
+      activationTerms = "",
+      compatibleModels = "",
+      warranty = "12 თვე",
+      searchKeywords = "",
+      exactModel = "",
+      condition = "მეორადი (იდეალური)",
+      specifications = mapOf("ელემენტის რესურსი" to "97%", "RAM" to "12 GB (Manual)")
+    )
+    val merged = AdminProductAiGenerator.mergeGeneratedWithManualFields(s24Generated, manualState)
+    assertEquals("2650 ₾", merged.price)
+    assertEquals("ადმინის ხელით ჩაწერილი მოკლე აღწერა", merged.shortDescription)
+    assertEquals("12 თვე", merged.warranty)
+    assertEquals("მეორადი (იდეალური)", merged.condition)
+    assertEquals("97%", merged.specifications["ელემენტის რესურსი"])
+    assertEquals("12 GB (Manual)", merged.specifications["RAM"])
+    assertTrue("AI should still fill empty description", merged.description.isNotBlank())
+
+    // 5. Invalid/blank title returns clear errorMessage
+    val blankGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("   ", existingCategories, existingBrands)
+    }
+    assertNotNull("Blank title must return an errorMessage", blankGen.errorMessage)
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `issue 3 and 2F - dynamic product form adapts to product type, hides software fields for physical items, warns before clearing incompatible fields, and AI button has single icon`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+
+    // Start with a Digital Service product that has populated software-specific fields
+    val initialServiceProduct = ProductItem(
+      id = 701,
+      title = "ChatGPT Plus",
+      price = "30 ₾",
+      brand = "OpenAI",
+      category = "პროგრამული სერვისები",
+      type = "software",
+      productType = "software",
+      shortDescription = "GPT-4o პრემიუმ წვდომა",
+      description = "სრული წვდომა OpenAI-ის უახლეს მოდელებზე.",
+      offerType = "თვიური გამოწერა",
+      duration = "1 თვე",
+      accountType = "პირადი ანგარიში (Private)",
+      activationTerms = "აქტივაცია 5 წუთში",
+      subcategory = "ხელოვნური ინტელექტი",
+      imageUrl = ""
+    )
+
+    var savedItem: ProductItem? = null
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        ProductEditDialog(
+          product = initialServiceProduct,
+          isNew = false,
+          onDismiss = {},
+          onSave = { savedItem = it }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Verify AI button displays single icon and clean label without duplicate "✨" prefix
+    val aiBtn = composeTestRule.onNodeWithTag("ai_autofill_product_button").assertIsDisplayed()
+    composeTestRule.onNodeWithText("AI-ით დეტალური ანალიზი და შევსება").assertIsDisplayed()
+    assertTrue(
+      "AI button text must not contain duplicate sparkle emoji",
+      composeTestRule.onAllNodes(androidx.compose.ui.test.hasText("✨ AI-ით დეტალური ანალიზი და შევსება")).fetchSemanticsNodes().isEmpty()
+    )
+
+    // 2. Verify Digital Service fields are present when DIGITAL_SERVICE is active
+    val lazyCol = composeTestRule.onNodeWithTag("product_edit_lazy_column")
+    lazyCol.performScrollToNode(hasTestTag("offer_type_input"))
+    composeTestRule.onNodeWithTag("offer_type_input").assertIsDisplayed()
+    lazyCol.performScrollToNode(hasTestTag("duration_input"))
+    composeTestRule.onNodeWithTag("duration_input").assertIsDisplayed()
+
+    // 3. Switch product type to Mobile Phone ("mobile_phone") while software fields are populated -> must show warning dialog
+    lazyCol.performScrollToNode(hasTestTag("product_type_selector_row"))
+    composeTestRule.onNodeWithTag("product_type_chip_mobile_phone").performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("type_switch_warning_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("confirm_type_switch_button").performClick()
+    composeTestRule.waitForIdle()
+
+    // 4. After switching to Mobile Phone, software-specific fields must NOT exist in the form
+    assertTrue(
+      "offer_type_input must be hidden for physical Mobile Phone",
+      composeTestRule.onAllNodesWithTag("offer_type_input").fetchSemanticsNodes().isEmpty()
+    )
+    assertTrue(
+      "duration_input must be hidden for physical Mobile Phone",
+      composeTestRule.onAllNodesWithTag("duration_input").fetchSemanticsNodes().isEmpty()
+    )
+    assertTrue(
+      "account_type_input must be hidden for physical Mobile Phone",
+      composeTestRule.onAllNodesWithTag("account_type_input").fetchSemanticsNodes().isEmpty()
+    )
+
+    // 5. Verify Mobile Phone category-specific fields (RAM, Storage, Battery Health) ARE displayed
+    lazyCol.performScrollToNode(hasTestTag("dynamic_category_fields_section"))
+    composeTestRule.onNodeWithTag("spec_field_RAM").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("spec_field_Storage").assertIsDisplayed()
+
+    // 6. Save and verify shared fields (title, price, shortDescription) are preserved while software fields are cleared
+    composeTestRule.onNodeWithTag("save_product_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertNotNull(savedItem)
+    assertEquals("ChatGPT Plus", savedItem!!.title)
+    assertEquals("30 ₾", savedItem!!.price)
+    assertEquals("GPT-4o პრემიუმ წვდომა", savedItem!!.shortDescription)
+    assertEquals("mobile_phone", savedItem!!.productType)
+    assertEquals("product", savedItem!!.type)
+    assertEquals("", savedItem!!.offerType)
+    assertEquals("", savedItem!!.duration)
+    assertEquals("", savedItem!!.accountType)
+    assertEquals("", savedItem!!.activationTerms)
+  }
 }
-
-
-

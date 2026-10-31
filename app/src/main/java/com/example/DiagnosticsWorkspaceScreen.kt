@@ -542,6 +542,9 @@ fun DiagnosticsWorkspaceScreen(
                     }
                 )
             } else {
+                val latestAssistantId = remember(stateHolder.messages) {
+                    stateHolder.messages.lastOrNull { !it.isUser }?.id
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -561,7 +564,7 @@ fun DiagnosticsWorkspaceScreen(
                                 onAttachmentClick = { stateHolder.zoomedAttachment = it }
                             )
                         } else {
-                            val isLatestAssistant = stateHolder.messages.lastOrNull { !it.isUser }?.id == message.id
+                            val isLatestAssistant = latestAssistantId == message.id
                             DiagnosticAssistantCard(
                                 palette = palette,
                                 message = message,

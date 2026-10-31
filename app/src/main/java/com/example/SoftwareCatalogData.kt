@@ -11,6 +11,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -886,142 +887,145 @@ fun SoftwareBrandVisualHeader(
         return
     }
 
-    val titleLower = product.title.lowercase()
-    val brandLower = product.brand.lowercase()
-    val catLower = product.category.lowercase()
-    val brandStyle = when {
-        titleLower.contains("chatgpt") || brandLower.contains("openai") -> Triple(
-            listOf(Color(0xFF0A2E24), Color(0xFF0F172A)),
-            Color(0xFF10A37F),
-            "OpenAI"
-        )
-        titleLower.contains("google ai") || titleLower.contains("gemini") -> Triple(
-            listOf(Color(0xFF172554), Color(0xFF3B0764), Color(0xFF0F172A)),
-            Color(0xFF60A5FA),
-            "Google Gemini"
-        )
-        titleLower.contains("gmail") -> Triple(
-            listOf(Color(0xFF3B1219), Color(0xFF111827)),
-            Color(0xFFEA4335),
-            "Gmail PVA"
-        )
-        titleLower.contains("google storage") || titleLower.contains("google one") -> Triple(
-            listOf(Color(0xFF0D2E22), Color(0xFF172554)),
-            Color(0xFF34A853),
-            "Google One"
-        )
-        titleLower.contains("grok") || brandLower.contains("xai") -> Triple(
-            listOf(Color(0xFF090D16), Color(0xFF1E293B)),
-            Color(0xFFE2E8F0),
-            "xAI Grok"
-        )
-        titleLower.contains("claude") || brandLower.contains("anthropic") -> Triple(
-            listOf(Color(0xFF2E1B14), Color(0xFF141210)),
-            Color(0xFFD97757),
-            "Anthropic"
-        )
-        titleLower.contains("perplexity") -> Triple(
-            listOf(Color(0xFF0B2930), Color(0xFF0F172A)),
-            Color(0xFF20B8CD),
-            "Perplexity"
-        )
-        titleLower.contains("cursor") -> Triple(
-            listOf(Color(0xFF0F172A), Color(0xFF1E1B4B)),
-            Color(0xFF38BDF8),
-            "Cursor IDE"
-        )
-        titleLower.contains("lovable") -> Triple(
-            listOf(Color(0xFF3B0A2A), Color(0xFF1E1B4B)),
-            Color(0xFFEC4899),
-            "Lovable.dev"
-        )
-        titleLower.contains("capcut") -> Triple(
-            listOf(Color(0xFF082830), Color(0xFF111827)),
-            Color(0xFF00F0FF),
-            "CapCut Pro"
-        )
-        titleLower.contains("pdf") || titleLower.contains("acrobat") -> Triple(
-            listOf(Color(0xFF3B0A0F), Color(0xFF161218)),
-            Color(0xFFFF4D4F),
-            product.brand.ifBlank { "PDF Pro" }
-        )
-        titleLower.contains("adobe") -> Triple(
-            listOf(Color(0xFF3B0A0A), Color(0xFF141418)),
-            Color(0xFFFF3B30),
-            "Adobe CC"
-        )
-        titleLower.contains("canva") -> Triple(
-            listOf(Color(0xFF004C56), Color(0xFF3B0764)),
-            Color(0xFF00C4CC),
-            "Canva Pro"
-        )
-        titleLower.contains("youtube") -> Triple(
-            listOf(Color(0xFF3B0A12), Color(0xFF121216)),
-            Color(0xFFFF0033),
-            "YouTube"
-        )
-        titleLower.contains("spotify") -> Triple(
-            listOf(Color(0xFF092E1A), Color(0xFF0F1412)),
-            Color(0xFF1DB954),
-            "Spotify"
-        )
-        titleLower.contains("netflix") -> Triple(
-            listOf(Color(0xFF33060A), Color(0xFF0F0F12)),
-            Color(0xFFE50914),
-            "Netflix"
-        )
-        titleLower.contains("telegram") -> Triple(
-            listOf(Color(0xFF09253A), Color(0xFF0F172A)),
-            Color(0xFF2AABEE),
-            "Telegram"
-        )
-        titleLower.contains("discord") -> Triple(
-            listOf(Color(0xFF181B3E), Color(0xFF0F1222)),
-            Color(0xFF5865F2),
-            "Discord"
-        )
-        titleLower.contains("midjourney") -> Triple(
-            listOf(Color(0xFF111827), Color(0xFF311042)),
-            Color(0xFFA855F7),
-            "Midjourney"
-        )
-        titleLower.contains("windows") -> Triple(
-            listOf(Color(0xFF082644), Color(0xFF0F172A)),
-            Color(0xFF00A4EF),
-            "Windows"
-        )
-        titleLower.contains("microsoft 365") || titleLower.contains("office") -> Triple(
-            listOf(Color(0xFF361509), Color(0xFF172554)),
-            Color(0xFFFF5722),
-            "Microsoft"
-        )
-        catLower.contains("ეკრან") -> Triple(
-            listOf(Color(0xFF0D2137), Color(0xFF12151E)),
-            Color(0xFF38BDF8),
-            product.brand.ifBlank { "OLED Display" }
-        )
-        catLower.contains("ელემენტ") -> Triple(
-            listOf(Color(0xFF0B2B1D), Color(0xFF12151E)),
-            Color(0xFF4ADE80),
-            product.brand.ifBlank { "Battery 100%" }
-        )
-        catLower.contains("კამერ") -> Triple(
-            listOf(Color(0xFF251438), Color(0xFF12151E)),
-            Color(0xFFC084FC),
-            product.brand.ifBlank { "Pro Camera" }
-        )
-        else -> Triple(
-            listOf(Color(0xFF1F1610), Color(0xFF12151E)),
-            Color(0xFFFF7A00),
-            product.brand.ifBlank { product.category.ifBlank { "BEKASERVICE" } }
-        )
+    val titleLower = remember(product.title) { product.title.lowercase() }
+    val brandLower = remember(product.brand) { product.brand.lowercase() }
+    val catLower = remember(product.category) { product.category.lowercase() }
+    val brandStyle = remember(product.id, titleLower, brandLower, catLower) {
+        when {
+            titleLower.contains("chatgpt") || brandLower.contains("openai") -> Triple(
+                listOf(Color(0xFF0A2E24), Color(0xFF0F172A)),
+                Color(0xFF10A37F),
+                "OpenAI"
+            )
+            titleLower.contains("google ai") || titleLower.contains("gemini") -> Triple(
+                listOf(Color(0xFF172554), Color(0xFF3B0764), Color(0xFF0F172A)),
+                Color(0xFF60A5FA),
+                "Google Gemini"
+            )
+            titleLower.contains("gmail") -> Triple(
+                listOf(Color(0xFF3B1219), Color(0xFF111827)),
+                Color(0xFFEA4335),
+                "Gmail PVA"
+            )
+            titleLower.contains("google storage") || titleLower.contains("google one") -> Triple(
+                listOf(Color(0xFF0D2E22), Color(0xFF172554)),
+                Color(0xFF34A853),
+                "Google One"
+            )
+            titleLower.contains("grok") || brandLower.contains("xai") -> Triple(
+                listOf(Color(0xFF090D16), Color(0xFF1E293B)),
+                Color(0xFFE2E8F0),
+                "xAI Grok"
+            )
+            titleLower.contains("claude") || brandLower.contains("anthropic") -> Triple(
+                listOf(Color(0xFF2E1B14), Color(0xFF141210)),
+                Color(0xFFD97757),
+                "Anthropic"
+            )
+            titleLower.contains("perplexity") -> Triple(
+                listOf(Color(0xFF0B2930), Color(0xFF0F172A)),
+                Color(0xFF20B8CD),
+                "Perplexity"
+            )
+            titleLower.contains("cursor") -> Triple(
+                listOf(Color(0xFF0F172A), Color(0xFF1E1B4B)),
+                Color(0xFF38BDF8),
+                "Cursor IDE"
+            )
+            titleLower.contains("lovable") -> Triple(
+                listOf(Color(0xFF3B0A2A), Color(0xFF1E1B4B)),
+                Color(0xFFEC4899),
+                "Lovable.dev"
+            )
+            titleLower.contains("capcut") -> Triple(
+                listOf(Color(0xFF082830), Color(0xFF111827)),
+                Color(0xFF00F0FF),
+                "CapCut Pro"
+            )
+            titleLower.contains("pdf") || titleLower.contains("acrobat") -> Triple(
+                listOf(Color(0xFF3B0A0F), Color(0xFF161218)),
+                Color(0xFFFF4D4F),
+                product.brand.ifBlank { "PDF Pro" }
+            )
+            titleLower.contains("adobe") -> Triple(
+                listOf(Color(0xFF3B0A0A), Color(0xFF141418)),
+                Color(0xFFFF3B30),
+                "Adobe CC"
+            )
+            titleLower.contains("canva") -> Triple(
+                listOf(Color(0xFF004C56), Color(0xFF3B0764)),
+                Color(0xFF00C4CC),
+                "Canva Pro"
+            )
+            titleLower.contains("youtube") -> Triple(
+                listOf(Color(0xFF3B0A12), Color(0xFF121216)),
+                Color(0xFFFF0033),
+                "YouTube"
+            )
+            titleLower.contains("spotify") -> Triple(
+                listOf(Color(0xFF092E1A), Color(0xFF0F1412)),
+                Color(0xFF1DB954),
+                "Spotify"
+            )
+            titleLower.contains("netflix") -> Triple(
+                listOf(Color(0xFF33060A), Color(0xFF0F0F12)),
+                Color(0xFFE50914),
+                "Netflix"
+            )
+            titleLower.contains("telegram") -> Triple(
+                listOf(Color(0xFF09253A), Color(0xFF0F172A)),
+                Color(0xFF2AABEE),
+                "Telegram"
+            )
+            titleLower.contains("discord") -> Triple(
+                listOf(Color(0xFF181B3E), Color(0xFF0F1222)),
+                Color(0xFF5865F2),
+                "Discord"
+            )
+            titleLower.contains("midjourney") -> Triple(
+                listOf(Color(0xFF111827), Color(0xFF311042)),
+                Color(0xFFA855F7),
+                "Midjourney"
+            )
+            titleLower.contains("windows") -> Triple(
+                listOf(Color(0xFF082644), Color(0xFF0F172A)),
+                Color(0xFF00A4EF),
+                "Windows"
+            )
+            titleLower.contains("microsoft 365") || titleLower.contains("office") -> Triple(
+                listOf(Color(0xFF361509), Color(0xFF172554)),
+                Color(0xFFFF5722),
+                "Microsoft"
+            )
+            catLower.contains("ეკრან") -> Triple(
+                listOf(Color(0xFF0D2137), Color(0xFF12151E)),
+                Color(0xFF38BDF8),
+                product.brand.ifBlank { "OLED Display" }
+            )
+            catLower.contains("ელემენტ") -> Triple(
+                listOf(Color(0xFF0B2B1D), Color(0xFF12151E)),
+                Color(0xFF4ADE80),
+                product.brand.ifBlank { "Battery 100%" }
+            )
+            catLower.contains("კამერ") -> Triple(
+                listOf(Color(0xFF251438), Color(0xFF12151E)),
+                Color(0xFFC084FC),
+                product.brand.ifBlank { "Pro Camera" }
+            )
+            else -> Triple(
+                listOf(Color(0xFF1F1610), Color(0xFF12151E)),
+                Color(0xFFFF7A00),
+                product.brand.ifBlank { product.category.ifBlank { "BEKASERVICE" } }
+            )
+        }
     }
 
     val (gradientColors, accentColor, brandTitle) = brandStyle
+    val bgBrush = remember(gradientColors) { Brush.linearGradient(gradientColors) }
 
     Box(
         modifier = modifier
-            .background(Brush.linearGradient(gradientColors))
+            .background(bgBrush)
             .padding(if (compact) 10.dp else 16.dp)
     ) {
         // დეკორატიული ნათება

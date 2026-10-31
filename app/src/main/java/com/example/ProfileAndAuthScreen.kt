@@ -508,11 +508,13 @@ fun ProfileAndAuthScreen(
                             }
                         }
 
-                        val filteredOrders = ordersList.filter { ord ->
-                            when (selectedOrderFilter) {
-                                "ყველა" -> true
-                                "მიმდინარე" -> ord.status == "მიმდინარე" || ord.status == "გზაშია" || ord.status == "მზადდება"
-                                else -> ord.status.equals(selectedOrderFilter, ignoreCase = true)
+                        val filteredOrders = remember(ordersList, selectedOrderFilter) {
+                            ordersList.filter { ord ->
+                                when (selectedOrderFilter) {
+                                    "ყველა" -> true
+                                    "მიმდინარე" -> ord.status == "მიმდინარე" || ord.status == "გზაშია" || ord.status == "მზადდება"
+                                    else -> ord.status.equals(selectedOrderFilter, ignoreCase = true)
+                                }
                             }
                         }
 

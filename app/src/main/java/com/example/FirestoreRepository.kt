@@ -747,6 +747,15 @@ class FirestoreRepository(val db: FirebaseFirestore) {
         val brandColorHex = doc.getString("brandColorHex") ?: "#FF7A00"
         val brandBadgeText = doc.getString("brandBadgeText") ?: ""
 
+        val imagesRaw = doc.get("images") as? List<*>
+        val imagesList = imagesRaw?.mapNotNull { it as? String }?.filter { it.isNotBlank() } ?: emptyList()
+        val primaryImg = doc.getString("primaryImageUrl")
+        val specsRaw = doc.get("specifications") as? Map<*, *>
+        val specsMap = specsRaw?.entries?.associate { it.key.toString() to it.value.toString() } ?: emptyMap()
+        val productType = doc.getString("productType") ?: ""
+        val condition = doc.getString("condition") ?: "ახალი"
+        val exactModel = doc.getString("exactModel") ?: ""
+
         return ProductItem(
             id = explicitId,
             title = title,
@@ -776,7 +785,13 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             warranty = warranty,
             firestoreDocId = doc.id,
             brandColorHex = brandColorHex,
-            brandBadgeText = brandBadgeText
+            brandBadgeText = brandBadgeText,
+            images = imagesList,
+            primaryImageUrl = primaryImg,
+            specifications = specsMap,
+            productType = productType,
+            condition = condition,
+            exactModel = exactModel
         )
     }
 
@@ -896,6 +911,24 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             "isDeleted" to false,
             "updatedAt" to FieldValue.serverTimestamp()
         )
+        if (item.images.isNotEmpty()) {
+            payload["images"] = item.images.take(15)
+        }
+        if (!item.primaryImageUrl.isNullOrBlank()) {
+            payload["primaryImageUrl"] = item.primaryImageUrl
+        }
+        if (item.specifications.isNotEmpty()) {
+            payload["specifications"] = item.specifications.toList().take(30).toMap()
+        }
+        if (item.productType.isNotBlank()) {
+            payload["productType"] = item.productType.take(50)
+        }
+        if (item.condition.isNotBlank()) {
+            payload["condition"] = item.condition.take(50)
+        }
+        if (item.exactModel.isNotBlank()) {
+            payload["exactModel"] = item.exactModel.take(100)
+        }
         if (includeCreatedAt) {
             payload["createdAt"] = FieldValue.serverTimestamp()
         }
@@ -1593,6 +1626,83 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             }
     }
 
+
+    fun listenToCategories(onCategoriesUpdated: (List<CategoryItem>) -> Unit): ListenerRegistration {
+        return db.collection("categories")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.LIST, "categories")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            CategoryItem(
+                                id = doc.id,
+                                name = doc.getString("name") ?: "",
+                                localizedName = doc.getString("localizedName") ?: "",
+                                description = doc.getString("description") ?: "",
+                                icon = doc.getString("icon") ?: "📦",
+                                imageUrl = doc.getString("imageUrl") ?: "",
+                                displayOrder = (doc.get("displayOrder") as? Number)?.toInt() ?: 0,
+                                isActive = doc.getBoolean("isActive") ?: true,
+                                isPopular = doc.getBoolean("isPopular") ?: false,
+                                popularOrder = (doc.get("popularOrder") as? Number)?.toInt() ?: 0,
+                                categoryType = doc.getString("categoryType") ?: "general",
+                                createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis(),
+                                updatedAt = doc.getTimestamp("updatedAt")?.toDate()?.time ?: System.currentTimeMillis()
+                            )
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }.filter { it.name.isNotBlank() }
+                    if (list.isNotEmpty()) {
+                        onCategoriesUpdated(list.sortedBy { it.displayOrder })
+                    }
+                }
+            }
+    }
+
+    suspend fun saveCategory(category: CategoryItem): Result<String> {
+        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის შესანახად საჭიროა ადმინისტრატორი"))
+        }
+        val docId = category.id.ifBlank { "cat_${System.currentTimeMillis()}" }
+        val payload = hashMapOf<String, Any>(
+            "id" to docId,
+            "name" to category.name.trim().take(100),
+            "localizedName" to category.localizedName.trim().take(100),
+            "description" to category.description.trim().take(500),
+            "icon" to category.icon.trim().take(20),
+            "imageUrl" to category.imageUrl.trim().take(2000),
+            "displayOrder" to category.displayOrder,
+            "isActive" to category.isActive,
+            "isPopular" to category.isPopular,
+            "popularOrder" to category.popularOrder,
+            "categoryType" to category.categoryType.trim().take(50),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        return try {
+            db.collection("categories").document(docId).set(payload, SetOptions.merge()).await()
+            Result.success(docId)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "categories/$docId")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCategory(categoryId: String): Result<Unit> {
+        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის წასაშლელად საჭიროა ადმინისტრატორი"))
+        }
+        return try {
+            db.collection("categories").document(categoryId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, "categories/$categoryId")
+            Result.failure(e)
+        }
+    }
 
     companion object {
         @Volatile

@@ -106,6 +106,15 @@ object AdminStorage {
     // =========================================================================
     // წაშლილი პროდუქტების ID-ების აღრიცხვა (რომ თავიდან გახსნისას არ აღდგეს)
     // =========================================================================
+    @Volatile
+    private var cachedRawProductsJson: String? = null
+    @Volatile
+    private var cachedParsedProducts: List<ProductItem>? = null
+    @Volatile
+    private var cachedRawBannersJson: String? = null
+    @Volatile
+    private var cachedParsedBanners: List<HomeBannerItem>? = null
+
     fun getDeletedProductIds(context: Context): Set<Int> {
         val jsonStr = getPrefs(context).getString(KEY_DELETED_PRODUCT_IDS, null) ?: return emptySet()
         return try {
@@ -125,10 +134,11 @@ object AdminStorage {
         current.add(productId)
         val arr = JSONArray()
         current.forEach { arr.put(it) }
+        cachedParsedProducts = null
         getPrefs(context).edit()
             .putString(KEY_DELETED_PRODUCT_IDS, arr.toString())
             .putLong(KEY_LAST_LOCAL_EDIT_TS, System.currentTimeMillis())
-            .commit()
+            .apply()
     }
 
     fun unmarkProductDeleted(context: Context, productId: Int) {
@@ -136,9 +146,10 @@ object AdminStorage {
         if (current.remove(productId)) {
             val arr = JSONArray()
             current.forEach { arr.put(it) }
+            cachedParsedProducts = null
             getPrefs(context).edit()
                 .putString(KEY_DELETED_PRODUCT_IDS, arr.toString())
-                .commit()
+                .apply()
         }
     }
 
@@ -161,7 +172,7 @@ object AdminStorage {
             .putString(KEY_BOG_RECIPIENT, requisites.bogRecipient.trim())
             .putString(KEY_TBC_IBAN, requisites.tbcIban.trim())
             .putString(KEY_TBC_RECIPIENT, requisites.tbcRecipient.trim())
-            .commit()
+            .apply()
     }
 
     fun resetBankRequisites(context: Context): BankRequisites {
@@ -251,7 +262,7 @@ object AdminStorage {
 
     fun setAdminPin(context: Context, newPin: String): Boolean {
         if (newPin.isBlank() || newPin.length < 4) return false
-        getPrefs(context).edit().putString(KEY_ADMIN_PIN, newPin.trim()).commit()
+        getPrefs(context).edit().putString(KEY_ADMIN_PIN, newPin.trim()).apply()
         return true
     }
 
@@ -273,6 +284,11 @@ object AdminStorage {
             return DEFAULT_HOME_BANNERS
         }
 
+        val existingParsed = cachedParsedBanners
+        if (existingParsed != null && cachedRawBannersJson == jsonStr) {
+            return existingParsed
+        }
+
         return try {
             val list = mutableListOf<HomeBannerItem>()
             val jsonArray = JSONArray(jsonStr)
@@ -289,7 +305,7 @@ object AdminStorage {
                     )
                 )
             }
-            if (list.isNotEmpty()) {
+            val resolved = if (list.isNotEmpty()) {
                 val mandatorySlides = DEFAULT_HOME_BANNERS.take(3)
                 val missingMandatory = mandatorySlides.filter { req ->
                     list.none { it.targetProductId == req.targetProductId || it.id == req.id }
@@ -298,6 +314,9 @@ object AdminStorage {
             } else {
                 DEFAULT_HOME_BANNERS
             }
+            cachedRawBannersJson = jsonStr
+            cachedParsedBanners = resolved
+            resolved
         } catch (e: Exception) {
             DEFAULT_HOME_BANNERS
         }
@@ -315,17 +334,22 @@ object AdminStorage {
             obj.put("tag", b.tag)
             jsonArray.put(obj)
         }
+        val serialized = jsonArray.toString()
+        cachedRawBannersJson = serialized
+        cachedParsedBanners = null
         getPrefs(context).edit()
-            .putString(KEY_HOME_BANNERS, jsonArray.toString())
+            .putString(KEY_HOME_BANNERS, serialized)
             .putBoolean(KEY_HAS_CUSTOM_BANNERS, true)
-            .commit()
+            .apply()
     }
 
     fun resetHomeBanners(context: Context): List<HomeBannerItem> {
+        cachedRawBannersJson = null
+        cachedParsedBanners = DEFAULT_HOME_BANNERS
         getPrefs(context).edit()
             .remove(KEY_HOME_BANNERS)
             .putBoolean(KEY_HAS_CUSTOM_BANNERS, false)
-            .commit()
+            .apply()
         return DEFAULT_HOME_BANNERS
     }
 
@@ -583,7 +607,14 @@ object AdminStorage {
         if (!hasCustom || jsonStr.isNullOrBlank()) {
             return ProductRepository.getAllProducts()
                 .filter { it.id !in deletedIds }
-                .map { it.copy(isFavorite = it.id in favoriteIds) }
+                .map { if (it.isFavorite == (it.id in favoriteIds)) it else it.copy(isFavorite = it.id in favoriteIds) }
+        }
+
+        val existingParsed = cachedParsedProducts
+        if (existingParsed != null && cachedRawProductsJson == jsonStr) {
+            return existingParsed
+                .filter { it.id !in deletedIds }
+                .map { if (it.isFavorite == (it.id in favoriteIds)) it else it.copy(isFavorite = it.id in favoriteIds) }
         }
 
         return try {
@@ -601,6 +632,25 @@ object AdminStorage {
                 }
                 val id = obj.optInt("id", i + 1)
                 if (id in deletedIds) continue
+
+                val imagesArr = obj.optJSONArray("images")
+                val imagesList = mutableListOf<String>()
+                if (imagesArr != null) {
+                    for (k in 0 until imagesArr.length()) {
+                        val img = imagesArr.optString(k, "").trim()
+                        if (img.isNotBlank()) imagesList.add(img)
+                    }
+                }
+                val specsObj = obj.optJSONObject("specifications")
+                val specsMap = mutableMapOf<String, String>()
+                if (specsObj != null) {
+                    val keys = specsObj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        specsMap[key] = specsObj.optString(key, "")
+                    }
+                }
+
                 list.add(
                     ProductItem(
                         id = id,
@@ -632,21 +682,30 @@ object AdminStorage {
                         warranty = obj.optString("warranty", "6 თვე"),
                         firestoreDocId = obj.optString("firestoreDocId", "prod_$id"),
                         brandColorHex = obj.optString("brandColorHex", "#FF7A00"),
-                        brandBadgeText = obj.optString("brandBadgeText", "")
+                        brandBadgeText = obj.optString("brandBadgeText", ""),
+                        images = imagesList,
+                        primaryImageUrl = obj.optString("primaryImageUrl", "").ifBlank { null },
+                        specifications = specsMap,
+                        productType = obj.optString("productType", ""),
+                        condition = obj.optString("condition", "ახალი"),
+                        exactModel = obj.optString("exactModel", "")
                     )
                 )
             }
             if (list.isNotEmpty()) {
-                mergeWithCatalogDefaults(list, deletedIds).map { it.copy(isFavorite = it.id in favoriteIds) }
+                val merged = mergeWithCatalogDefaults(list, deletedIds)
+                cachedRawProductsJson = jsonStr
+                cachedParsedProducts = merged
+                merged.map { if (it.isFavorite == (it.id in favoriteIds)) it else it.copy(isFavorite = it.id in favoriteIds) }
             } else {
                 ProductRepository.getAllProducts()
                     .filter { it.id !in deletedIds }
-                    .map { it.copy(isFavorite = it.id in favoriteIds) }
+                    .map { if (it.isFavorite == (it.id in favoriteIds)) it else it.copy(isFavorite = it.id in favoriteIds) }
             }
         } catch (e: Exception) {
             ProductRepository.getAllProducts()
                 .filter { it.id !in deletedIds }
-                .map { it.copy(isFavorite = it.id in favoriteIds) }
+                .map { if (it.isFavorite == (it.id in favoriteIds)) it else it.copy(isFavorite = it.id in favoriteIds) }
         }
     }
 
@@ -686,6 +745,18 @@ object AdminStorage {
             obj.put("firestoreDocId", item.firestoreDocId.ifBlank { "prod_${item.id}" })
             obj.put("brandColorHex", item.brandColorHex)
             obj.put("brandBadgeText", item.brandBadgeText)
+            if (item.images.isNotEmpty()) {
+                obj.put("images", JSONArray(item.images))
+            }
+            if (!item.primaryImageUrl.isNullOrBlank()) {
+                obj.put("primaryImageUrl", item.primaryImageUrl)
+            }
+            if (item.specifications.isNotEmpty()) {
+                obj.put("specifications", JSONObject(item.specifications))
+            }
+            obj.put("productType", item.productType)
+            obj.put("condition", item.condition)
+            obj.put("exactModel", item.exactModel)
             jsonArray.put(obj)
         }
         return jsonArray.toString()
@@ -702,6 +773,8 @@ object AdminStorage {
         if (existingJson == serialized && prefs.getBoolean(KEY_HAS_CUSTOM_PRODUCTS, false)) {
             return
         }
+        cachedRawProductsJson = serialized
+        cachedParsedProducts = products
         prefs.edit()
             .putBoolean(KEY_HAS_CUSTOM_PRODUCTS, true)
             .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)
@@ -711,17 +784,19 @@ object AdminStorage {
 
     fun saveProducts(context: Context, products: List<ProductItem>, markUnsyncedLocalEdit: Boolean = false) {
         val serialized = serializeProductsToJson(products)
-        // სინქრონული commit() უზრუნველყოფს, რომ აპლიკაციის დახურვისა და ხელახლა გახსნისას
-        // არცერთი შეტანილი ცვლილება არ დაიკარგოს!
+        cachedRawProductsJson = serialized
+        cachedParsedProducts = products
         getPrefs(context).edit()
             .putBoolean(KEY_HAS_CUSTOM_PRODUCTS, true)
             .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, markUnsyncedLocalEdit)
             .putString(KEY_CUSTOM_PRODUCTS, serialized)
             .putLong(KEY_LAST_LOCAL_EDIT_TS, System.currentTimeMillis())
-            .commit()
+            .apply()
     }
 
     fun resetToDefaults(context: Context): List<ProductItem> {
+        cachedRawProductsJson = null
+        cachedParsedProducts = null
         getPrefs(context).edit()
             .remove(KEY_HAS_CUSTOM_PRODUCTS)
             .remove(KEY_HAS_UNSYNCED_LOCAL_EDITS)
@@ -729,7 +804,7 @@ object AdminStorage {
             .remove(KEY_DELETED_PRODUCT_IDS)
             .remove(KEY_KNOWN_CLOUD_DOC_IDS)
             .putLong(KEY_LAST_LOCAL_EDIT_TS, System.currentTimeMillis())
-            .commit()
+            .apply()
         val favoriteIds = AuthAndOrderManager.getFavoriteProductIds(context)
         return ProductRepository.getAllProducts().map { it.copy(isFavorite = it.id in favoriteIds) }
     }
@@ -864,6 +939,323 @@ object AdminStorage {
             )
             .putString(KEY_APP_UPDATE_UPDATED_BY, config.updatedBy.trim())
             .commit()
+    }
+
+    // =========================================================================
+    // დინამიური კატეგორიების მართვა (Dynamic Categories CRUD & Safe Deletion)
+    // =========================================================================
+    private const val KEY_CUSTOM_CATEGORIES = "custom_categories_json"
+    private const val KEY_ADMIN_SESSION_ACTIVE = "admin_session_active"
+    private const val KEY_ADMIN_SESSION_TS = "admin_session_ts"
+    private const val KEY_ADMIN_SESSION_EMAIL = "admin_session_email"
+
+    fun getDefaultCategories(): List<CategoryItem> = listOf(
+        CategoryItem(
+            id = "cat_software",
+            name = "პროგრამული სერვისები",
+            localizedName = "Software Services",
+            description = "AI გამოწერები, ლიცენზიები, Google One, iCloud & Carrier Unlock",
+            icon = "💻",
+            displayOrder = 1,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 1,
+            categoryType = "digital"
+        ),
+        CategoryItem(
+            id = "cat_screens",
+            name = "ეკრანები",
+            localizedName = "Screens & OLED",
+            description = "Super Retina OLED, Original & Premium Incell დისპლეები",
+            icon = "📱",
+            displayOrder = 2,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 2,
+            categoryType = "spare_part"
+        ),
+        CategoryItem(
+            id = "cat_batteries",
+            name = "ელემენტები",
+            localizedName = "Batteries",
+            description = "100% Battery Health ორიგინალი და გაზრდილი ტევადობის ელემენტები",
+            icon = "🔋",
+            displayOrder = 3,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 3,
+            categoryType = "spare_part"
+        ),
+        CategoryItem(
+            id = "cat_routers",
+            name = "როუტერები & ქსელი",
+            localizedName = "Routers & Network",
+            description = "4G/5G მობილური როუტერები, გარე ანტენები და ქსელური მოწყობილობები",
+            icon = "📡",
+            displayOrder = 4,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 4,
+            categoryType = "networking"
+        ),
+        CategoryItem(
+            id = "cat_accessories",
+            name = "აქსესუარები",
+            localizedName = "Accessories",
+            description = "სწრაფი GaN დამტენები, კაბელები, დამცავი მინები და ქეისები",
+            icon = "🎧",
+            displayOrder = 5,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 5,
+            categoryType = "accessory"
+        ),
+        CategoryItem(
+            id = "cat_mobiles",
+            name = "მობილურები",
+            localizedName = "Mobile Phones",
+            description = "ახალი და შემოწმებული მეორადი სმარტფონები გარანტიით",
+            icon = "📲",
+            displayOrder = 6,
+            isActive = true,
+            isPopular = true,
+            popularOrder = 6,
+            categoryType = "mobile"
+        ),
+        CategoryItem(
+            id = "cat_cameras",
+            name = "კამერები",
+            localizedName = "Cameras",
+            description = "მთავარი და სელფის კამერის ორიგინალი მოდულები",
+            icon = "📸",
+            displayOrder = 7,
+            isActive = true,
+            isPopular = false,
+            popularOrder = 7,
+            categoryType = "spare_part"
+        ),
+        CategoryItem(
+            id = "cat_speakers",
+            name = "დინამიკები",
+            localizedName = "Speakers",
+            description = "სასაუბრო და მუსიკალური სტერეო დინამიკები",
+            icon = "🔊",
+            displayOrder = 8,
+            isActive = true,
+            isPopular = false,
+            popularOrder = 8,
+            categoryType = "spare_part"
+        ),
+        CategoryItem(
+            id = "cat_charge_ports",
+            name = "დამტენის პორტები",
+            localizedName = "Charging Ports",
+            description = "Lightning / Type-C პორტები და ქვედა მიკროფონის პლატები",
+            icon = "🔌",
+            displayOrder = 9,
+            isActive = true,
+            isPopular = false,
+            popularOrder = 9,
+            categoryType = "spare_part"
+        ),
+        CategoryItem(
+            id = "cat_housings",
+            name = "კორპუსები",
+            localizedName = "Housings & Glass",
+            description = "უკანა შუშები, ტიტანის ჩარჩოები და ღილაკების კომპლექტები",
+            icon = "🛠️",
+            displayOrder = 10,
+            isActive = true,
+            isPopular = false,
+            popularOrder = 10,
+            categoryType = "spare_part"
+        )
+    )
+
+    @Volatile
+    private var cachedCategories: List<CategoryItem>? = null
+
+    fun getCategories(context: Context): List<CategoryItem> {
+        val cached = cachedCategories
+        if (cached != null) return cached
+
+        val prefs = getPrefs(context)
+        val jsonStr = prefs.getString(KEY_CUSTOM_CATEGORIES, null)
+        if (jsonStr.isNullOrBlank()) {
+            val defaults = getDefaultCategories()
+            cachedCategories = defaults
+            return defaults
+        }
+
+        return try {
+            val arr = JSONArray(jsonStr)
+            val list = mutableListOf<CategoryItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    CategoryItem(
+                        id = obj.optString("id", "cat_${i + 1}"),
+                        name = obj.optString("name", ""),
+                        localizedName = obj.optString("localizedName", ""),
+                        description = obj.optString("description", ""),
+                        icon = obj.optString("icon", "📦"),
+                        imageUrl = obj.optString("imageUrl", ""),
+                        displayOrder = obj.optInt("displayOrder", i + 1),
+                        isActive = obj.optBoolean("isActive", true),
+                        isPopular = obj.optBoolean("isPopular", false),
+                        popularOrder = obj.optInt("popularOrder", 0),
+                        categoryType = obj.optString("categoryType", "general"),
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+            if (list.isEmpty()) {
+                val defaults = getDefaultCategories()
+                cachedCategories = defaults
+                defaults
+            } else {
+                val sorted = list.sortedBy { it.displayOrder }
+                cachedCategories = sorted
+                sorted
+            }
+        } catch (_: Exception) {
+            val defaults = getDefaultCategories()
+            cachedCategories = defaults
+            defaults
+        }
+    }
+
+    fun saveCategories(context: Context, categories: List<CategoryItem>) {
+        val arr = JSONArray()
+        for (cat in categories) {
+            val obj = JSONObject().apply {
+                put("id", cat.id)
+                put("name", cat.name)
+                put("localizedName", cat.localizedName)
+                put("description", cat.description)
+                put("icon", cat.icon)
+                put("imageUrl", cat.imageUrl)
+                put("displayOrder", cat.displayOrder)
+                put("isActive", cat.isActive)
+                put("isPopular", cat.isPopular)
+                put("popularOrder", cat.popularOrder)
+                put("categoryType", cat.categoryType)
+                put("createdAt", cat.createdAt)
+                put("updatedAt", cat.updatedAt)
+            }
+            arr.put(obj)
+        }
+        val sorted = categories.sortedBy { it.displayOrder }
+        cachedCategories = sorted
+        getPrefs(context).edit()
+            .putString(KEY_CUSTOM_CATEGORIES, arr.toString())
+            .putLong(KEY_LAST_LOCAL_EDIT_TS, System.currentTimeMillis())
+            .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, true)
+            .apply()
+    }
+
+    fun addCategory(context: Context, category: CategoryItem) {
+        val current = getCategories(context).toMutableList()
+        val exists = current.any { it.id == category.id || it.name.equals(category.name, ignoreCase = true) }
+        if (!exists) {
+            current.add(category)
+            saveCategories(context, current)
+        }
+    }
+
+    fun updateCategory(context: Context, category: CategoryItem) {
+        val current = getCategories(context).toMutableList()
+        val idx = current.indexOfFirst { it.id == category.id }
+        if (idx >= 0) {
+            current[idx] = category.copy(updatedAt = System.currentTimeMillis())
+            saveCategories(context, current)
+        }
+    }
+
+    fun getProductCountForCategory(context: Context, categoryName: String): Int {
+        val clean = categoryName.trim()
+        if (clean.isBlank()) return 0
+        return loadProducts(context).count { it.category.equals(clean, ignoreCase = true) }
+    }
+
+    fun reassignProductsCategory(context: Context, oldCategory: String, newCategory: String): Int {
+        val cleanOld = oldCategory.trim()
+        val cleanNew = newCategory.trim().ifBlank { "სხვა" }
+        if (cleanOld.isBlank() || cleanOld.equals(cleanNew, ignoreCase = true)) return 0
+
+        val products = loadProducts(context).toMutableList()
+        var updatedCount = 0
+        for (i in products.indices) {
+            if (products[i].category.equals(cleanOld, ignoreCase = true)) {
+                products[i] = products[i].copy(category = cleanNew)
+                updatedCount++
+            }
+        }
+        if (updatedCount > 0) {
+            saveProducts(context, products, markUnsyncedLocalEdit = true)
+        }
+        return updatedCount
+    }
+
+    fun deleteCategory(
+        context: Context,
+        categoryId: String,
+        reassignToCategoryName: String? = null
+    ): Boolean {
+        val current = getCategories(context).toMutableList()
+        val target = current.find { it.id == categoryId } ?: return false
+
+        // Reassign affected products if any
+        val affectedCount = getProductCountForCategory(context, target.name)
+        if (affectedCount > 0) {
+            val destination = reassignToCategoryName?.trim()?.ifBlank { "სხვა" } ?: "სხვა"
+            reassignProductsCategory(context, target.name, destination)
+        }
+
+        current.removeAll { it.id == categoryId }
+        saveCategories(context, current)
+        return true
+    }
+
+    // =========================================================================
+    // ადმინისტრატორის სესიის მართვა (Admin Session Persistence & beqa1994@gmail.com)
+    // =========================================================================
+    fun isAdminSessionActive(context: Context): Boolean {
+        val currentAuthEmail = try {
+            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
+        } catch (_: Throwable) {
+            null
+        }
+        if (currentAuthEmail?.equals("beqa1994@gmail.com", ignoreCase = true) == true) {
+            return true
+        }
+        val prefs = getPrefs(context)
+        val isActive = prefs.getBoolean(KEY_ADMIN_SESSION_ACTIVE, false)
+        if (!isActive) return false
+        val ts = prefs.getLong(KEY_ADMIN_SESSION_TS, 0L)
+        val maxSessionDuration = java.util.concurrent.TimeUnit.DAYS.toMillis(7)
+        if (System.currentTimeMillis() - ts > maxSessionDuration) {
+            clearAdminSession(context)
+            return false
+        }
+        return true
+    }
+
+    fun setAdminSessionActive(context: Context, active: Boolean, email: String? = null) {
+        val editor = getPrefs(context).edit()
+            .putBoolean(KEY_ADMIN_SESSION_ACTIVE, active)
+            .putLong(KEY_ADMIN_SESSION_TS, if (active) System.currentTimeMillis() else 0L)
+        if (email != null) {
+            editor.putString(KEY_ADMIN_SESSION_EMAIL, email)
+        } else if (!active) {
+            editor.remove(KEY_ADMIN_SESSION_EMAIL)
+        }
+        editor.apply()
+    }
+
+    fun clearAdminSession(context: Context) {
+        setAdminSessionActive(context, false)
     }
 }
 

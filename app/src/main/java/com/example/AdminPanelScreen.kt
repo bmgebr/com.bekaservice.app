@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -68,18 +69,33 @@ fun AdminPinDialog(
     onSuccess: () -> Unit
 ) {
     val context = LocalContext.current
+    val isAlreadyActive = remember { AdminStorage.isAdminSessionActive(context) }
     var pinInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showPin by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    LaunchedEffect(isAlreadyActive) {
+        if (isAlreadyActive) {
+            onSuccess()
+        }
+    }
+
+    if (isAlreadyActive) {
+        return
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = Color(0xFF16191E),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.5f)),
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.92f)
                 .padding(8.dp)
+                .testTag("admin_pin_dialog")
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -142,7 +158,9 @@ fun AdminPinDialog(
                         focusedLabelColor = Color(0xFFFF6A00),
                         unfocusedLabelColor = Color(0xFFA0A5B0)
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_pin_input")
                 )
 
                 if (errorMessage != null) {
@@ -150,7 +168,8 @@ fun AdminPinDialog(
                         text = errorMessage!!,
                         color = Color(0xFFFF4D4F),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.testTag("admin_pin_error_text")
                     )
                 }
 
@@ -161,7 +180,9 @@ fun AdminPinDialog(
                     OutlinedButton(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("admin_pin_cancel_button"),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA0A5B0))
                     ) {
                         Text("გაუქმება")
@@ -169,7 +190,9 @@ fun AdminPinDialog(
 
                     Button(
                         onClick = {
-                            if (AdminStorage.verifyPin(context, pinInput)) {
+                            val trimmedPin = pinInput.trim()
+                            if (AdminStorage.verifyPin(context, trimmedPin)) {
+                                AdminStorage.setAdminSessionActive(context, true)
                                 Toast.makeText(context, "ავტორიზაცია წარმატებულია!", Toast.LENGTH_SHORT).show()
                                 onSuccess()
                             } else {
@@ -178,7 +201,9 @@ fun AdminPinDialog(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("admin_pin_submit_button")
                     ) {
                         Text("შესვლა", color = Color.White, fontWeight = FontWeight.Bold)
                     }
@@ -202,12 +227,15 @@ fun ChangePinDialog(
     var confirmPin by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = Color(0xFF16191E),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3440)),
-            modifier = Modifier.fillMaxWidth().padding(8.dp)
+            modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp)
         ) {
             Column(
                 modifier = Modifier.padding(18.dp),
@@ -314,7 +342,6 @@ fun AdminPanelScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    BackHandler { onClose() }
     val coroutineScope = rememberCoroutineScope()
 
     var adminTab by remember { mutableIntStateOf(0) } // 0=პროდუქტები, 1=მასიური ფასები/მარჟა, 2=სტატისტიკა
@@ -325,6 +352,63 @@ fun AdminPanelScreen(
     var isAddingNewProduct by remember { mutableStateOf(false) }
     var productToDelete by remember { mutableStateOf<ProductItem?>(null) }
 
+    // არსებული სუბ-მოდალების დახურვა Back ღილაკზე დაჭერისას, ან AdminPanelScreen-დან უსაფრთხო გამოსვლა
+    BackHandler {
+        when {
+            editingProduct != null -> editingProduct = null
+            isAddingNewProduct -> isAddingNewProduct = false
+            productToDelete != null -> productToDelete = null
+            showChangePinDialog -> showChangePinDialog = false
+            else -> onClose()
+        }
+    }
+
+    // Google Admin vs PIN-only სესიის სტატუსი (არასოდეს ბლოკავს Main Thread-ს და არ ეკიდება უსასრულოდ)
+    var firebaseUserEmail by remember {
+        mutableStateOf(
+            try {
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email.orEmpty()
+            } catch (_: Exception) {
+                ""
+            }.ifBlank {
+                AuthAndOrderManager.getCurrentUser(context)?.takeIf { it.provider.equals("Google", ignoreCase = true) }?.email.orEmpty()
+            }
+        )
+    }
+    var isCloudAdminVerified by remember {
+        mutableStateOf(firebaseUserEmail.equals("beqa1994@gmail.com", ignoreCase = true))
+    }
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val currentFbEmail = try {
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email.orEmpty()
+            } catch (_: Exception) {
+                ""
+            }
+            val localGoogleEmail = AuthAndOrderManager.getCurrentUser(context)
+                ?.takeIf { it.provider.equals("Google", ignoreCase = true) }
+                ?.email
+                .orEmpty()
+            val resolvedEmail = currentFbEmail.ifBlank { localGoogleEmail }
+            val verifiedAdmin = if (currentFbEmail.isNotBlank()) {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    try {
+                        FirestoreRepository(context).checkIsCurrentUserAdmin()
+                    } catch (_: Exception) {
+                        currentFbEmail.equals("beqa1994@gmail.com", ignoreCase = true)
+                    }
+                } ?: currentFbEmail.equals("beqa1994@gmail.com", ignoreCase = true)
+            } else {
+                resolvedEmail.equals("beqa1994@gmail.com", ignoreCase = true)
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                firebaseUserEmail = resolvedEmail
+                isCloudAdminVerified = verifiedAdmin
+            }
+        }
+    }
+
     // საძიებო & ფილტრი პროდუქტების ტაბში
     var productSearch by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf("ყველა") }
@@ -334,9 +418,14 @@ fun AdminPanelScreen(
     val baseCategories = listOf(
         "ყველა",
         "პროგრამული სერვისები",
+        "მობილური ტელეფონები",
+        "როუტერები და ქსელი",
         "ეკრანები",
         "ელემენტები",
         "დამტენის პორტები",
+        "დამტენები და კაბელები",
+        "ყურსასმენები და აუდიო",
+        "აქსესუარები",
         "კამერები",
         "კორპუსები",
         "დინამიკები"
@@ -356,6 +445,7 @@ fun AdminPanelScreen(
         "ყველა",
         "Apple",
         "Samsung",
+        "Huawei",
         "Xiaomi",
         "Google Pixel",
         "OnePlus",
@@ -382,6 +472,7 @@ fun AdminPanelScreen(
     val isDark = AppPreferencesManager.isDarkMode
 
     Scaffold(
+        modifier = Modifier.testTag("admin_panel_screen"),
         containerColor = AppThemeColorAdapter.adaptPageBackground(Color(0xFF0D0F12)),
         topBar = {
             TopAppBar(
@@ -409,10 +500,26 @@ fun AdminPanelScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showChangePinDialog = true }) {
+                    IconButton(
+                        onClick = {
+                            AdminStorage.clearAdminSession(context)
+                            Toast.makeText(context, "🔒 ადმინ სესია დაიხურა (დაბლოკილია)", Toast.LENGTH_SHORT).show()
+                            onClose()
+                        },
+                        modifier = Modifier.testTag("admin_lock_button")
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = "Lock Session", tint = Color(0xFFFF4D4F))
+                    }
+                    IconButton(
+                        onClick = { showChangePinDialog = true },
+                        modifier = Modifier.testTag("admin_change_pin_button")
+                    ) {
                         Icon(Icons.Default.VpnKey, contentDescription = "Change PIN", tint = Color(0xFFFF6A00))
                     }
-                    IconButton(onClick = onClose) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.testTag("admin_close_button")
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = "Close", tint = if (isDark) Color.White else Color(0xFF1E293B))
                     }
                 },
@@ -442,6 +549,7 @@ fun AdminPanelScreen(
                 ) {
                     val tabs = listOf(
                         "პროდუქტები & სერვისები",
+                        "კატეგორიები",
                         "შეკვეთები",
                         "მომხმარებლები",
                         "მარჟა & ფასები",
@@ -504,30 +612,51 @@ fun AdminPanelScreen(
                     // სრული ეკრანის სქროლი: ძებნა, ფილტრები და სტატუსის ზოლი მოთავსებულია LazyColumn-ში,
                     // რათა ჩამოსქროლვისას პროდუქტების სიამ დაიკავოს მთელი სამუშაო სივრცე.
                     // =========================================================================
-                    val filteredList = products.filter { item ->
-                        val matchCat = selectedCategoryFilter == "ყველა" || item.category.equals(selectedCategoryFilter, ignoreCase = true)
-                        val matchSubcat = selectedSubcategoryFilter == "ყველა" || item.subcategory.equals(selectedSubcategoryFilter, ignoreCase = true)
-                        val matchBrand = selectedBrandFilter == "ყველა" || item.brand.equals(selectedBrandFilter, ignoreCase = true)
-                        val matchSearch = productSearch.isBlank() ||
-                                item.title.contains(productSearch, ignoreCase = true) ||
-                                item.shortDescription.contains(productSearch, ignoreCase = true) ||
-                                item.description.contains(productSearch, ignoreCase = true) ||
-                                item.category.contains(productSearch, ignoreCase = true) ||
-                                item.subcategory.contains(productSearch, ignoreCase = true) ||
-                                item.brand.contains(productSearch, ignoreCase = true) ||
-                                item.compatibleModels.contains(productSearch, ignoreCase = true) ||
-                                item.searchKeywords.contains(productSearch, ignoreCase = true)
-                        matchCat && matchSubcat && matchBrand && matchSearch
+                    val filteredList = remember(
+                        products,
+                        selectedCategoryFilter,
+                        selectedSubcategoryFilter,
+                        selectedBrandFilter,
+                        productSearch
+                    ) {
+                        products.filter { item ->
+                            val matchCat = selectedCategoryFilter == "ყველა" || item.category.equals(selectedCategoryFilter, ignoreCase = true)
+                            val matchSubcat = selectedSubcategoryFilter == "ყველა" || item.subcategory.equals(selectedSubcategoryFilter, ignoreCase = true)
+                            val matchBrand = selectedBrandFilter == "ყველა" || item.brand.equals(selectedBrandFilter, ignoreCase = true)
+                            val matchSearch = productSearch.isBlank() ||
+                                    item.title.contains(productSearch, ignoreCase = true) ||
+                                    item.shortDescription.contains(productSearch, ignoreCase = true) ||
+                                    item.description.contains(productSearch, ignoreCase = true) ||
+                                    item.category.contains(productSearch, ignoreCase = true) ||
+                                    item.subcategory.contains(productSearch, ignoreCase = true) ||
+                                    item.brand.contains(productSearch, ignoreCase = true) ||
+                                    item.compatibleModels.contains(productSearch, ignoreCase = true) ||
+                                    item.searchKeywords.contains(productSearch, ignoreCase = true)
+                            matchCat && matchSubcat && matchBrand && matchSearch
+                        }
                     }
 
                     var cloudSyncStatusMessage by remember { mutableStateOf<String?>(null) }
                     var isCloudOperationInProgress by remember { mutableStateOf(false) }
                     var showFiltersExpanded by remember { mutableStateOf(true) }
 
-                    LaunchedEffect(Unit) {
-                        val repo = FirestoreRepository(context)
-                        val migrationRes = repo.performSafeInitialMigrationIfNeeded(context)
-                        migrationRes.onSuccess { outcome ->
+                    LaunchedEffect(firebaseUserEmail, isCloudAdminVerified) {
+                        val hasFirebaseAuthUser = try {
+                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (!hasFirebaseAuthUser || !isCloudAdminVerified) {
+                            // PIN-only ან არა-ადმინის რეჟიმში არ ველოდებით Firestore მიგრაციას, რათა აპი არ გაიჭედოს
+                            return@LaunchedEffect
+                        }
+                        val migrationRes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            kotlinx.coroutines.withTimeoutOrNull(6000L) {
+                                val repo = FirestoreRepository(context)
+                                repo.performSafeInitialMigrationIfNeeded(context)
+                            }
+                        }
+                        migrationRes?.onSuccess { outcome ->
                             when (outcome) {
                                 is FirestoreRepository.MigrationOutcome.Migrated -> {
                                     if (outcome.uploadedCount > 0) {
@@ -551,6 +680,36 @@ fun AdminPanelScreen(
                             .fillMaxSize()
                             .imePadding()
                     ) {
+                        // 0. ავტორიზაციის რეჟიმის სტატუსის ბანერი (PIN-only vs Google Admin)
+                        item(key = "admin_access_mode_banner_item") {
+                            val bannerText = when {
+                                isCloudAdminVerified -> "☁️ Google Admin ავტორიზებულია ($firebaseUserEmail) • Cloud სინქრონიზაცია აქტიურია"
+                                firebaseUserEmail.isNotBlank() -> "⚠️ შესული ხართ არა-ადმინისტრატორის ანგარიშით ($firebaseUserEmail). Cloud-ში ჩაწერა შეზღუდულია."
+                                else -> "🔑 PIN-კოდით წვდომის რეჟიმი (Google ავტორიზაციის გარეშე) • ცვლილებები ინახება ლოკალურად"
+                            }
+                            val bannerColor = when {
+                                isCloudAdminVerified -> Color(0xFF4ADE80)
+                                firebaseUserEmail.isNotBlank() -> Color(0xFFFF4D4F)
+                                else -> Color(0xFFFF9E40)
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = bannerColor.copy(alpha = 0.12f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, bannerColor.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_access_mode_banner")
+                            ) {
+                                Text(
+                                    text = bannerText,
+                                    color = bannerColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+
                         // 1. ძებნა + ფილტრების ჩაკეცვა/გაშლა + ახლის დამატება
                         item(key = "admin_products_header_controls") {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -649,7 +808,9 @@ fun AdminPanelScreen(
                                         onClick = { isAddingNewProduct = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.height(44.dp),
+                                        modifier = Modifier
+                                            .height(44.dp)
+                                            .testTag("admin_add_product_button"),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -668,7 +829,7 @@ fun AdminPanelScreen(
                                 if (showFiltersExpanded) {
                                     // კატეგორიის ფილტრი (პროგრამული სერვისები + ნაწილები)
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        items(allCategories) { cat ->
+                                        items(allCategories, key = { it }) { cat ->
                                             val isSelected = selectedCategoryFilter == cat
                                             val isSoftwareCat = cat == "პროგრამული სერვისები"
                                             Surface(
@@ -709,7 +870,7 @@ fun AdminPanelScreen(
                                     // ქვეკატეგორიის ფილტრი (როდესაც არჩეულია პროგრამული სერვისები)
                                     if (selectedCategoryFilter == "პროგრამული სერვისები") {
                                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            items(softwareSubcategories) { subcat ->
+                                            items(softwareSubcategories, key = { it }) { subcat ->
                                                 val isSelected = selectedSubcategoryFilter == subcat
                                                 Surface(
                                                     shape = RoundedCornerShape(14.dp),
@@ -734,7 +895,7 @@ fun AdminPanelScreen(
 
                                     // ბრენდის ფილტრი
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        items(allBrands) { brand ->
+                                        items(allBrands, key = { it }) { brand ->
                                             val isSelected = selectedBrandFilter == brand
                                             Surface(
                                                 shape = RoundedCornerShape(16.dp),
@@ -840,23 +1001,44 @@ fun AdminPanelScreen(
                                 onEdit = { editingProduct = item },
                                 onDelete = { productToDelete = item },
                                 onToggleStock = {
-                                    val toggledItem = item.copy(inStock = !item.inStock)
+                                    val toggledItem = item.copy(
+                                        inStock = !item.inStock,
+                                        firestoreDocId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
+                                    )
                                     coroutineScope.launch {
-                                        val repo = FirestoreRepository(context)
-                                        val writeRes = repo.saveOrUpdateProductResult(toggledItem)
-                                        if (writeRes.isSuccess) {
-                                            val savedItem = toggledItem.copy(
-                                                firestoreDocId = toggledItem.firestoreDocId.ifBlank { "prod_${toggledItem.id}" }
-                                            )
-                                            val updated = products.map {
-                                                if (it.id == item.id) savedItem else it
+                                        val hasFirebaseUser = try {
+                                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                                        } catch (_: Exception) {
+                                            false
+                                        }
+                                        if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
+                                            // PIN-only ლოკალური სესია
+                                            val updated = products.map { if (it.id == item.id) toggledItem else it }
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
                                             }
-                                            AdminStorage.saveProductsFromCloud(context, updated)
-                                            AdminStorage.markLocalEditsSynced(context)
                                             onProductsUpdated(updated)
                                             Toast.makeText(
                                                 context,
-                                                if (savedItem.inStock) "✅ სტატუსი განახლდა Cloud-ში: მარაგშია" else "✅ სტატუსი განახლდა Cloud-ში: არ არის მარაგში",
+                                                if (toggledItem.inStock) "✅ სტატუსი განახლდა ლოკალურად: მარაგშია" else "✅ სტატუსი განახლდა ლოკალურად: არ არის მარაგში",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            return@launch
+                                        }
+                                        val repo = FirestoreRepository(context)
+                                        val writeRes = repo.saveOrUpdateProductResult(toggledItem)
+                                        if (writeRes.isSuccess) {
+                                            val updated = products.map {
+                                                if (it.id == item.id) toggledItem else it
+                                            }
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                AdminStorage.saveProductsFromCloud(context, updated)
+                                                AdminStorage.markLocalEditsSynced(context)
+                                            }
+                                            onProductsUpdated(updated)
+                                            Toast.makeText(
+                                                context,
+                                                if (toggledItem.inStock) "✅ სტატუსი განახლდა Cloud-ში: მარაგშია" else "✅ სტატუსი განახლდა Cloud-ში: არ არის მარაგში",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         } else {
@@ -872,21 +1054,31 @@ fun AdminPanelScreen(
 
                 1 -> {
                     // =========================================================================
-                    // ტაბი 2: შეკვეთების მართვა (Orders Management - Cloud Firestore)
+                    // ტაბი 2: კატეგორიების მართვა (Dynamic Categories Management)
                     // =========================================================================
-                    AdminOrdersManagementView()
+                    AdminCategoriesManagementView(
+                        products = products,
+                        onProductsUpdated = onProductsUpdated
+                    )
                 }
 
                 2 -> {
                     // =========================================================================
-                    // ტაბი 3: მომხმარებლების მართვა (Users Management - Cloud Firestore)
+                    // ტაბი 3: შეკვეთების მართვა (Orders Management - Cloud Firestore)
                     // =========================================================================
-                    AdminUsersManagementView()
+                    AdminOrdersManagementView()
                 }
 
                 3 -> {
                     // =========================================================================
-                    // ტაბი 4: მასიური ფასებისა და მარჟის ცვლილება (Bulk Price / Margin)
+                    // ტაბი 4: მომხმარებლების მართვა (Users Management - Cloud Firestore)
+                    // =========================================================================
+                    AdminUsersManagementView()
+                }
+
+                4 -> {
+                    // =========================================================================
+                    // ტაბი 5: მასიური ფასებისა და მარჟის ცვლილება (Bulk Price / Margin)
                     // =========================================================================
                     BulkPriceAndMarginScreen(
                         products = products,
@@ -922,37 +1114,37 @@ fun AdminPanelScreen(
                     )
                 }
 
-                4 -> {
+                5 -> {
                     // =========================================================================
-                    // ტაბი 5: Home Screen items მართვა & რედაქტირება (ბანერები, შეთავაზებები)
+                    // ტაბი 6: Home Screen items მართვა & რედაქტირება (ბანერები, შეთავაზებები)
                     // =========================================================================
                     AdminHomeScreenView(products = products)
                 }
 
-                5 -> {
+                6 -> {
                     // =========================================================================
-                    // ტაბი 6: სტატისტიკა & მიმოხილვა
+                    // ტაბი 7: სტატისტიკა & მიმოხილვა
                     // =========================================================================
                     AdminStatisticsView(products = products)
                 }
 
-                6 -> {
+                7 -> {
                     // =========================================================================
-                    // ტაბი 7: საბანკო რეკვიზიტების მართვა & რედაქტირება
+                    // ტაბი 8: საბანკო რეკვიზიტების მართვა & რედაქტირება
                     // =========================================================================
                     AdminBankRequisitesView()
                 }
 
-                7 -> {
+                8 -> {
                     // =========================================================================
-                    // ტაბი 8: Push შეტყობინებების გაგზავნა და ტესტირება (მხოლოდ beqa1994@gmail.com)
+                    // ტაბი 9: Push შეტყობინებების გაგზავნა და ტესტირება (მხოლოდ beqa1994@gmail.com)
                     // =========================================================================
                     AdminPushNotificationsView(products = products)
                 }
 
-                8 -> {
+                9 -> {
                     // =========================================================================
-                    // ტაბი 9: აპლიკაციის განახლების მართვა (app_config/updates)
+                    // ტაბი 10: აპლიკაციის განახლების მართვა (app_config/updates)
                     // =========================================================================
                     AdminAppUpdateManagementView()
                 }
@@ -971,15 +1163,32 @@ fun AdminPanelScreen(
             onDismiss = { editingProduct = null },
             onSave = { updatedItem ->
                 coroutineScope.launch {
-                    val repo = FirestoreRepository(context)
-                    val writeRes = repo.saveOrUpdateProductResult(updatedItem)
-                    if (writeRes.isSuccess) {
-                        val savedItem = updatedItem.copy(
-                            firestoreDocId = updatedItem.firestoreDocId.ifBlank { "prod_${updatedItem.id}" }
-                        )
+                    val savedItem = updatedItem.copy(
+                        firestoreDocId = updatedItem.firestoreDocId.ifBlank { "prod_${updatedItem.id}" }
+                    )
+                    val hasFirebaseUser = try {
+                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
                         val updated = products.map { if (it.id == savedItem.id) savedItem else it }
-                        AdminStorage.saveProductsFromCloud(context, updated)
-                        AdminStorage.markLocalEditsSynced(context)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                        }
+                        onProductsUpdated(updated)
+                        editingProduct = null
+                        Toast.makeText(context, "✅ ცვლილებები შეინახა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    val repo = FirestoreRepository(context)
+                    val writeRes = repo.saveOrUpdateProductResult(savedItem)
+                    if (writeRes.isSuccess) {
+                        val updated = products.map { if (it.id == savedItem.id) savedItem else it }
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            AdminStorage.saveProductsFromCloud(context, updated)
+                            AdminStorage.markLocalEditsSynced(context)
+                        }
                         onProductsUpdated(updated)
                         editingProduct = null
                         Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა Cloud-ში!", Toast.LENGTH_SHORT).show()
@@ -995,22 +1204,28 @@ fun AdminPanelScreen(
     // ახალი პროდუქტის ან პროგრამული სერვისის დამატების დიალოგი
     if (isAddingNewProduct) {
         val nextId = (products.maxOfOrNull { it.id } ?: 200) + 1
-        val defaultCat = if (selectedCategoryFilter != "ყველა") selectedCategoryFilter else "პროგრამული სერვისები"
+        val defaultCat = if (selectedCategoryFilter != "ყველა") selectedCategoryFilter else "მობილური ტელეფონები"
         val isSw = defaultCat == "პროგრამული სერვისები"
+        val defaultType = ProductFormSchema.resolveProductCategoryType(
+            productTypeRaw = if (isSw) "software" else "mobile_phone",
+            categoryRaw = defaultCat
+        )
         val newItem = ProductItem(
             id = nextId,
             firestoreDocId = "prod_$nextId",
             title = "",
-            price = if (isSw) "ფასი შეთანხმებით" else "150 ₾",
+            price = "",
             category = defaultCat,
-            type = if (isSw) "software" else "product",
-            subcategory = if (isSw) (if (selectedSubcategoryFilter != "ყველა") selectedSubcategoryFilter else SoftwareCatalogData.SUBCAT_AI) else "",
+            type = if (defaultType.isDigitalService) "software" else "product",
+            productType = defaultType.id,
+            subcategory = if (defaultType.isDigitalService && selectedSubcategoryFilter != "ყველა") selectedSubcategoryFilter else "",
             imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER,
             shortDescription = "",
-            description = if (isSw) "პროგრამული სერვისი სრული მხარდაჭერით და გარანტიით." else "ორიგინალი სათადარიგო ნაწილი გარანტიით.",
-            brand = if (selectedBrandFilter != "ყველა") selectedBrandFilter else if (isSw) "OpenAI" else "Apple",
+            description = "",
+            brand = if (selectedBrandFilter != "ყველა") selectedBrandFilter else "",
             compatibleModels = "",
-            warranty = "6 თვე",
+            warranty = "",
+            condition = "",
             inStock = true
         )
         ProductEditDialog(
@@ -1024,12 +1239,29 @@ fun AdminPanelScreen(
                     val itemWithDocId = addedItem.copy(
                         firestoreDocId = addedItem.firestoreDocId.ifBlank { "prod_${addedItem.id}" }
                     )
+                    val hasFirebaseUser = try {
+                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
+                        val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                        }
+                        onProductsUpdated(updated)
+                        isAddingNewProduct = false
+                        Toast.makeText(context, "✅ ახალი პოზიცია დაემატა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
                     val repo = FirestoreRepository(context)
                     val writeRes = repo.saveOrUpdateProductResult(itemWithDocId)
                     if (writeRes.isSuccess) {
                         val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
-                        AdminStorage.saveProductsFromCloud(context, updated)
-                        AdminStorage.markLocalEditsSynced(context)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            AdminStorage.saveProductsFromCloud(context, updated)
+                            AdminStorage.markLocalEditsSynced(context)
+                        }
                         onProductsUpdated(updated)
                         isAddingNewProduct = false
                         Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა Cloud-ში!", Toast.LENGTH_SHORT).show()
@@ -1055,13 +1287,31 @@ fun AdminPanelScreen(
                         val toDel = productToDelete ?: return@Button
                         val docIdToDelete = toDel.firestoreDocId.ifBlank { "prod_${toDel.id}" }
                         coroutineScope.launch {
+                            val hasFirebaseUser = try {
+                                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                            } catch (_: Exception) {
+                                false
+                            }
+                            if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
+                                val updated = products.filter { it.id != toDel.id }
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    AdminStorage.markProductDeleted(context, toDel.id)
+                                    AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                                }
+                                onProductsUpdated(updated)
+                                productToDelete = null
+                                Toast.makeText(context, "✅ პროდუქტი წაიშალა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
                             val repo = FirestoreRepository(context)
                             val delRes = repo.deleteProductResult(docIdToDelete, toDel.id)
                             if (delRes.isSuccess) {
-                                AdminStorage.markProductDeleted(context, toDel.id)
                                 val updated = products.filter { it.id != toDel.id }
-                                AdminStorage.saveProductsFromCloud(context, updated)
-                                AdminStorage.markLocalEditsSynced(context)
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    AdminStorage.markProductDeleted(context, toDel.id)
+                                    AdminStorage.saveProductsFromCloud(context, updated)
+                                    AdminStorage.markLocalEditsSynced(context)
+                                }
                                 onProductsUpdated(updated)
                                 productToDelete = null
                                 Toast.makeText(context, "✅ პროდუქტი წაიშალა Cloud-იდან!", Toast.LENGTH_SHORT).show()
@@ -1330,8 +1580,95 @@ fun ProductEditDialog(
     var isFeatured by remember { mutableStateOf(product.isFeatured) }
     var displayOrderInput by remember { mutableStateOf(product.displayOrder.toString()) }
 
+    var exactModel by remember { mutableStateOf(product.exactModel) }
+    var selectedCategoryType by remember(product) {
+        mutableStateOf(
+            ProductFormSchema.resolveProductCategoryType(
+                productTypeRaw = product.productType,
+                categoryRaw = product.category,
+                legacyTypeRaw = product.type,
+                titleRaw = product.title
+            )
+        )
+    }
+    val currentFormConfig = remember(selectedCategoryType) {
+        ProductFormSchema.getConfig(selectedCategoryType)
+    }
+    var productType by remember(selectedCategoryType) { mutableStateOf(selectedCategoryType.id) }
+    var condition by remember { mutableStateOf(product.condition) }
+    var productImages by remember {
+        mutableStateOf(
+            product.allImages.filter { it.isNotBlank() && it != ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }.toMutableList()
+        )
+    }
+    var primaryImageUrl by remember { mutableStateOf(product.displayPrimaryImage) }
+    var specificationsMap by remember { mutableStateOf(product.specifications.toMutableMap()) }
+    var newSpecKey by remember { mutableStateOf("") }
+    var newSpecVal by remember { mutableStateOf("") }
+    var imageToCrop by remember { mutableStateOf<String?>(null) }
+    var aiReviewFields by remember { mutableStateOf<AdminProductAiGenerator.GeneratedProductFields?>(null) }
+
     var isAiGenerating by remember { mutableStateOf(false) }
     var aiStatusMessage by remember { mutableStateOf<String?>(null) }
+    var isAiError by remember { mutableStateOf(false) }
+
+    // State for warning administrator before clearing incompatible type-specific fields on type switch
+    var pendingCategoryTypeSwitch by remember { mutableStateOf<ProductCategoryType?>(null) }
+    var pendingIncompatibleFieldNames by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    fun applyCategoryTypeSwitch(targetType: ProductCategoryType, clearIncompatible: Boolean) {
+        val prevConfig = ProductFormSchema.getConfig(selectedCategoryType)
+        val targetConfig = ProductFormSchema.getConfig(targetType)
+        if (clearIncompatible) {
+            if (!targetConfig.showSoftwareFields) {
+                offerType = ""
+                duration = ""
+                accountType = ""
+                activationTerms = ""
+                subcategory = ""
+            }
+            if (!targetConfig.showCompatibleModels) {
+                compatibleModels = ""
+            }
+            val targetSpecKeys = targetConfig.specFields.map { it.key }.toSet()
+            val prevExclusiveSpecKeys = prevConfig.specFields.map { it.key }.toSet() - targetSpecKeys
+            if (prevExclusiveSpecKeys.isNotEmpty()) {
+                val updatedSpecs = specificationsMap.toMutableMap()
+                prevExclusiveSpecKeys.forEach { updatedSpecs.remove(it) }
+                specificationsMap = updatedSpecs
+            }
+        }
+        if (category.isBlank() || category == prevConfig.categoryNameGeo) {
+            category = targetConfig.categoryNameGeo
+        }
+        if (targetType == ProductCategoryType.DIGITAL_SERVICE) {
+            condition = "ციფრული"
+        } else if (condition == "ციფრული") {
+            condition = ""
+        }
+        selectedCategoryType = targetType
+        productType = targetType.id
+    }
+
+    fun requestCategoryTypeSwitch(targetType: ProductCategoryType) {
+        if (targetType == selectedCategoryType) return
+        val incompatible = ProductFormSchema.detectIncompatiblePopulatedFields(
+            fromType = selectedCategoryType,
+            toType = targetType,
+            offerType = offerType,
+            duration = duration,
+            accountType = accountType,
+            activationTerms = activationTerms,
+            subcategory = subcategory,
+            specifications = specificationsMap
+        )
+        if (incompatible.isNotEmpty()) {
+            pendingCategoryTypeSwitch = targetType
+            pendingIncompatibleFieldNames = incompatible
+        } else {
+            applyCategoryTypeSwitch(targetType, clearIncompatible = false)
+        }
+    }
 
     // ტელეფონის მეხსიერებიდან ფოტოს არჩევის ლანჩერი (Zero-permission Android Photo Picker)
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -1342,6 +1679,12 @@ fun ProductEditDialog(
                 val savedPath = ProductImageManager.copyPickerUriToInternalStorage(context, uri)
                 if (!savedPath.isNullOrBlank()) {
                     imageUrl = savedPath
+                    if (!productImages.contains(savedPath)) {
+                        productImages = (productImages + savedPath).toMutableList()
+                    }
+                    if (primaryImageUrl.isBlank() || primaryImageUrl == ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) {
+                        primaryImageUrl = savedPath
+                    }
                     showUrlInputBox = false
                     Toast.makeText(context, "✅ ფოტო ტელეფონის მეხსიერებიდან წარმატებით მიება!", Toast.LENGTH_SHORT).show()
                 } else {
@@ -1351,23 +1694,48 @@ fun ProductEditDialog(
         }
     }
 
-    val isSoftwareService = category == "პროგრამული სერვისები" ||
-        product.type == "software" ||
-        shortDescription.isNotBlank() ||
-        featuresText.isNotBlank()
+    // მრავალფოტოიანი არჩევის ლანჩერი (Multi-Image Picker)
+    val multiPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 6)
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            coroutineScope.launch {
+                val added = mutableListOf<String>()
+                for (uri in uris) {
+                    val saved = ProductImageManager.copyPickerUriToInternalStorage(context, uri)
+                    if (!saved.isNullOrBlank() && !productImages.contains(saved)) {
+                        added.add(saved)
+                    }
+                }
+                if (added.isNotEmpty()) {
+                    productImages = (productImages + added).toMutableList()
+                    if (primaryImageUrl.isBlank() || primaryImageUrl == ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) {
+                        primaryImageUrl = productImages.first()
+                        imageUrl = productImages.first()
+                    }
+                    Toast.makeText(context, "✅ ${added.size} ფოტო წარმატებით დაემატა!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Schema-driven determination: ONLY true when DIGITAL_SERVICE is selected
+    val isSoftwareService = currentFormConfig.showSoftwareFields
 
     val baseBrands = listOf(
+        "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor", "Huawei",
+        "TP-Link", "ZTE", "Anker", "Baseus", "Ugreen", "Sony", "JBL",
         "OpenAI", "Google", "Anthropic", "xAI", "Perplexity", "Cursor", "Lovable",
-        "Canva", "CapCut", "Adobe", "YouTube", "Spotify", "Microsoft",
-        "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor"
+        "Canva", "CapCut", "Adobe", "YouTube", "Spotify", "Microsoft"
     )
     val brands = remember(existingBrands, brand) {
         (baseBrands + existingBrands + listOfNotNull(brand.trim().takeIf { it.isNotBlank() })).distinct()
     }
 
     val baseCategories = listOf(
-        "პროგრამული სერვისები", "ეკრანები", "ელემენტები", "დამტენის პორტები",
-        "კამერები", "კორპუსები", "დინამიკები"
+        "მობილური ტელეფონები", "ეკრანები", "აქსესუარები", "ყურსასმენები და აუდიო",
+        "დამტენები და კაბელები", "ქსელური მოწყობილობები", "ელექტრონიკა",
+        "პროგრამული სერვისები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები"
     )
     val categories = remember(existingCategories, category) {
         (baseCategories + existingCategories + listOfNotNull(category.trim().takeIf { it.isNotBlank() })).distinct()
@@ -1392,13 +1760,15 @@ fun ProductEditDialog(
 
     // ცოცხალი გადახედვის ობიექტი ქარდის ვიზუალისთვის
     val previewProduct = remember(
-        title, price, brand, category, subcategory, shortDescription, description, duration, imageUrl
+        title, price, brand, category, subcategory, shortDescription, description, duration, imageUrl, selectedCategoryType
     ) {
         product.copy(
             title = title.ifBlank { "ახალი პროდუქტი" },
             price = price,
             brand = brand,
-            category = category,
+            category = category.ifBlank { currentFormConfig.categoryNameGeo },
+            type = if (isSoftwareService) "software" else "product",
+            productType = selectedCategoryType.id,
             subcategory = subcategory,
             shortDescription = shortDescription,
             description = description,
@@ -1408,6 +1778,70 @@ fun ProductEditDialog(
     }
 
     val isDark = AppPreferencesManager.isDarkMode
+
+    if (pendingCategoryTypeSwitch != null) {
+        val targetType = pendingCategoryTypeSwitch!!
+        AlertDialog(
+            onDismissRequest = {
+                pendingCategoryTypeSwitch = null
+                pendingIncompatibleFieldNames = emptyList()
+            },
+            containerColor = if (isDark) Color(0xFF1A1F29) else Color.White,
+            titleContentColor = if (isDark) Color.White else Color(0xFF0F172A),
+            textContentColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+            title = {
+                Text(
+                    "⚠️ პროდუქტის ტიპის შეცვლა",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "არჩეულ ტიპზე (${targetType.labelGeo}) გადასვლისას გასუფთავდება შეუთავსებელი ველები:",
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        pendingIncompatibleFieldNames.joinToString(", "),
+                        color = Color(0xFFFF9E40),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "საერთო ველები (დასახელება, ბრენდი, ფასი, აღწერა, ფოტოები, გარანტია, მარაგი) სრულად შენარჩუნდება.",
+                        color = Color(0xFF4ADE80),
+                        fontSize = 11.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        applyCategoryTypeSwitch(targetType, clearIncompatible = true)
+                        pendingCategoryTypeSwitch = null
+                        pendingIncompatibleFieldNames = emptyList()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                    modifier = Modifier.testTag("confirm_type_switch_button")
+                ) {
+                    Text("გადართვა და გასუფთავება", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        pendingCategoryTypeSwitch = null
+                        pendingIncompatibleFieldNames = emptyList()
+                    },
+                    modifier = Modifier.testTag("cancel_type_switch_button")
+                ) {
+                    Text("გაუქმება", fontSize = 11.5.sp)
+                }
+            },
+            modifier = Modifier.testTag("type_switch_warning_dialog")
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1436,15 +1870,15 @@ fun ProductEditDialog(
                         Text(
                             text = when {
                                 isNew -> "➕ ახალი პოზიციის დამატება"
-                                isSoftwareService -> "✏️ პროგრამული სერვისის რედაქტირება"
-                                else -> "✏️ პროდუქტის რედაქტირება"
+                                isSoftwareService -> "✏️ ციფრული სერვისის რედაქტირება"
+                                else -> "✏️ ${selectedCategoryType.labelGeo} — რედაქტირება"
                             },
                             color = if (isDark) Color.White else Color(0xFF0F172A),
                             fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "ფასის, ფოტოსა და აღწერის ცვლილება მყისიერად აისახება",
+                            text = "ფორმის ველები ავტომატურად ერგება არჩეული პროდუქტის ტიპს",
                             color = Color(0xFFFF9E40),
                             fontSize = 10.5.sp
                         )
@@ -1463,14 +1897,14 @@ fun ProductEditDialog(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(top = 4.dp, bottom = 20.dp)
                 ) {
-                    // 1. დასახელება + AI ავტო-შევსების ღილაკი
+                    // 1. დასახელება + AI დეტალური ანალიზის ღილაკი (ერთი ხატულით)
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = title,
                                 onValueChange = { title = it },
                                 label = { Text("დასახელება (Title)") },
-                                placeholder = { Text("მაგ: Adobe Acrobat Pro, ChatGPT Plus, iPhone 15 ეკრანი...", fontSize = 12.sp) },
+                                placeholder = { Text("მაგ: Samsung Galaxy S24 Ultra 12/256GB, Huawei B535-232, ChatGPT Plus...", fontSize = 12.sp) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
@@ -1485,41 +1919,37 @@ fun ProductEditDialog(
                                     .testTag("product_title_input")
                             )
 
-                            // ✨ AI-ით ყველა ველის ავტომატური ძებნა და შევსება
+                            // AI-ით დეტალური ანალიზი და შევსება (ზუსტად 1 ხატულით და მკაფიო ტექსტით)
                             Button(
                                 onClick = {
+                                    if (isAiGenerating) return@Button
                                     if (title.trim().isBlank()) {
+                                        isAiError = true
+                                        aiStatusMessage = "⚠️ გთხოვთ ჯერ შეიყვანოთ პროდუქტის ან მოდელის დასახელება"
                                         Toast.makeText(context, "⚠️ ჯერ მიუთითეთ პროდუქტის დასახელება!", Toast.LENGTH_SHORT).show()
                                         return@Button
                                     }
-                                    if (isAiGenerating) return@Button
                                     isAiGenerating = true
-                                    aiStatusMessage = "🤖 AI ეძებს და აგენერირებს პროდუქტის სრულ მონაცემებს..."
+                                    isAiError = false
+                                    aiStatusMessage = "AI იკვლევს ზუსტ მოდელს და ამოწმებს ოფიციალურ ტექნიკურ მონაცემებს..."
                                     coroutineScope.launch {
                                         val generated = AdminProductAiGenerator.generateForTitle(
                                             rawTitle = title,
                                             existingCategories = categories,
-                                            existingBrands = brands
+                                            existingBrands = brands,
+                                            selectedProductType = if (title.trim().isNotBlank()) "" else selectedCategoryType.id,
+                                            selectedCategory = category
                                         )
-                                        price = generated.price
-                                        shortDescription = generated.shortDescription
-                                        description = generated.description
-                                        category = generated.category
-                                        brand = generated.brand
-                                        subcategory = generated.subcategory
-                                        offerType = generated.offerType
-                                        duration = generated.duration
-                                        accountType = generated.accountType
-                                        if (generated.features.isNotEmpty()) {
-                                            featuresText = generated.features.joinToString("\n")
-                                        }
-                                        targetAudience = generated.targetAudience
-                                        activationTerms = generated.activationTerms
-                                        compatibleModels = generated.compatibleModels
-                                        warranty = generated.warranty
-                                        searchKeywords = generated.searchKeywords
                                         isAiGenerating = false
-                                        aiStatusMessage = "✨ ყველა ველი წარმატებით შეივსო AI-ის მიერ! (${generated.category} • ${generated.brand})"
+                                        if (generated.errorMessage != null) {
+                                            isAiError = true
+                                            aiReviewFields = null
+                                            aiStatusMessage = "⚠️ ${generated.errorMessage}"
+                                        } else {
+                                            isAiError = false
+                                            aiReviewFields = generated
+                                            aiStatusMessage = "✅ AI კვლევა დასრულდა (${generated.categoryType.labelGeo}). გადახედეთ შედეგებს ქვემოთ."
+                                        }
                                     }
                                 },
                                 enabled = !isAiGenerating,
@@ -1543,21 +1973,21 @@ fun ProductEditDialog(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "AI ამუშავებს ინფორმაციას...",
+                                        text = "AI იკვლევს მოდელს...",
                                         color = if (isDark) Color(0xFFFF9E40) else Color(0xFFC2410C),
                                         fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 } else {
                                     Icon(
-                                        Icons.Default.AutoAwesome,
-                                        contentDescription = "AI Auto Fill",
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI დეტალური ანალიზი",
                                         tint = Color(0xFFFF7A00),
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        "✨ AI-ით ყველა ველის ავტო-შევსება",
+                                        text = "AI-ით დეტალური ანალიზი და შევსება",
                                         color = if (isDark) Color.White else Color(0xFFC2410C),
                                         fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold
@@ -1566,21 +1996,433 @@ fun ProductEditDialog(
                             }
 
                             if (!aiStatusMessage.isNullOrBlank()) {
+                                val statusTag = when {
+                                    isAiGenerating -> "ai_status_loading"
+                                    isAiError -> "ai_status_error"
+                                    else -> "ai_status_completed"
+                                }
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (isDark) Color(0xFF0F2618) else Color(0xFFDCFCE7),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF1B4E2E) else Color(0xFF86EFAC)),
+                                    color = when {
+                                        isAiError -> if (isDark) Color(0xFF2D1215) else Color(0xFFFEE2E2)
+                                        else -> if (isDark) Color(0xFF0F2618) else Color(0xFFDCFCE7)
+                                    },
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        when {
+                                            isAiError -> Color(0xFFFF4D4F)
+                                            else -> if (isDark) Color(0xFF1B4E2E) else Color(0xFF86EFAC)
+                                        }
+                                    ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .testTag(if (isAiGenerating) "ai_status_loading" else "ai_status_completed")
+                                        .testTag(statusTag)
                                 ) {
                                     Text(
                                         text = aiStatusMessage!!,
-                                        color = if (isDark) Color(0xFF4ADE80) else Color(0xFF166534),
+                                        color = when {
+                                            isAiError -> Color(0xFFFF4D4F)
+                                            else -> if (isDark) Color(0xFF4ADE80) else Color(0xFF166534)
+                                        },
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
+                                }
+                            }
+
+                            // AI Review Card (გადახედვა & დადასტურება — ხელით შეყვანილი ველების დაცვით)
+                            if (aiReviewFields != null) {
+                                val gen = aiReviewFields!!
+                                AdminAiProductReviewCard(
+                                    generated = gen,
+                                    onAcceptAll = {
+                                        val currentManualFeatures = featuresText
+                                            .lines()
+                                            .map { it.trim().removePrefix("•").removePrefix("-").trim() }
+                                            .filter { it.isNotBlank() }
+
+                                        val merged = AdminProductAiGenerator.mergeGeneratedWithManualFields(
+                                            generated = gen,
+                                            manual = ExistingProductFormState(
+                                                price = price,
+                                                brand = brand,
+                                                category = category,
+                                                subcategory = subcategory,
+                                                shortDescription = shortDescription,
+                                                description = description,
+                                                featuresText = featuresText,
+                                                targetAudience = targetAudience,
+                                                offerType = offerType,
+                                                duration = duration,
+                                                accountType = accountType,
+                                                activationTerms = activationTerms,
+                                                compatibleModels = compatibleModels,
+                                                warranty = warranty,
+                                                searchKeywords = searchKeywords,
+                                                exactModel = exactModel,
+                                                condition = condition,
+                                                specifications = specificationsMap
+                                            )
+                                        )
+
+                                        selectedCategoryType = gen.categoryType
+                                        productType = gen.categoryType.id
+                                        if (merged.price.isNotBlank()) price = merged.price
+                                        shortDescription = merged.shortDescription
+                                        description = merged.description
+                                        category = merged.category
+                                        brand = merged.brand
+                                        if (gen.categoryType == ProductCategoryType.DIGITAL_SERVICE) {
+                                            subcategory = merged.subcategory
+                                            offerType = merged.offerType
+                                            duration = merged.duration
+                                            accountType = merged.accountType
+                                            activationTerms = merged.activationTerms
+                                        } else {
+                                            subcategory = ""
+                                            offerType = ""
+                                            duration = ""
+                                            accountType = ""
+                                            activationTerms = ""
+                                        }
+                                        if (merged.features.isNotEmpty()) {
+                                            featuresText = merged.features.joinToString("\n")
+                                        }
+                                        targetAudience = merged.targetAudience
+                                        compatibleModels = merged.compatibleModels
+                                        if (merged.warranty.isNotBlank()) warranty = merged.warranty
+                                        searchKeywords = merged.searchKeywords
+                                        if (merged.exactModel.isNotBlank()) exactModel = merged.exactModel
+                                        if (merged.condition.isNotBlank()) condition = merged.condition
+                                        specificationsMap = merged.specifications.toMutableMap()
+                                        aiReviewFields = null
+                                        aiStatusMessage = "✅ დადასტურებული მონაცემები შევსებულია (ხელით შეყვანილი ველები შენარჩუნდა)."
+                                    },
+                                    onDismiss = { aiReviewFields = null }
+                                )
+                            }
+                        }
+                    }
+
+                    // 1.2. პროდუქტის ტიპის დინამიკური არჩევა (8 კატეგორია) + ზუსტი მოდელი + მდგომარეობა
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF28303E) else Color(0xFFCBD5E1)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    "🏷️ პროდუქტის ტიპი და მოდელის იდენტიფიკაცია:",
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        "აირჩიეთ პროდუქტის ტიპი (განსაზღვრავს ფორმის სპეციფიკურ ველებს):",
+                                        color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                        fontSize = 11.sp
+                                    )
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.testTag("product_type_selector_row")
+                                    ) {
+                                        items(ProductCategoryType.entries.toList()) { typeOption ->
+                                            val isSel = selectedCategoryType == typeOption
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isSel) Color(0xFFFF6A00) else (if (isDark) Color(0xFF1E2430) else Color(0xFFE2E8F0)),
+                                                border = androidx.compose.foundation.BorderStroke(
+                                                    1.dp,
+                                                    if (isSel) Color(0xFFFF6A00) else Color.Transparent
+                                                ),
+                                                modifier = Modifier
+                                                    .clickable { requestCategoryTypeSwitch(typeOption) }
+                                                    .testTag("product_type_chip_${typeOption.id}")
+                                            ) {
+                                                Text(
+                                                    text = typeOption.labelGeo,
+                                                    color = if (isSel) Color.White else (if (isDark) Color(0xFFA0A5B0) else Color(0xFF334155)),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (currentFormConfig.showExactModelField) {
+                                    OutlinedTextField(
+                                        value = exactModel,
+                                        onValueChange = { exactModel = it },
+                                        label = { Text("ზუსტი მოდელის კოდი (Exact Model)") },
+                                        placeholder = { Text("მაგ: SM-S928B/DS, Huawei B535-232, A2848...", fontSize = 11.5.sp) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            focusedBorderColor = Color(0xFFFF6A00),
+                                            unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("exact_model_input")
+                                    )
+                                }
+
+                                if (currentFormConfig.showConditionField) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            "ფიზიკური მდგომარეობა (მხოლოდ ადმინისტრატორის მიერ დასაზუსტებელი):",
+                                            color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                            fontSize = 11.sp
+                                        )
+                                        val condOptions = listOf("ახალი", "მეორადი (იდეალური)", "მეორადი (კარგი)", "Refurbished")
+                                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            items(condOptions) { cond ->
+                                                val isSel = condition == cond
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = if (isSel) Color(0xFFFF6A00) else (if (isDark) Color(0xFF1E2430) else Color(0xFFE2E8F0)),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF6A00) else Color.Transparent),
+                                                    modifier = Modifier
+                                                        .clickable { condition = if (isSel) "" else cond }
+                                                        .testTag("condition_chip_$cond")
+                                                ) {
+                                                    Text(
+                                                        text = cond,
+                                                        color = if (isSel) Color.White else (if (isDark) Color(0xFFA0A5B0) else Color(0xFF334155)),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 1.25. კატეგორიის სპეციფიკური სტრუქტურირებული ველები (Dynamic Category-Specific Schema Fields)
+                    if (currentFormConfig.specFields.isNotEmpty()) {
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("dynamic_category_fields_section")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "📋 ${selectedCategoryType.labelGeo} — სპეციფიკური პარამეტრები:",
+                                        color = Color(0xFFFF9E40),
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    currentFormConfig.specFields.forEach { specDef ->
+                                        val currentVal = specificationsMap[specDef.key] ?: ""
+                                        OutlinedTextField(
+                                            value = currentVal,
+                                            onValueChange = { updatedText ->
+                                                val updated = specificationsMap.toMutableMap()
+                                                if (updatedText.isBlank()) {
+                                                    updated.remove(specDef.key)
+                                                } else {
+                                                    updated[specDef.key] = updatedText
+                                                }
+                                                specificationsMap = updated
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = if (specDef.isSellerProvided && !specDef.labelGeo.contains("ხელით")) {
+                                                        "${specDef.labelGeo} (ხელით)"
+                                                    } else {
+                                                        specDef.labelGeo
+                                                    },
+                                                    fontSize = 11.5.sp,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            placeholder = { Text(specDef.placeholderGeo, fontSize = 11.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                focusedBorderColor = Color(0xFFFF6A00),
+                                                unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
+                                            ),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag(specDef.testTag)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 1.3. ტექნიკური მახასიათებლები (Dynamic Technical Specifications)
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF28303E) else Color(0xFFCBD5E1)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "⚙️ ტექნიკური მახასიათებლები (Specs):",
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFFF6A00).copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            "${specificationsMap.size} პარამეტრი",
+                                            color = Color(0xFFFF6A00),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                if (specificationsMap.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        specificationsMap.entries.forEach { (k, v) ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (isDark) Color(0xFF1A1F2B) else Color(0xFFF1F5F9))
+                                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(k, color = Color(0xFFFF9E40), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text(v, color = if (isDark) Color.White else Color(0xFF1E293B), fontSize = 11.5.sp)
+                                                }
+                                                IconButton(
+                                                    onClick = {
+                                                        val updated = specificationsMap.toMutableMap()
+                                                        updated.remove(k)
+                                                        specificationsMap = updated
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Remove spec", tint = Color.Gray, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ახალი პარამეტრის დამატება
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = newSpecKey,
+                                        onValueChange = { newSpecKey = it },
+                                        placeholder = {
+                                            Text(
+                                                "პარამეტრი",
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            focusedBorderColor = Color(0xFFFF6A00),
+                                            unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(52.dp)
+                                    )
+                                    OutlinedTextField(
+                                        value = newSpecVal,
+                                        onValueChange = { newSpecVal = it },
+                                        placeholder = {
+                                            Text(
+                                                "მნიშვნელობა",
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                            focusedBorderColor = Color(0xFFFF6A00),
+                                            unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(52.dp)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (newSpecKey.isNotBlank() && newSpecVal.isNotBlank()) {
+                                                val updated = specificationsMap.toMutableMap()
+                                                updated[newSpecKey.trim()] = newSpecVal.trim()
+                                                specificationsMap = updated
+                                                newSpecKey = ""
+                                                newSpecVal = ""
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(0.dp),
+                                        modifier = Modifier.size(width = 48.dp, height = 52.dp)
+                                    ) {
+                                        Text("+", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -1735,7 +2577,7 @@ fun ProductEditDialog(
                                         }
                                     }
 
-                                    // 2) ტელეფონის მეხსიერებიდან არჩევა (ცენტრირებული ხატულა + ტექსტი, Dark/Light მოუდის სრული მხარდაჭერით)
+                                    // 2) ტელეფონის მეხსიერებიდან არჩევა (მრავალფოტოიანი არჩევა)
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
                                         color = if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBg,
@@ -1747,9 +2589,9 @@ fun ProductEditDialog(
                                             .weight(1f)
                                             .height(44.dp)
                                             .clickable {
-                                                photoPickerLauncher.launch(
+                                                multiPhotoPickerLauncher.launch(
                                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                )
+                                                 )
                                             }
                                             .testTag("photo_mode_gallery_button")
                                     ) {
@@ -1768,7 +2610,7 @@ fun ProductEditDialog(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = "გალერეა",
+                                                text = "მრავალფოტო",
                                                 color = if (isGallerySelected) Color.White else unselectedBtnText,
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -1827,43 +2669,200 @@ fun ProductEditDialog(
                                     }
                                 }
 
-                                // ლინკის ჩასაწერი ველი (ყოველთვის ხელმისაწვდომია როცა არჩეულია "ლინკით" ან უკვე ჩაწერილია URL)
+                                // ლინკის ჩასაწერი ველი და დამატების ღილაკი
                                 if (showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)) {
-                                    OutlinedTextField(
-                                        value = urlInputText,
-                                        onValueChange = { newUrl ->
-                                            urlInputText = newUrl
-                                            imageUrl = newUrl.trim().ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
-                                        },
-                                        label = { Text("ფოტოს რეალური ლინკი (https://...)") },
-                                        placeholder = { Text("ჩასვით სურათის პირდაპირი URL ბმული...", fontSize = 11.5.sp) },
-                                        singleLine = true,
-                                        trailingIcon = {
-                                            if (urlInputText.isNotBlank()) {
-                                                IconButton(onClick = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = urlInputText,
+                                            onValueChange = { newUrl ->
+                                                urlInputText = newUrl
+                                                imageUrl = newUrl.trim().ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
+                                            },
+                                            label = { Text("ფოტოს რეალური ლინკი (https://...)") },
+                                            placeholder = { Text("ჩასვით სურათის პირდაპირი URL ბმული...", fontSize = 11.5.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White,
+                                                focusedBorderColor = Color(0xFFFF6A00),
+                                                unfocusedBorderColor = Color(0xFF2E3440)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("product_image_url_input")
+                                        )
+                                        Button(
+                                            onClick = {
+                                                val trimmed = urlInputText.trim()
+                                                if (trimmed.isNotBlank() && !productImages.contains(trimmed)) {
+                                                    productImages = (productImages + trimmed).toMutableList()
+                                                    if (primaryImageUrl.isBlank() || primaryImageUrl == ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) {
+                                                        primaryImageUrl = trimmed
+                                                        imageUrl = trimmed
+                                                    }
                                                     urlInputText = ""
-                                                    imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
-                                                }) {
-                                                    Icon(Icons.Default.Clear, contentDescription = "Clear URL", tint = Color(0xFFA0A5B0))
+                                                    Toast.makeText(context, "✅ ფოტოს ლინკი დაემატა!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier.height(48.dp)
+                                        ) {
+                                            Text("+", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
+                                // 4) მრავალფოტოიანი გალერეის სია (Multi-Image Gallery List)
+                                if (productImages.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "ატვირთული ფოტოები (${productImages.size}):",
+                                                color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                "⭐ მონიშნეთ მთავარი ფოტო",
+                                                color = Color(0xFFFFB800),
+                                                fontSize = 10.sp
+                                            )
+                                        }
+
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            items(productImages, key = { it }) { imgPath ->
+                                                val isPrimary = primaryImageUrl == imgPath || (primaryImageUrl.isBlank() && productImages.firstOrNull() == imgPath)
+                                                val imgIndex = productImages.indexOf(imgPath)
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isDark) Color(0xFF1E2430) else Color(0xFFF1F5F9),
+                                                    border = androidx.compose.foundation.BorderStroke(
+                                                        1.5.dp,
+                                                        if (isPrimary) Color(0xFFFF6A00) else Color(0xFF333B4D)
+                                                    ),
+                                                    modifier = Modifier.width(105.dp)
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.padding(4.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(97.dp, 75.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(Color.Black)
+                                                        ) {
+                                                            SafeProductAsyncImage(
+                                                                imageUrl = imgPath,
+                                                                contentDescription = "Product image",
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+
+                                                            if (isPrimary) {
+                                                                Surface(
+                                                                    shape = RoundedCornerShape(bottomEnd = 6.dp),
+                                                                    color = Color(0xFFFF6A00),
+                                                                    modifier = Modifier.align(Alignment.TopStart)
+                                                                ) {
+                                                                    Text("⭐ მთავარი", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // მოქმედებების ღილაკები: Star (Primary), Crop, Delete, Left/Right
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceAround,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            // Primary toggle
+                                                            IconButton(
+                                                                onClick = {
+                                                                    primaryImageUrl = imgPath
+                                                                    imageUrl = imgPath
+                                                                },
+                                                                modifier = Modifier.size(22.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    if (isPrimary) Icons.Default.Star else Icons.Default.StarBorder,
+                                                                    contentDescription = "Set Primary",
+                                                                    tint = if (isPrimary) Color(0xFFFFB800) else Color.Gray,
+                                                                    modifier = Modifier.size(15.dp)
+                                                                )
+                                                            }
+
+                                                            // Crop button
+                                                            IconButton(
+                                                                onClick = { imageToCrop = imgPath },
+                                                                modifier = Modifier.size(22.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.Crop,
+                                                                    contentDescription = "Crop",
+                                                                    tint = Color(0xFFFF7A00),
+                                                                    modifier = Modifier.size(14.dp)
+                                                                )
+                                                            }
+
+                                                            // Move Left
+                                                            if (imgIndex > 0) {
+                                                                IconButton(
+                                                                    onClick = {
+                                                                        val list = productImages.toMutableList()
+                                                                        val tmp = list[imgIndex]
+                                                                        list[imgIndex] = list[imgIndex - 1]
+                                                                        list[imgIndex - 1] = tmp
+                                                                        productImages = list
+                                                                    },
+                                                                    modifier = Modifier.size(20.dp)
+                                                                ) {
+                                                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Move Left", tint = Color.LightGray, modifier = Modifier.size(13.dp))
+                                                                }
+                                                            }
+
+                                                            // Delete image
+                                                            IconButton(
+                                                                onClick = {
+                                                                    val list = productImages.toMutableList()
+                                                                    list.remove(imgPath)
+                                                                    productImages = list
+                                                                    if (primaryImageUrl == imgPath) {
+                                                                        primaryImageUrl = productImages.firstOrNull() ?: ""
+                                                                        imageUrl = primaryImageUrl.ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
+                                                                    }
+                                                                },
+                                                                modifier = Modifier.size(22.dp)
+                                                             ) {
+                                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF4D4F), modifier = Modifier.size(14.dp))
+                                                             }
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        },
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF6A00),
-                                            unfocusedBorderColor = Color(0xFF2E3440)
-                                        ),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("product_image_url_input")
-                                    )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
 
-                    // 2. ფასი + სწრაფი არჩევის ღილაკები
+                    // 2. ფასი + სწრაფი არჩევის ღილაკები (მხოლოდ ადმინისტრატორის მიერ შესავსები)
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedTextField(
@@ -1877,7 +2876,9 @@ fun ProductEditDialog(
                                     focusedBorderColor = Color(0xFFFF6A00),
                                     unfocusedBorderColor = Color(0xFF2E3440)
                                 ),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("product_price_input")
                             )
 
                             Text("სწრაფი ფასის არჩევა:", color = Color(0xFFA0A5B0), fontSize = 11.sp)
@@ -1911,7 +2912,7 @@ fun ProductEditDialog(
                         OutlinedTextField(
                             value = shortDescription,
                             onValueChange = { shortDescription = it },
-                            label = { Text("მოკლე აღწერა (ჩანს სერვისის ქარდზე)") },
+                            label = { Text("მოკლე აღწერა (ჩანს ბარათზე)") },
                             placeholder = { Text("მოკლე ქართული აღწერა კატალოგის ბარათისთვის...", fontSize = 12.sp) },
                             minLines = 2,
                             maxLines = 4,
@@ -1921,7 +2922,9 @@ fun ProductEditDialog(
                                 focusedBorderColor = Color(0xFFFF6A00),
                                 unfocusedBorderColor = Color(0xFF2E3440)
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_short_description_input")
                         )
                     }
 
@@ -1939,7 +2942,9 @@ fun ProductEditDialog(
                                 focusedBorderColor = Color(0xFFFF6A00),
                                 unfocusedBorderColor = Color(0xFF2E3440)
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_description_input")
                         )
                     }
 
@@ -1972,8 +2977,22 @@ fun ProductEditDialog(
                             OutlinedTextField(
                                 value = category,
                                 onValueChange = { category = it },
-                                label = { Text("კატეგორია (ხელით მითითება / ახალი კატეგორია)") },
-                                placeholder = { Text("მაგ: აქსესუარები, PDF ხელსაწყოები, პროგრამული სერვისები...", fontSize = 11.5.sp) },
+                                label = {
+                                    Text(
+                                        "კატეგორია (ხელით / ახალი)",
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                placeholder = {
+                                    Text(
+                                        "მაგ: მობილური ტელეფონები, ეკრანები...",
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -2017,8 +3036,22 @@ fun ProductEditDialog(
                             OutlinedTextField(
                                 value = brand,
                                 onValueChange = { brand = it },
-                                label = { Text("ბრენდი / მწარმოებელი (ხელით მითითება)") },
-                                placeholder = { Text("მაგ: Adobe, OpenAI, Apple, Netflix, Midjourney...", fontSize = 11.5.sp) },
+                                label = {
+                                    Text(
+                                        "ბრენდი / მწარმოებელი",
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                placeholder = {
+                                    Text(
+                                        "მაგ: Samsung, Apple, Huawei, Xiaomi...",
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -2033,10 +3066,13 @@ fun ProductEditDialog(
                         }
                     }
 
-                    // 7. პროგრამული სერვისის სპეციფიკური ველები
+                    // 7. ციფრული / პროგრამული სერვისის სპეციფიკური ველები (მხოლოდ DIGITAL_SERVICE ტიპისთვის!)
                     if (isSoftwareService) {
                         item {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.testTag("software_specific_fields_section")
+                            ) {
                                 Text("პროგრამული ქვეკატეგორია:", color = Color(0xFFFF9E40), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     items(softwareSubcategories) { sc ->
@@ -2088,7 +3124,9 @@ fun ProductEditDialog(
                                         focusedBorderColor = Color(0xFFFF6A00),
                                         unfocusedBorderColor = Color(0xFF2E3440)
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("offer_type_input")
                                 )
 
                                 OutlinedTextField(
@@ -2102,7 +3140,9 @@ fun ProductEditDialog(
                                         focusedBorderColor = Color(0xFFFF6A00),
                                         unfocusedBorderColor = Color(0xFF2E3440)
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("duration_input")
                                 )
 
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2138,7 +3178,9 @@ fun ProductEditDialog(
                                         focusedBorderColor = Color(0xFFFF6A00),
                                         unfocusedBorderColor = Color(0xFF2E3440)
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("account_type_input")
                                 )
 
                                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2160,24 +3202,6 @@ fun ProductEditDialog(
                             }
                         }
 
-                        // ძირითადი შესაძლებლობები (Features)
-                        item {
-                            OutlinedTextField(
-                                value = featuresText,
-                                onValueChange = { featuresText = it },
-                                label = { Text("ძირითადი შესაძლებლობები (თითო პუნქტი ახალ ხაზზე)") },
-                                minLines = 3,
-                                maxLines = 6,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFFFF6A00),
-                                    unfocusedBorderColor = Color(0xFF2E3440)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
                         // სამიზნე აუდიტორია, აქტივაციის და უსაფრთხოების პირობები
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2192,7 +3216,9 @@ fun ProductEditDialog(
                                         focusedBorderColor = Color(0xFFFF6A00),
                                         unfocusedBorderColor = Color(0xFF2E3440)
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("target_audience_input")
                                 )
 
                                 OutlinedTextField(
@@ -2206,33 +3232,80 @@ fun ProductEditDialog(
                                         focusedBorderColor = Color(0xFFFF6A00),
                                         unfocusedBorderColor = Color(0xFF2E3440)
                                     ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("activation_terms_input")
                                 )
                             }
                         }
                     }
 
-                    // თავსებადი მოდელები / პლატფორმები და გარანტია (ყველა პოზიციისთვის)
+                    // 7.5 ძირითადი უპირატესობები / მახასიათებლები (Features)
+                    item {
+                        OutlinedTextField(
+                            value = featuresText,
+                            onValueChange = { featuresText = it },
+                            label = {
+                                Text(
+                                    if (isSoftwareService) "ძირითადი შესაძლებლობები (ახალ ხაზზე)" else "მთავარი მახასიათებლები (ახალ ხაზზე)",
+                                    fontSize = 11.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            minLines = 2,
+                            maxLines = 6,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFF6A00),
+                                unfocusedBorderColor = Color(0xFF2E3440)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("product_features_input")
+                        )
+                    }
+
+                    // თავსებადი მოდელები / პლატფორმები (მხოლოდ იმ ტიპებისთვის, სადაც რელევანტურია) და გარანტია
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedTextField(
-                                value = compatibleModels,
-                                onValueChange = { compatibleModels = it },
-                                label = { Text(if (isSoftwareService) "თავსებადი პლატფორმები (Windows, Mac, iOS, Android...)" else "თავსებადი მოდელები") },
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFFFF6A00),
-                                    unfocusedBorderColor = Color(0xFF2E3440)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (currentFormConfig.showCompatibleModels) {
+                                OutlinedTextField(
+                                    value = compatibleModels,
+                                    onValueChange = { compatibleModels = it },
+                                    label = {
+                                        Text(
+                                            currentFormConfig.compatibleModelsLabelGeo,
+                                            fontSize = 11.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFFFF6A00),
+                                        unfocusedBorderColor = Color(0xFF2E3440)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("compatible_models_input")
+                                )
+                            }
 
                             OutlinedTextField(
                                 value = warranty,
                                 onValueChange = { warranty = it },
-                                label = { Text("გარანტია (მაგ: 6 თვე ან სრული ვადით)") },
+                                label = {
+                                    Text(
+                                        "გარანტია (ხელით მისათითებელი)",
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -2240,7 +3313,9 @@ fun ProductEditDialog(
                                     focusedBorderColor = Color(0xFFFF6A00),
                                     unfocusedBorderColor = Color(0xFF2E3440)
                                 ),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("warranty_input")
                             )
                         }
                     }
@@ -2319,7 +3394,7 @@ fun ProductEditDialog(
                         onClick = {
                             val trimmedPrice = price.trim()
                             val normalizedPrice = when {
-                                trimmedPrice.isBlank() -> if (isSoftwareService) "ფასი შეთანხმებით" else "0 ₾"
+                                trimmedPrice.isBlank() -> "ფასი შეთანხმებით"
                                 trimmedPrice.all { it.isDigit() || it == '.' || it == ',' } -> "$trimmedPrice ₾"
                                 else -> trimmedPrice
                             }
@@ -2329,34 +3404,41 @@ fun ProductEditDialog(
                                 .filter { it.isNotBlank() }
 
                             val normalizedCategory = category.trim().ifBlank {
-                                if (isSoftwareService) "პროგრამული სერვისები" else "ეკრანები"
+                                currentFormConfig.categoryNameGeo
                             }
-                            val normalizedBrand = brand.trim().ifBlank {
-                                if (isSoftwareService) "OpenAI" else "Apple"
-                            }
+                            val normalizedBrand = brand.trim()
                             val savedImageUrl = imageUrl.trim().ifBlank {
                                 ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
                             }
 
+                            val finalImages = if (productImages.isNotEmpty()) productImages else if (savedImageUrl.isNotBlank() && savedImageUrl != ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) listOf(savedImageUrl) else emptyList()
+                            val finalPrimary = primaryImageUrl.ifBlank { finalImages.firstOrNull() ?: savedImageUrl }
+
                             val finalItem = product.copy(
-                                title = title.trim().ifBlank { if (isSoftwareService) "პროგრამული სერვისი" else "სათადარიგო ნაწილი" },
+                                title = title.trim().ifBlank { selectedCategoryType.labelGeo },
                                 price = normalizedPrice,
                                 brand = normalizedBrand,
                                 category = normalizedCategory,
-                                type = if (normalizedCategory == "პროგრამული სერვისები" || isSoftwareService) "software" else "product",
-                                subcategory = subcategory.trim(),
+                                type = if (isSoftwareService) "software" else "product",
+                                subcategory = if (isSoftwareService) subcategory.trim() else "",
                                 shortDescription = shortDescription.trim(),
                                 description = description.trim().ifBlank { shortDescription.trim() },
                                 features = if (parsedFeatures.isNotEmpty()) parsedFeatures else product.features,
                                 targetAudience = targetAudience.trim(),
-                                offerType = offerType.trim(),
-                                duration = duration.trim(),
-                                accountType = accountType.trim(),
-                                activationTerms = activationTerms.trim(),
-                                compatibleModels = compatibleModels.trim(),
-                                warranty = warranty.trim().ifBlank { "6 თვე" },
+                                offerType = if (isSoftwareService) offerType.trim() else "",
+                                duration = if (isSoftwareService) duration.trim() else "",
+                                accountType = if (isSoftwareService) accountType.trim() else "",
+                                activationTerms = if (isSoftwareService) activationTerms.trim() else "",
+                                compatibleModels = if (currentFormConfig.showCompatibleModels) compatibleModels.trim() else "",
+                                warranty = warranty.trim(),
                                 searchKeywords = searchKeywords.trim(),
-                                imageUrl = savedImageUrl,
+                                imageUrl = finalPrimary.ifBlank { savedImageUrl },
+                                images = finalImages,
+                                primaryImageUrl = finalPrimary,
+                                specifications = specificationsMap,
+                                productType = selectedCategoryType.id,
+                                condition = condition,
+                                exactModel = exactModel.trim(),
                                 inStock = inStock,
                                 isFeatured = isFeatured,
                                 displayOrder = displayOrderInput.toIntOrNull() ?: product.displayOrder
@@ -2375,6 +3457,31 @@ fun ProductEditDialog(
                 }
             }
         }
+    }
+
+    // ფოტოს ჩამოჭრის დიალოგი (Image Cropper Dialog)
+    if (imageToCrop != null) {
+        ImageCropperDialog(
+            imageUriOrUrl = imageToCrop!!,
+            onDismiss = { imageToCrop = null },
+            onCropFinished = { croppedUri ->
+                val currentTarget = imageToCrop
+                val idx = productImages.indexOf(currentTarget)
+                if (idx >= 0) {
+                    val updated = productImages.toMutableList()
+                    updated[idx] = croppedUri
+                    productImages = updated
+                } else {
+                    productImages = (productImages + croppedUri).toMutableList()
+                }
+                if (primaryImageUrl == currentTarget || primaryImageUrl.isBlank()) {
+                    primaryImageUrl = croppedUri
+                    imageUrl = croppedUri
+                }
+                imageToCrop = null
+                Toast.makeText(context, "✅ ფოტო წარმატებით ჩამოიჭრა და შეინახა!", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 }
 
@@ -2396,10 +3503,12 @@ fun BulkPriceAndMarginScreen(
     var customInput by remember { mutableStateOf("10") }
     var showResetConfirm by remember { mutableStateOf(false) }
 
-    val affectedCount = products.count { item ->
-        val matchBrand = selectedBrand == "ყველა" || item.brand.equals(selectedBrand, ignoreCase = true)
-        val matchCat = selectedCategory == "ყველა" || item.category.equals(selectedCategory, ignoreCase = true)
-        matchBrand && matchCat
+    val affectedCount = remember(products, selectedBrand, selectedCategory) {
+        products.count { item ->
+            val matchBrand = selectedBrand == "ყველა" || item.brand.equals(selectedBrand, ignoreCase = true)
+            val matchCat = selectedCategory == "ყველა" || item.category.equals(selectedCategory, ignoreCase = true)
+            matchBrand && matchCat
+        }
     }
 
     LazyColumn(
@@ -2643,16 +3752,16 @@ fun BulkPriceAndMarginScreen(
 @Composable
 fun AdminStatisticsView(products: List<ProductItem>) {
     val totalCount = products.size
-    val inStockCount = products.count { it.inStock }
+    val inStockCount = remember(products) { products.count { it.inStock } }
     val outOfStockCount = totalCount - inStockCount
 
-    val prices = products.mapNotNull { it.price.filter { ch -> ch.isDigit() }.toIntOrNull() }
-    val avgPrice = if (prices.isNotEmpty()) prices.average().toInt() else 0
-    val minPrice = prices.minOrNull() ?: 0
-    val maxPrice = prices.maxOrNull() ?: 0
+    val prices = remember(products) { products.mapNotNull { it.price.filter { ch -> ch.isDigit() }.toIntOrNull() } }
+    val avgPrice = remember(prices) { if (prices.isNotEmpty()) prices.average().toInt() else 0 }
+    val minPrice = remember(prices) { prices.minOrNull() ?: 0 }
+    val maxPrice = remember(prices) { prices.maxOrNull() ?: 0 }
 
-    val brandCounts = products.groupBy { it.brand }.mapValues { it.value.size }
-    val catCounts = products.groupBy { it.category }.mapValues { it.value.size }
+    val brandCounts = remember(products) { products.groupBy { it.brand }.mapValues { it.value.size } }
+    val catCounts = remember(products) { products.groupBy { it.category }.mapValues { it.value.size } }
 
     LazyColumn(
         modifier = Modifier
@@ -3450,13 +4559,16 @@ fun BannerEditDialog(
         "https://images.unsplash.com/photo-1610945265064-0e34e5519bbf?w=800"
     )
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = Color(0xFF16191E),
             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.5f)),
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.92f)
                 .wrapContentHeight()
                 .imePadding()
         ) {
@@ -3678,6 +4790,854 @@ fun BannerEditDialog(
 }
 
 // ==============================================================================
+// 6.5. კატეგორიების სრული დინამიური მართვის ეკრანი (Categories Management)
+// ==============================================================================
+@Composable
+fun AdminCategoriesManagementView(
+    products: List<ProductItem>,
+    onProductsUpdated: (List<ProductItem>) -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val isDark = AppPreferencesManager.isDarkMode
+
+    var categories by remember { mutableStateOf(AdminStorage.getCategories(context)) }
+    var editingCategory by remember { mutableStateOf<CategoryItem?>(null) }
+    var isAddingNewCategory by remember { mutableStateOf(false) }
+    var categoryToDelete by remember { mutableStateOf<CategoryItem?>(null) }
+    var reassignTargetCategoryName by remember { mutableStateOf("") }
+    var previewCategory by remember { mutableStateOf<CategoryItem?>(null) }
+    var categorySearch by remember { mutableStateOf("") }
+
+    // Live listening to Firestore categories if available
+    DisposableEffect(Unit) {
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            val repo = FirestoreRepository(context)
+            registration = repo.listenToCategories(
+                onCategoriesUpdated = { cloudList ->
+                    if (cloudList.isNotEmpty()) {
+                        AdminStorage.saveCategories(context, cloudList)
+                        categories = cloudList.sortedBy { it.displayOrder }
+                    }
+                }
+            )
+        } catch (_: Exception) {}
+        onDispose { registration?.remove() }
+    }
+
+    val filteredCategories = remember(categories, categorySearch) {
+        if (categorySearch.isBlank()) categories
+        else categories.filter {
+            it.name.contains(categorySearch, ignoreCase = true) ||
+            it.localizedName.contains(categorySearch, ignoreCase = true) ||
+            it.categoryType.contains(categorySearch, ignoreCase = true)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        // ჰედერი & ახალი კატეგორიის დამატების ღილაკი
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "📁 კატეგორიების მართვა",
+                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "სულ: ${categories.size} კატეგორია • ${categories.count { it.isPopular }} პოპულარული",
+                    color = Color(0xFFFF7A00),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Button(
+                onClick = { isAddingNewCategory = true },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("დამატება", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // ძებნის ველი
+        OutlinedTextField(
+            value = categorySearch,
+            onValueChange = { categorySearch = it },
+            placeholder = { Text("ძებნა კატეგორიებში...", fontSize = 12.sp, color = Color(0xFF888E9B)) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFFFF7A00), modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (categorySearch.isNotBlank()) {
+                    IconButton(onClick = { categorySearch = "" }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                focusedBorderColor = Color(0xFFFF6A00),
+                unfocusedBorderColor = if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1),
+                focusedContainerColor = if (isDark) Color(0xFF161922) else Color(0xFFF8FAFC),
+                unfocusedContainerColor = if (isDark) Color(0xFF161922) else Color(0xFFF8FAFC)
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 20.dp)
+        ) {
+            items(filteredCategories, key = { it.id }) { cat ->
+                val productCount = remember(products, cat.name) {
+                    products.count { it.category.equals(cat.name, ignoreCase = true) }
+                }
+                val currentIndex = categories.indexOfFirst { it.id == cat.id }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) Color(0xFF161A22) else Color.White,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (cat.isPopular) Color(0xFFFF7A00).copy(alpha = 0.6f)
+                        else if (isDark) Color(0xFF252B37) else Color(0xFFE2E8F0)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isDark) Color(0xFF222834) else Color(0xFFFFF7ED),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.3f)),
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(cat.icon.ifBlank { "📦" }, fontSize = 20.sp)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = cat.localizedName.ifBlank { cat.name },
+                                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (cat.isPopular) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = Color(0xFFFF6A00).copy(alpha = 0.15f)
+                                            ) {
+                                                Text(
+                                                    "⭐ პოპულარული",
+                                                    color = Color(0xFFFF6A00),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "ID: ${cat.name}",
+                                            color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                            fontSize = 11.sp
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (isDark) Color(0xFF1E2430) else Color(0xFFF1F5F9)
+                                        ) {
+                                            Text(
+                                                text = "$productCount პროდუქტი",
+                                                color = Color(0xFFFF7A00),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // აქტიური ჩამრთველი
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Switch(
+                                    checked = cat.isActive,
+                                    onCheckedChange = { active ->
+                                        val updated = cat.copy(isActive = active)
+                                        AdminStorage.updateCategory(context, updated)
+                                        categories = AdminStorage.getCategories(context)
+                                        coroutineScope.launch {
+                                            FirestoreRepository(context).saveCategory(updated)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFFFF6A00)
+                                    ),
+                                    modifier = Modifier.scale(0.8f)
+                                )
+                            }
+                        }
+
+                        if (cat.description.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = cat.description,
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                fontSize = 11.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        HorizontalDivider(color = if (isDark) Color(0xFF252B37) else Color(0xFFF1F5F9), thickness = 0.8.dp)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // მოქმედებების ზოლი: Reorder Up/Down, Popular Toggle, Preview, Edit, Delete
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Reorder buttons
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        if (currentIndex > 0) {
+                                            val list = categories.toMutableList()
+                                            val prev = list[currentIndex - 1]
+                                            val cur = list[currentIndex]
+                                            list[currentIndex - 1] = cur.copy(displayOrder = prev.displayOrder)
+                                            list[currentIndex] = prev.copy(displayOrder = cur.displayOrder)
+                                            AdminStorage.saveCategories(context, list)
+                                            categories = AdminStorage.getCategories(context)
+                                            coroutineScope.launch {
+                                                FirestoreRepository(context).saveCategory(list[currentIndex - 1])
+                                                FirestoreRepository(context).saveCategory(list[currentIndex])
+                                            }
+                                        }
+                                    },
+                                    enabled = currentIndex > 0,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowUpward,
+                                        contentDescription = "Move Up",
+                                        tint = if (currentIndex > 0) (if (isDark) Color.White else Color(0xFF1E293B)) else Color.Gray.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        if (currentIndex < categories.size - 1) {
+                                            val list = categories.toMutableList()
+                                            val next = list[currentIndex + 1]
+                                            val cur = list[currentIndex]
+                                            list[currentIndex + 1] = cur.copy(displayOrder = next.displayOrder)
+                                            list[currentIndex] = next.copy(displayOrder = cur.displayOrder)
+                                            AdminStorage.saveCategories(context, list)
+                                            categories = AdminStorage.getCategories(context)
+                                            coroutineScope.launch {
+                                                FirestoreRepository(context).saveCategory(list[currentIndex + 1])
+                                                FirestoreRepository(context).saveCategory(list[currentIndex])
+                                            }
+                                        }
+                                    },
+                                    enabled = currentIndex < categories.size - 1,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ArrowDownward,
+                                        contentDescription = "Move Down",
+                                        tint = if (currentIndex < categories.size - 1) (if (isDark) Color.White else Color(0xFF1E293B)) else Color.Gray.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                // Popular Star Button
+                                IconButton(
+                                    onClick = {
+                                        val updated = cat.copy(isPopular = !cat.isPopular)
+                                        AdminStorage.updateCategory(context, updated)
+                                        categories = AdminStorage.getCategories(context)
+                                        coroutineScope.launch {
+                                            FirestoreRepository(context).saveCategory(updated)
+                                        }
+                                    },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        if (cat.isPopular) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = "Toggle Popular",
+                                        tint = if (cat.isPopular) Color(0xFFFFB800) else Color.Gray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // Preview live catalog chip
+                                IconButton(
+                                    onClick = { previewCategory = cat },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Visibility,
+                                        contentDescription = "Live Preview",
+                                        tint = Color(0xFFFF7A00),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            // Edit & Delete
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = { editingCategory = cat },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color(0xFFFF7A00), modifier = Modifier.size(16.dp))
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        categoryToDelete = cat
+                                        reassignTargetCategoryName = categories.firstOrNull { it.id != cat.id }?.name ?: "სხვა"
+                                    },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF4D4F), modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // კატეგორიის დამატების ან რედაქტირების დიალოგი
+    if (isAddingNewCategory || editingCategory != null) {
+        val target = editingCategory
+        val isNew = isAddingNewCategory
+        CategoryEditModal(
+            category = target ?: CategoryItem(
+                id = "cat_${System.currentTimeMillis()}",
+                name = "",
+                localizedName = "",
+                icon = "📦",
+                categoryType = "general",
+                displayOrder = categories.size + 1,
+                isActive = true,
+                isPopular = false
+            ),
+            isNew = isNew,
+            onDismiss = {
+                isAddingNewCategory = false
+                editingCategory = null
+            },
+            onSave = { saved ->
+                if (isNew) {
+                    AdminStorage.addCategory(context, saved)
+                } else {
+                    AdminStorage.updateCategory(context, saved)
+                }
+                categories = AdminStorage.getCategories(context)
+                coroutineScope.launch {
+                    FirestoreRepository(context).saveCategory(saved)
+                }
+                Toast.makeText(context, "✅ კატეგორია წარმატებით შეინახა!", Toast.LENGTH_SHORT).show()
+                isAddingNewCategory = false
+                editingCategory = null
+            }
+        )
+    }
+
+    // უსაფრთხო წაშლის დიალოგი (Safe Deletion with Reassignment)
+    if (categoryToDelete != null) {
+        val toDelete = categoryToDelete!!
+        val affectedCount = remember(products, toDelete.name) {
+            products.count { it.category.equals(toDelete.name, ignoreCase = true) }
+        }
+        val destinationOptions = remember(categories, toDelete.id) {
+            categories.filter { it.id != toDelete.id }.map { it.name }
+        }
+
+        AlertDialog(
+            onDismissRequest = { categoryToDelete = null },
+            title = {
+                Text(
+                    text = "კატეგორიის წაშლა",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "ნამდვილად გსურთ წაშალოთ კატეგორია „${toDelete.localizedName.ifBlank { toDelete.name }}“?",
+                        color = Color(0xFFA0A5B0),
+                        fontSize = 13.sp
+                    )
+
+                    if (affectedCount > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF331616),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4D4F)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "⚠️ ყურადღება: ამ კატეგორიაში არის $affectedCount პროდუქტი!",
+                                    color = Color(0xFFFF4D4F),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "წაშლამდე მიუთითეთ, რომელ კატეგორიაში გადავიდეს ეს პროდუქტები:",
+                                    color = Color.White,
+                                    fontSize = 11.5.sp
+                                )
+
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    items(destinationOptions) { dest ->
+                                        val isSelected = reassignTargetCategoryName == dest
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222834),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF3B4455)),
+                                            modifier = Modifier.clickable { reassignTargetCategoryName = dest }
+                                        ) {
+                                            Text(
+                                                text = dest,
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            containerColor = Color(0xFF16191E),
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val destination = if (affectedCount > 0) reassignTargetCategoryName.ifBlank { "სხვა" } else null
+                        val success = AdminStorage.deleteCategory(context, toDelete.id, destination)
+                        if (success) {
+                            categories = AdminStorage.getCategories(context)
+                            val updatedProducts = AdminStorage.loadProducts(context)
+                            onProductsUpdated(updatedProducts)
+                            coroutineScope.launch {
+                                FirestoreRepository(context).deleteCategory(toDelete.id)
+                            }
+                            Toast.makeText(
+                                context,
+                                if (affectedCount > 0) "✅ კატეგორია წაიშალა და $affectedCount პროდუქტი გადავიდა: $destination"
+                                else "✅ კატეგორია წაიშალა!",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        categoryToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4D4F))
+                ) {
+                    Text("წაშლა", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { categoryToDelete = null }) {
+                    Text("გაუქმება", color = Color(0xFFA0A5B0))
+                }
+            }
+        )
+    }
+
+    // კატალოგის ცოცხალი გადახედვის მოდალი
+    if (previewCategory != null) {
+        val cat = previewCategory!!
+        Dialog(
+            onDismissRequest = { previewCategory = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF161922),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00)),
+                modifier = Modifier.fillMaxWidth(0.92f).padding(12.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("👁️ კატალოგის ცოცხალი გადახედვა", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { previewCategory = null }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                        }
+                    }
+
+                    Text("როგორ გამოიყურება ეს კატეგორია მომხმარებლისთვის:", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+
+                    // 1) Catalog Chip Preview
+                    Text("1. კატალოგის ფილტრის ჩიპი (Filter Chip):", color = Color(0xFFFF9E40), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Unselected Chip
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF1E2430),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF333B4D))
+                        ) {
+                            Text(
+                                text = "${cat.icon} ${cat.localizedName.ifBlank { cat.name }}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+
+                        // Selected Chip
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFF6A00)
+                        ) {
+                            Text(
+                                text = "${cat.icon} ${cat.localizedName.ifBlank { cat.name }}",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+
+                    // 2) Popular Grid Card Preview
+                    Text("2. პოპულარული კატეგორიის ქარდი (Home/Catalog Grid):", color = Color(0xFFFF9E40), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF1F2430),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.5f)),
+                        modifier = Modifier.width(160.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(cat.icon.ifBlank { "📦" }, fontSize = 28.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = cat.localizedName.ifBlank { cat.name },
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "${products.count { it.category.equals(cat.name, true) }} პროდუქტი",
+                                color = Color(0xFFFF7A00),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { previewCategory = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("დახურვა", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * კატეგორიის შექმნისა და რედაქტირების მოდალური ფანჯარა
+ */
+@Composable
+fun CategoryEditModal(
+    category: CategoryItem,
+    isNew: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (CategoryItem) -> Unit
+) {
+    val isDark = AppPreferencesManager.isDarkMode
+
+    var name by remember { mutableStateOf(category.name) }
+    var localizedName by remember { mutableStateOf(category.localizedName) }
+    var icon by remember { mutableStateOf(category.icon.ifBlank { "📦" }) }
+    var description by remember { mutableStateOf(category.description) }
+    var categoryType by remember { mutableStateOf(category.categoryType.ifBlank { "general" }) }
+    var isActive by remember { mutableStateOf(category.isActive) }
+    var isPopular by remember { mutableStateOf(category.isPopular) }
+
+    val presetIcons = listOf("📦", "📶", "📱", "💻", "🎧", "⚡", "⚙️", "🔋", "📸", "🔊", "🛡️", "🌐")
+    val types = listOf(
+        "general" to "ზოგადი",
+        "networking" to "ქსელური მოწყობილობები",
+        "phones" to "მობილური ტელეფონები",
+        "accessories" to "აქსესუარები",
+        "parts" to "სათადარიგო ნაწილები",
+        "software" to "პროგრამული სერვისები"
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = if (isDark) Color(0xFF161922) else Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.5f)),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .wrapContentHeight()
+                .padding(8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isNew) "➕ ახალი კატეგორია" else "✏️ კატეგორიის რედაქტირება",
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                    }
+                }
+
+                // სისტემური სახელი
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("სისტემური სახელი (Category Key)") },
+                    placeholder = { Text("მაგ: ქსელური მოწყობილობები, ეკრანები...") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFFFF6A00),
+                        unfocusedBorderColor = if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // ქართული სახელი
+                OutlinedTextField(
+                    value = localizedName,
+                    onValueChange = { localizedName = it },
+                    label = { Text("ქართული სახელწოდება (Localized Title)") },
+                    placeholder = { Text("მაგ: ქსელური მოწყობილობები (როუტერები)") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFFFF6A00),
+                        unfocusedBorderColor = if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // ხატულა (Icon / Emoji)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("ხატულა (Emoji ან სიმბოლო):", color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B), fontSize = 12.sp)
+                        Text(icon, fontSize = 24.sp)
+                    }
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(presetIcons) { ic ->
+                            val isSel = icon == ic
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFFFF6A00) else (if (isDark) Color(0xFF222834) else Color(0xFFF1F5F9)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF6A00) else Color.Transparent),
+                                modifier = Modifier.clickable { icon = ic }
+                            ) {
+                                Text(ic, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+                    }
+                }
+
+                // კატეგორიის ტიპი
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("კატეგორიის ტიპი:", color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B), fontSize = 12.sp)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(types) { (key, label) ->
+                            val isSel = categoryType == key
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isSel) Color(0xFFFF6A00) else (if (isDark) Color(0xFF222834) else Color(0xFFF1F5F9)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFFF6A00) else Color.Transparent),
+                                modifier = Modifier.clickable { categoryType = key }
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSel) Color.White else (if (isDark) Color(0xFFA0A5B0) else Color(0xFF1E293B)),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // აღწერა
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("მოკლე აღწერა (არასავალდებულო)") },
+                    maxLines = 3,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                        focusedBorderColor = Color(0xFFFF6A00),
+                        unfocusedBorderColor = if (isDark) Color(0xFF282F3C) else Color(0xFFCBD5E1)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // ჩამრთველები
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("აქტიურია კატალოგში", color = if (isDark) Color.White else Color(0xFF0F172A), fontSize = 13.sp)
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = { isActive = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFFF6A00))
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("პოპულარული კატეგორია (Home/Grid)", color = Color(0xFFFF9E40), fontSize = 13.sp)
+                    Switch(
+                        checked = isPopular,
+                        onCheckedChange = { isPopular = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFFF6A00))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("გაუქმება")
+                    }
+
+                    Button(
+                        onClick = {
+                            val cleanName = name.trim()
+                            if (cleanName.isBlank()) return@Button
+                            val saved = category.copy(
+                                name = cleanName,
+                                localizedName = localizedName.trim().ifBlank { cleanName },
+                                icon = icon.trim().ifBlank { "📦" },
+                                description = description.trim(),
+                                categoryType = categoryType,
+                                isActive = isActive,
+                                isPopular = isPopular,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                            onSave(saved)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==============================================================================
 // 7. შეკვეთების მართვის ეკრანი (Orders Management - Cloud Firestore & Local)
 // ==============================================================================
 @Composable
@@ -3704,12 +5664,14 @@ fun AdminOrdersManagementView() {
         }
     }
 
-    val statusFilters = listOf("ყველა", "მიმდინარე", "დამუშავების პროცესში", "შესრულებული", "გაუქმებული")
-    val filteredOrders = ordersList.filter { ord ->
-        when (selectedStatusFilter) {
-            "ყველა" -> true
-            "მიმდინარე" -> ord.status == "მიმდინარე" || ord.status == "ახალი"
-            else -> ord.status == selectedStatusFilter
+    val statusFilters = remember { listOf("ყველა", "მიმდინარე", "დამუშავების პროცესში", "შესრულებული", "გაუქმებული") }
+    val filteredOrders = remember(ordersList, selectedStatusFilter) {
+        ordersList.filter { ord ->
+            when (selectedStatusFilter) {
+                "ყველა" -> true
+                "მიმდინარე" -> ord.status == "მიმდინარე" || ord.status == "ახალი"
+                else -> ord.status == selectedStatusFilter
+            }
         }
     }
 
