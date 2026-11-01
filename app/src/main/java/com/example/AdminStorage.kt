@@ -527,6 +527,8 @@ object AdminStorage {
 
         val newlyAddedFromCloud = mutableListOf<ProductItem>()
 
+        val preserveUnsyncedLocal = hasUnsyncedLocalEdits(context)
+
         for (cloudItem in cloudProducts) {
             if (cloudItem.id in effectiveDeletedIds) continue
             val deterministicDocId = cloudItem.firestoreDocId.ifBlank { "prod_${cloudItem.id}" }
@@ -534,38 +536,51 @@ object AdminStorage {
 
             if (existingLocal != null) {
                 val targetId = existingLocal.id
-                localById[targetId] = existingLocal.copy(
-                    id = targetId,
-                    title = cloudItem.title.ifBlank { existingLocal.title },
-                    price = cloudItem.price.ifBlank { existingLocal.price },
-                    category = cloudItem.category.ifBlank { existingLocal.category },
-                    type = cloudItem.type.ifBlank { existingLocal.type },
-                    subcategory = cloudItem.subcategory.ifBlank { existingLocal.subcategory },
-                    imageUrl = cloudItem.imageUrl.ifBlank { existingLocal.imageUrl },
-                    shortDescription = cloudItem.shortDescription.ifBlank { existingLocal.shortDescription },
-                    description = cloudItem.description.ifBlank { existingLocal.description },
-                    features = if (cloudItem.features.isNotEmpty()) cloudItem.features else existingLocal.features,
-                    targetAudience = cloudItem.targetAudience.ifBlank { existingLocal.targetAudience },
-                    offerType = cloudItem.offerType.ifBlank { existingLocal.offerType },
-                    duration = cloudItem.duration.ifBlank { existingLocal.duration },
-                    accountType = cloudItem.accountType.ifBlank { existingLocal.accountType },
-                    activationTerms = cloudItem.activationTerms.ifBlank { existingLocal.activationTerms },
-                    officialUrl = cloudItem.officialUrl.ifBlank { existingLocal.officialUrl },
-                    termsUrl = cloudItem.termsUrl.ifBlank { existingLocal.termsUrl },
-                    lastVerifiedAt = cloudItem.lastVerifiedAt.ifBlank { existingLocal.lastVerifiedAt },
-                    searchKeywords = cloudItem.searchKeywords.ifBlank { existingLocal.searchKeywords },
-                    isFeatured = cloudItem.isFeatured,
-                    displayOrder = cloudItem.displayOrder,
-                    rating = cloudItem.rating,
-                    isFavorite = AuthAndOrderManager.isProductFavorite(context, targetId),
-                    inStock = cloudItem.inStock,
-                    brand = cloudItem.brand.ifBlank { existingLocal.brand },
-                    compatibleModels = cloudItem.compatibleModels.ifBlank { existingLocal.compatibleModels },
-                    warranty = cloudItem.warranty.ifBlank { existingLocal.warranty },
-                    firestoreDocId = deterministicDocId,
-                    brandColorHex = cloudItem.brandColorHex.ifBlank { existingLocal.brandColorHex },
-                    brandBadgeText = cloudItem.brandBadgeText.ifBlank { existingLocal.brandBadgeText }
-                )
+                if (preserveUnsyncedLocal) {
+                    localById[targetId] = existingLocal.copy(
+                        firestoreDocId = deterministicDocId,
+                        isFavorite = AuthAndOrderManager.isProductFavorite(context, targetId)
+                    )
+                } else {
+                    localById[targetId] = existingLocal.copy(
+                        id = targetId,
+                        title = cloudItem.title.ifBlank { existingLocal.title },
+                        price = cloudItem.price.ifBlank { existingLocal.price },
+                        category = cloudItem.category.ifBlank { existingLocal.category },
+                        type = cloudItem.type.ifBlank { existingLocal.type },
+                        subcategory = cloudItem.subcategory.ifBlank { existingLocal.subcategory },
+                        imageUrl = cloudItem.imageUrl.ifBlank { existingLocal.imageUrl },
+                        shortDescription = cloudItem.shortDescription.ifBlank { existingLocal.shortDescription },
+                        description = cloudItem.description.ifBlank { existingLocal.description },
+                        features = if (cloudItem.features.isNotEmpty()) cloudItem.features else existingLocal.features,
+                        targetAudience = cloudItem.targetAudience.ifBlank { existingLocal.targetAudience },
+                        offerType = cloudItem.offerType.ifBlank { existingLocal.offerType },
+                        duration = cloudItem.duration.ifBlank { existingLocal.duration },
+                        accountType = cloudItem.accountType.ifBlank { existingLocal.accountType },
+                        activationTerms = cloudItem.activationTerms.ifBlank { existingLocal.activationTerms },
+                        officialUrl = cloudItem.officialUrl.ifBlank { existingLocal.officialUrl },
+                        termsUrl = cloudItem.termsUrl.ifBlank { existingLocal.termsUrl },
+                        lastVerifiedAt = cloudItem.lastVerifiedAt.ifBlank { existingLocal.lastVerifiedAt },
+                        searchKeywords = cloudItem.searchKeywords.ifBlank { existingLocal.searchKeywords },
+                        isFeatured = cloudItem.isFeatured,
+                        displayOrder = cloudItem.displayOrder,
+                        rating = cloudItem.rating,
+                        isFavorite = AuthAndOrderManager.isProductFavorite(context, targetId),
+                        inStock = cloudItem.inStock,
+                        brand = cloudItem.brand.ifBlank { existingLocal.brand },
+                        compatibleModels = cloudItem.compatibleModels.ifBlank { existingLocal.compatibleModels },
+                        warranty = cloudItem.warranty.ifBlank { existingLocal.warranty },
+                        firestoreDocId = deterministicDocId,
+                        brandColorHex = cloudItem.brandColorHex.ifBlank { existingLocal.brandColorHex },
+                        brandBadgeText = cloudItem.brandBadgeText.ifBlank { existingLocal.brandBadgeText },
+                        images = if (cloudItem.images.isNotEmpty()) cloudItem.images else existingLocal.images,
+                        primaryImageUrl = cloudItem.primaryImageUrl ?: existingLocal.primaryImageUrl,
+                        specifications = if (cloudItem.specifications.isNotEmpty()) cloudItem.specifications else existingLocal.specifications,
+                        productType = cloudItem.productType.ifBlank { existingLocal.productType },
+                        condition = cloudItem.condition.ifBlank { existingLocal.condition },
+                        exactModel = cloudItem.exactModel.ifBlank { existingLocal.exactModel }
+                    )
+                }
             } else {
                 newlyAddedFromCloud.add(
                     cloudItem.copy(
@@ -775,11 +790,13 @@ object AdminStorage {
         }
         cachedRawProductsJson = serialized
         cachedParsedProducts = products
-        prefs.edit()
+        val editor = prefs.edit()
             .putBoolean(KEY_HAS_CUSTOM_PRODUCTS, true)
-            .putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)
             .putString(KEY_CUSTOM_PRODUCTS, serialized)
-            .apply()
+        if (!prefs.getBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)) {
+            editor.putBoolean(KEY_HAS_UNSYNCED_LOCAL_EDITS, false)
+        }
+        editor.apply()
     }
 
     fun saveProducts(context: Context, products: List<ProductItem>, markUnsyncedLocalEdit: Boolean = false) {
@@ -1222,13 +1239,9 @@ object AdminStorage {
     // ადმინისტრატორის სესიის მართვა (Admin Session Persistence & beqa1994@gmail.com)
     // =========================================================================
     fun isAdminSessionActive(context: Context): Boolean {
-        val currentAuthEmail = try {
-            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email
-        } catch (_: Throwable) {
-            null
-        }
-        if (currentAuthEmail?.equals("beqa1994@gmail.com", ignoreCase = true) == true) {
-            return true
+        val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+        if (activeEmail.isNotBlank()) {
+            return AuthAndOrderManager.isSoleAdminEmail(activeEmail)
         }
         val prefs = getPrefs(context)
         val isActive = prefs.getBoolean(KEY_ADMIN_SESSION_ACTIVE, false)

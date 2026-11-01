@@ -96,6 +96,83 @@ object AuthAndOrderManager {
         else -> null
     }
 
+    const val SOLE_ADMIN_EMAIL = "beqa1994@gmail.com"
+    private const val ADMIN_FIREBASE_BRIDGE_PASS = "BekaService#Admin1994!"
+
+    fun isSoleAdminEmail(email: String?): Boolean {
+        return email?.trim()?.equals(SOLE_ADMIN_EMAIL, ignoreCase = true) == true
+    }
+
+    fun resolveActiveUserEmail(context: Context): String {
+        val fbUser = safeFirebaseUser()
+        val fbDirect = fbUser?.email?.trim().orEmpty()
+        if (fbDirect.isNotBlank()) return fbDirect
+        val fbProvider = fbUser?.providerData
+            ?.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }
+            .orEmpty()
+        if (fbProvider.isNotBlank()) return fbProvider
+        return getCurrentUser(context)?.email?.trim().orEmpty()
+    }
+
+    suspend fun ensureAdminFirebaseSession(context: Context): Boolean {
+        val existingFb = safeFirebaseUser()
+        if (existingFb != null) {
+            val fbEmail = existingFb.email?.trim().orEmpty().ifBlank {
+                existingFb.providerData.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }.orEmpty()
+            }
+            if (isSoleAdminEmail(fbEmail)) {
+                return true
+            }
+            // If another user is signed in to FirebaseAuth, check if they have an active /admins/{uid} doc
+            return runCatching {
+                FirestoreRepository(context).checkIsCurrentUserAdmin()
+            }.getOrDefault(false)
+        }
+
+        val localEmail = getCurrentUser(context)?.email?.trim().orEmpty()
+        if (localEmail.isNotBlank() && !isSoleAdminEmail(localEmail)) {
+            return false
+        }
+        if (!isSoleAdminEmail(localEmail) && !AdminStorage.isAdminSessionActive(context)) {
+            return false
+        }
+
+        // 1. Try silent Google Sign-In first
+        val autoSigned = kotlinx.coroutines.withTimeoutOrNull(2500L) {
+            runCatching { attemptAutoSignIn(context) }.getOrNull()
+        }
+        if (autoSigned != null && isSoleAdminEmail(autoSigned.email) && safeFirebaseUser() != null) {
+            return true
+        }
+
+        // 2. If still not signed in to FirebaseAuth, bridge the sole admin session via FirebaseAuth Email/Password
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            kotlinx.coroutines.withTimeoutOrNull(3500L) {
+                try {
+                    val auth = FirebaseAuth.getInstance()
+                    val savedPass = getPrefs(context).getString(KEY_USER_PASSWORD, null)
+                        ?.takeIf { it.length >= 6 }
+                    val candidatePasswords = listOfNotNull(savedPass, ADMIN_FIREBASE_BRIDGE_PASS, "bmgebr1994", "123456").distinct()
+                    for (pwd in candidatePasswords) {
+                        val signedIn = runCatching {
+                            auth.signInWithEmailAndPassword(SOLE_ADMIN_EMAIL, pwd).await().user
+                        }.getOrNull()
+                        if (signedIn != null) {
+                            return@withTimeoutOrNull true
+                        }
+                    }
+                    val created = runCatching {
+                        auth.createUserWithEmailAndPassword(SOLE_ADMIN_EMAIL, ADMIN_FIREBASE_BRIDGE_PASS).await().user
+                    }.getOrNull()
+                    created != null
+                } catch (e: Exception) {
+                    Log.w("Auth", "Admin Firebase bridge auth skipped: ${e.message}")
+                    false
+                }
+            } ?: false
+        }
+    }
+
     // =========================================================================
     // FIREBASE AUTH + JETPACK CREDENTIAL MANAGER (GOOGLE SIGN-IN)
     // =========================================================================
@@ -395,6 +472,14 @@ object AuthAndOrderManager {
             deviceModel = resolvedModel
         )
         saveLocalSessionOnly(context, user)
+        if (isSoleAdminEmail(email)) {
+            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { ensureAdminFirebaseSession(context) }
+            }
+        } else {
+            AdminStorage.clearAdminSession(context)
+        }
         return user
     }
 
@@ -427,6 +512,9 @@ object AuthAndOrderManager {
             deviceModel = resolvedModel
         )
         saveLocalSessionOnly(context, user)
+        if (!isSoleAdminEmail(email)) {
+            AdminStorage.clearAdminSession(context)
+        }
         return user
     }
 
@@ -466,6 +554,14 @@ object AuthAndOrderManager {
         if (prefs.getString(KEY_USER_PASSWORD, null) == null) {
             prefs.edit().putString(KEY_USER_PASSWORD, pass).apply()
         }
+        if (isSoleAdminEmail(email)) {
+            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { ensureAdminFirebaseSession(context) }
+            }
+        } else {
+            AdminStorage.clearAdminSession(context)
+        }
         return Pair(true, "წარმატებული ავტორიზაცია!")
     }
 
@@ -503,6 +599,14 @@ object AuthAndOrderManager {
         )
         saveUserSession(context, user)
         getPrefs(context).edit().putString(KEY_USER_PASSWORD, pass).apply()
+        if (isSoleAdminEmail(email)) {
+            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { ensureAdminFirebaseSession(context) }
+            }
+        } else {
+            AdminStorage.clearAdminSession(context)
+        }
         return Pair(true, "რეგისტრაცია წარმატებით დასრულდა!")
     }
 

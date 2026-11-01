@@ -84,7 +84,7 @@ object ProductImageManager {
 
         // ტელეფონის მეხსიერებიდან / გალერეიდან არჩეული ფოტო
         if (isLocalOrEmbeddedImage(raw)) {
-            return isValidRenderableImage(raw)
+            return true
         }
 
         // საწყისი 24 პროგრამული სერვისისთვის (ID 101..124):

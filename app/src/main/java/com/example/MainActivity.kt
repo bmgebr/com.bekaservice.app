@@ -2006,9 +2006,13 @@ fun BekaServiceApp(
                     onDismiss = { isAdminOpen = false },
                     onAddProduct = { title, price, rating, imageUrl, category ->
                         coroutineScope.launch {
-                            val repo = firestoreRepo
-                            if (repo == null) {
-                                Toast.makeText(context, "❌ Firestore კავშირი მიუწვდომელია", Toast.LENGTH_LONG).show()
+                            val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                            if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                                Toast.makeText(
+                                    context,
+                                    "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 return@launch
                             }
                             val nextId = (productsList.maxOfOrNull { it.id } ?: 200) + 1
@@ -2024,23 +2028,26 @@ fun BekaServiceApp(
                                 inStock = true,
                                 firestoreDocId = deterministicDocId
                             )
+                            AdminStorage.unmarkProductDeleted(context, newProd.id)
+                            if (productsList.none { it.id == newProd.id }) {
+                                productsList.add(0, newProd)
+                            }
+                            val updatedSnapshot = productsList.toList()
+                            withContext(Dispatchers.IO) {
+                                AdminStorage.saveProducts(context, updatedSnapshot, markUnsyncedLocalEdit = true)
+                            }
+                            isAdminOpen = false
+
+                            val repo = firestoreRepo ?: FirestoreRepository(context)
                             val writeResult = repo.saveOrUpdateProductResult(newProd)
                             if (writeResult.isSuccess) {
-                                AdminStorage.unmarkProductDeleted(context, newProd.id)
-                                if (productsList.none { it.id == newProd.id }) {
-                                    productsList.add(0, newProd)
+                                withContext(Dispatchers.IO) {
+                                    AdminStorage.saveProductsFromCloud(context, updatedSnapshot)
+                                    AdminStorage.markLocalEditsSynced(context)
                                 }
-                                AdminStorage.saveProductsFromCloud(context, productsList.toList())
-                                Toast.makeText(context, "✅ პროდუქტი წარმატებით დაემატა Firestore-ში!", Toast.LENGTH_SHORT).show()
-                                isAdminOpen = false
+                                Toast.makeText(context, "✅ პროდუქტი წარმატებით დაემატა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
                             } else {
-                                val err = writeResult.exceptionOrNull()
-                                val friendlyMsg = if (err != null) {
-                                    repo.formatUserFriendlyFirestoreError(err)
-                                } else {
-                                    "Firestore-ში ჩაწერა ვერ მოხერხდა"
-                                }
-                                Toast.makeText(context, "❌ $friendlyMsg", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "✅ პროდუქტი წარმატებით დაემატა!", Toast.LENGTH_SHORT).show()
                             }
                         }
                     },
@@ -2074,9 +2081,6 @@ fun BekaServiceApp(
                         productsList.addAll(updatedList)
                         if (selectedProductForDetail != null) {
                             selectedProductForDetail = updatedList.find { it.id == selectedProductForDetail?.id }
-                        }
-                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            AdminStorage.saveProductsFromCloud(context, updatedList)
                         }
                     },
                     onClose = {

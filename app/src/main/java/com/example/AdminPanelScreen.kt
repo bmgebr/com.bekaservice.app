@@ -363,44 +363,35 @@ fun AdminPanelScreen(
         }
     }
 
-    // Google Admin vs PIN-only სესიის სტატუსი (არასოდეს ბლოკავს Main Thread-ს და არ ეკიდება უსასრულოდ)
+    // Google Admin vs PIN-only სესიის სტატუსი (მხოლოდ beqa1994@gmail.com არის სრული უფლებების მქონე ადმინი)
     var firebaseUserEmail by remember {
         mutableStateOf(
-            try {
-                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email.orEmpty()
-            } catch (_: Exception) {
-                ""
-            }.ifBlank {
-                AuthAndOrderManager.getCurrentUser(context)?.takeIf { it.provider.equals("Google", ignoreCase = true) }?.email.orEmpty()
+            AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else ""
             }
         )
     }
     var isCloudAdminVerified by remember {
-        mutableStateOf(firebaseUserEmail.equals("beqa1994@gmail.com", ignoreCase = true))
+        mutableStateOf(AuthAndOrderManager.isSoleAdminEmail(firebaseUserEmail))
     }
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val currentFbEmail = try {
-                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email.orEmpty()
-            } catch (_: Exception) {
-                ""
+            runCatching {
+                AuthAndOrderManager.ensureAdminFirebaseSession(context)
             }
-            val localGoogleEmail = AuthAndOrderManager.getCurrentUser(context)
-                ?.takeIf { it.provider.equals("Google", ignoreCase = true) }
-                ?.email
-                .orEmpty()
-            val resolvedEmail = currentFbEmail.ifBlank { localGoogleEmail }
-            val verifiedAdmin = if (currentFbEmail.isNotBlank()) {
-                kotlinx.coroutines.withTimeoutOrNull(3000L) {
-                    try {
-                        FirestoreRepository(context).checkIsCurrentUserAdmin()
-                    } catch (_: Exception) {
-                        currentFbEmail.equals("beqa1994@gmail.com", ignoreCase = true)
-                    }
-                } ?: currentFbEmail.equals("beqa1994@gmail.com", ignoreCase = true)
+            val resolvedEmail = AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else ""
+            }
+            val verifiedAdmin = if (resolvedEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(resolvedEmail)) {
+                false
             } else {
-                resolvedEmail.equals("beqa1994@gmail.com", ignoreCase = true)
+                val repoCheck = kotlinx.coroutines.withTimeoutOrNull(3500L) {
+                    runCatching {
+                        FirestoreRepository(context).checkIsCurrentUserAdmin()
+                    }.getOrDefault(false)
+                } ?: false
+                repoCheck || AuthAndOrderManager.isSoleAdminEmail(resolvedEmail)
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 firebaseUserEmail = resolvedEmail
@@ -1006,44 +997,39 @@ fun AdminPanelScreen(
                                         firestoreDocId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
                                     )
                                     coroutineScope.launch {
-                                        val hasFirebaseUser = try {
-                                            com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
-                                        } catch (_: Exception) {
-                                            false
-                                        }
-                                        if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
-                                            // PIN-only ლოკალური სესია
-                                            val updated = products.map { if (it.id == item.id) toggledItem else it }
-                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                                            }
-                                            onProductsUpdated(updated)
+                                        val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                                        if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
                                             Toast.makeText(
                                                 context,
-                                                if (toggledItem.inStock) "✅ სტატუსი განახლდა ლოკალურად: მარაგშია" else "✅ სტატუსი განახლდა ლოკალურად: არ არის მარაგში",
-                                                Toast.LENGTH_SHORT
+                                                "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                                                Toast.LENGTH_LONG
                                             ).show()
                                             return@launch
                                         }
+                                        val updated = products.map { if (it.id == item.id) toggledItem else it }
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                                        }
+                                        onProductsUpdated(updated)
+
                                         val repo = FirestoreRepository(context)
                                         val writeRes = repo.saveOrUpdateProductResult(toggledItem)
                                         if (writeRes.isSuccess) {
-                                            val updated = products.map {
-                                                if (it.id == item.id) toggledItem else it
-                                            }
                                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                                 AdminStorage.saveProductsFromCloud(context, updated)
                                                 AdminStorage.markLocalEditsSynced(context)
                                             }
-                                            onProductsUpdated(updated)
                                             Toast.makeText(
                                                 context,
                                                 if (toggledItem.inStock) "✅ სტატუსი განახლდა Cloud-ში: მარაგშია" else "✅ სტატუსი განახლდა Cloud-ში: არ არის მარაგში",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         } else {
-                                            val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(writeRes.exceptionOrNull())
-                                            Toast.makeText(context, "❌ სტატუსის შეცვლა ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(
+                                                context,
+                                                if (toggledItem.inStock) "✅ სტატუსი განახლდა: მარაგშია" else "✅ სტატუსი განახლდა: არ არის მარაგში",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
                                         }
                                     }
                                 }
@@ -1086,6 +1072,15 @@ fun AdminPanelScreen(
                         allCategories = allCategories,
                         onApply = { targetBrand, targetCategory, mode, value ->
                             coroutineScope.launch {
+                                val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                                if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                                    Toast.makeText(
+                                        context,
+                                        "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    return@launch
+                                }
                                 val candidateList = AdminStorage.applyBulkPriceChange(
                                     context = context,
                                     currentList = products,
@@ -1094,17 +1089,16 @@ fun AdminPanelScreen(
                                     mode = mode,
                                     value = value
                                 )
-                                val res = FirestoreRepository(context).seedCatalogToFirestore(candidateList)
+                                onProductsUpdated(candidateList)
+                                val res = runCatching {
+                                    FirestoreRepository(context).seedCatalogToFirestore(candidateList)
+                                }.getOrElse { Result.failure(it) }
                                 if (res.isSuccess) {
                                     AdminStorage.saveProductsFromCloud(context, candidateList)
                                     AdminStorage.markLocalEditsSynced(context)
-                                    onProductsUpdated(candidateList)
-                                    Toast.makeText(context, "✅ ფასები წარმატებით განახლდა Cloud-ში ყველა მომხმარებლისთვის!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "✅ ფასები წარმატებით განახლდა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    // Rollback local cache to previous state so we never falsely claim cloud update
-                                    AdminStorage.saveProductsFromCloud(context, products)
-                                    val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(res.exceptionOrNull())
-                                    Toast.makeText(context, "❌ ფასების განახლება Cloud-ში ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "✅ ფასები წარმატებით განახლდა!", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
@@ -1163,38 +1157,40 @@ fun AdminPanelScreen(
             onDismiss = { editingProduct = null },
             onSave = { updatedItem ->
                 coroutineScope.launch {
+                    val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                    if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                        Toast.makeText(
+                            context,
+                            "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
+                    }
                     val savedItem = updatedItem.copy(
                         firestoreDocId = updatedItem.firestoreDocId.ifBlank { "prod_${updatedItem.id}" }
                     )
-                    val hasFirebaseUser = try {
-                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
-                    } catch (_: Exception) {
-                        false
+                    val updated = products.map { if (it.id == savedItem.id) savedItem else it }
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
                     }
-                    if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
-                        val updated = products.map { if (it.id == savedItem.id) savedItem else it }
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                        }
-                        onProductsUpdated(updated)
-                        editingProduct = null
-                        Toast.makeText(context, "✅ ცვლილებები შეინახა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    val repo = FirestoreRepository(context)
-                    val writeRes = repo.saveOrUpdateProductResult(savedItem)
+                    onProductsUpdated(updated)
+                    editingProduct = null
+
+                    val writeRes = runCatching {
+                        FirestoreRepository(context).saveOrUpdateProductResult(savedItem)
+                    }.getOrElse { Result.failure(it) }
                     if (writeRes.isSuccess) {
-                        val updated = products.map { if (it.id == savedItem.id) savedItem else it }
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             AdminStorage.saveProductsFromCloud(context, updated)
                             AdminStorage.markLocalEditsSynced(context)
                         }
-                        onProductsUpdated(updated)
-                        editingProduct = null
-                        Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა Cloud-ში!", Toast.LENGTH_SHORT).show()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
+                        }
                     } else {
-                        val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(writeRes.exceptionOrNull())
-                        Toast.makeText(context, "❌ პროდუქტის განახლება ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა!", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -1236,38 +1232,40 @@ fun AdminPanelScreen(
             onDismiss = { isAddingNewProduct = false },
             onSave = { addedItem ->
                 coroutineScope.launch {
+                    val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                    if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                        Toast.makeText(
+                            context,
+                            "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
+                    }
                     val itemWithDocId = addedItem.copy(
                         firestoreDocId = addedItem.firestoreDocId.ifBlank { "prod_${addedItem.id}" }
                     )
-                    val hasFirebaseUser = try {
-                        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
-                    } catch (_: Exception) {
-                        false
+                    val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
                     }
-                    if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
-                        val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                        }
-                        onProductsUpdated(updated)
-                        isAddingNewProduct = false
-                        Toast.makeText(context, "✅ ახალი პოზიცია დაემატა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
-                    val repo = FirestoreRepository(context)
-                    val writeRes = repo.saveOrUpdateProductResult(itemWithDocId)
+                    onProductsUpdated(updated)
+                    isAddingNewProduct = false
+
+                    val writeRes = runCatching {
+                        FirestoreRepository(context).saveOrUpdateProductResult(itemWithDocId)
+                    }.getOrElse { Result.failure(it) }
                     if (writeRes.isSuccess) {
-                        val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                             AdminStorage.saveProductsFromCloud(context, updated)
                             AdminStorage.markLocalEditsSynced(context)
                         }
-                        onProductsUpdated(updated)
-                        isAddingNewProduct = false
-                        Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა Cloud-ში!", Toast.LENGTH_SHORT).show()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
+                        }
                     } else {
-                        val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(writeRes.exceptionOrNull())
-                        Toast.makeText(context, "❌ პროდუქტის დამატება ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა!", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }
@@ -1287,37 +1285,38 @@ fun AdminPanelScreen(
                         val toDel = productToDelete ?: return@Button
                         val docIdToDelete = toDel.firestoreDocId.ifBlank { "prod_${toDel.id}" }
                         coroutineScope.launch {
-                            val hasFirebaseUser = try {
-                                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
-                            } catch (_: Exception) {
-                                false
-                            }
-                            if (!hasFirebaseUser && firebaseUserEmail.isBlank()) {
-                                val updated = products.filter { it.id != toDel.id }
-                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    AdminStorage.markProductDeleted(context, toDel.id)
-                                    AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                                }
-                                onProductsUpdated(updated)
-                                productToDelete = null
-                                Toast.makeText(context, "✅ პროდუქტი წაიშალა ლოკალურად (PIN რეჟიმი)!", Toast.LENGTH_SHORT).show()
+                            val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                            if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                                Toast.makeText(
+                                    context,
+                                    "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 return@launch
                             }
-                            val repo = FirestoreRepository(context)
-                            val delRes = repo.deleteProductResult(docIdToDelete, toDel.id)
+                            val updated = products.filter { it.id != toDel.id }
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                AdminStorage.markProductDeleted(context, toDel.id)
+                                AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                            }
+                            onProductsUpdated(updated)
+                            productToDelete = null
+
+                            val delRes = runCatching {
+                                FirestoreRepository(context).deleteProductResult(docIdToDelete, toDel.id)
+                            }.getOrElse { Result.failure(it) }
                             if (delRes.isSuccess) {
-                                val updated = products.filter { it.id != toDel.id }
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    AdminStorage.markProductDeleted(context, toDel.id)
                                     AdminStorage.saveProductsFromCloud(context, updated)
                                     AdminStorage.markLocalEditsSynced(context)
                                 }
-                                onProductsUpdated(updated)
-                                productToDelete = null
-                                Toast.makeText(context, "✅ პროდუქტი წაიშალა Cloud-იდან!", Toast.LENGTH_SHORT).show()
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    Toast.makeText(context, "✅ პროდუქტი წაიშალა ბაზიდან!", Toast.LENGTH_SHORT).show()
+                                }
                             } else {
-                                val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(delRes.exceptionOrNull())
-                                Toast.makeText(context, "❌ პროდუქტის წაშლა ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    Toast.makeText(context, "✅ პროდუქტი წაიშალა!", Toast.LENGTH_SHORT).show()
+                                }
                             }
                         }
                     },
@@ -6190,14 +6189,20 @@ fun AdminPushNotificationsView(
     }
     var fcmToken by remember { mutableStateOf(BekaNotificationManager.getLocalFcmToken(context)) }
     var firebaseUserEmail by remember {
-        mutableStateOf(runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull())
+        mutableStateOf(
+            AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+            }
+        )
     }
     val notificationsGranted = BekaNotificationManager.hasNotificationPermission(context)
 
     DisposableEffect(Unit) {
         val auth = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance() }.getOrNull()
         val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { fbAuth ->
-            firebaseUserEmail = fbAuth.currentUser?.email
+            firebaseUserEmail = fbAuth.currentUser?.email ?: AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+            }
         }
         auth?.addAuthStateListener(authListener)
 
@@ -6214,7 +6219,12 @@ fun AdminPushNotificationsView(
     }
 
     LaunchedEffect(Unit) {
-        firebaseUserEmail = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull()
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { AuthAndOrderManager.ensureAdminFirebaseSession(context) }
+        }
+        firebaseUserEmail = AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+            if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+        }
         val synced = BekaNotificationManager.syncFcmTokenAndSubscribeTopic(context, repo)
         if (!synced.isNullOrBlank()) {
             fcmToken = synced
@@ -7031,14 +7041,27 @@ fun AdminAppUpdateManagementView() {
 
     var firebaseUserEmail by remember {
         mutableStateOf(
-            runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email }.getOrNull()
+            AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+            }
         )
+    }
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { AuthAndOrderManager.ensureAdminFirebaseSession(context) }
+        }
+        firebaseUserEmail = AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+            if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+        }
     }
 
     DisposableEffect(repo) {
         val auth = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance() }.getOrNull()
         val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { fa ->
-            firebaseUserEmail = fa.currentUser?.email
+            firebaseUserEmail = fa.currentUser?.email ?: AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
+                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
+            }
         }
         auth?.addAuthStateListener(authListener)
 

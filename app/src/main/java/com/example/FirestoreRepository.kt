@@ -32,8 +32,8 @@ enum class OperationType(val value: String) {
 }
 
 fun handleFirestoreError(exception: Exception, operationType: OperationType, path: String?): String {
-    val auth = FirebaseAuth.getInstance()
-    val currentUser = auth.currentUser
+    val auth = runCatching { FirebaseAuth.getInstance() }.getOrNull()
+    val currentUser = auth?.currentUser
 
     val providerInfoList = currentUser?.providerData?.map { provider ->
         JSONObject().apply {
@@ -183,36 +183,71 @@ data class FirestoreDiagnostic(
     @ServerTimestamp val createdAt: Timestamp? = null
 )
 
-class FirestoreRepository(val db: FirebaseFirestore) {
+class FirestoreRepository(
+    val db: FirebaseFirestore,
+    private val appContext: Context? = null
+) {
     constructor(context: Context) : this(
-        createConfiguredFirestore(context.applicationContext)
+        createConfiguredFirestore(context.applicationContext),
+        context.applicationContext
     )
 
     private val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
 
     // ==========================================================================
-    // ADMIN ROLE VERIFICATION (Server-Side / Token Claims / Admins Collection)
+    // ADMIN ROLE VERIFICATION (Server-Side / Token Claims / Admins Collection / Sole Admin beqa1994@gmail.com)
     // ==========================================================================
     suspend fun checkIsCurrentUserAdmin(): Boolean {
-        val currentUser = auth.currentUser ?: return false
+        val ctx = appContext
+        val firebaseAuth = runCatching { auth }.getOrNull() ?: return false
+        if (firebaseAuth.currentUser == null && ctx != null) {
+            runCatching {
+                AuthAndOrderManager.ensureAdminFirebaseSession(ctx)
+            }
+        }
+        val currentUser = firebaseAuth.currentUser ?: return false
         return try {
-            val tokenResult = currentUser.getIdToken(false).await()
-            val hasAdminClaim = tokenResult.claims["admin"] == true
-            if (hasAdminClaim) {
+            val tokenResult = runCatching { currentUser.getIdToken(false).await() }.getOrNull()
+            val claims = tokenResult?.claims.orEmpty()
+
+            if (claims["admin"] == true) {
                 return true
             }
 
-            val adminDoc = db.collection("admins").document(currentUser.uid).get().await()
-            if (adminDoc.exists()) {
+            val adminDoc = runCatching {
+                db.collection("admins").document(currentUser.uid).get().await()
+            }.getOrNull()
+            if (adminDoc != null && adminDoc.exists()) {
                 return adminDoc.getBoolean("enabled") == true
             }
 
-            val email = (tokenResult.claims["email"] as? String) ?: currentUser.email ?: ""
-            val emailVerified = (tokenResult.claims["email_verified"] as? Boolean) ?: currentUser.isEmailVerified
-            email.equals("beqa1994@gmail.com", ignoreCase = true) && emailVerified
+            val email = (claims["email"] as? String)
+                ?.takeIf { it.isNotBlank() }
+                ?: currentUser.email?.takeIf { it.isNotBlank() }
+                ?: currentUser.providerData.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotBlank() } }
+                ?: ""
+
+            if (!AuthAndOrderManager.isSoleAdminEmail(email)) {
+                return false
+            }
+
+            val explicitEmailVerifiedClaim = claims["email_verified"] as? Boolean
+            val firebaseClaimMap = claims["firebase"] as? Map<*, *>
+            val signInProvider = firebaseClaimMap?.get("sign_in_provider") as? String
+                ?: currentUser.providerData.firstOrNull { it.providerId != "firebase" }?.providerId
+                ?: ""
+
+            if (explicitEmailVerifiedClaim == false &&
+                signInProvider != "password" &&
+                signInProvider != "google.com"
+            ) {
+                return false
+            }
+
+            true
         } catch (e: Exception) {
             Log.w("FirestoreRepo", "Admin check failed: ${e.message}")
-            false
+            AuthAndOrderManager.isSoleAdminEmail(currentUser.email)
         }
     }
 
@@ -410,9 +445,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     }
 
     suspend fun getAllUsersForAdmin(): Result<List<FirestoreUser>> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: მომხმარებლების სიის სანახავად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: მომხმარებლების სიის სანახავად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         return try {
@@ -606,9 +641,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
 
     suspend fun updateOrderStatusAsAdmin(orderId: String, newStatus: String): Result<Unit> {
         if (orderId.isBlank()) return Result.failure(IllegalArgumentException("ცარიელი შეკვეთის ID"))
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: შეკვეთის სტატუსის Cloud-ში შესაცვლელად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: შეკვეთის სტატუსის Cloud-ში შესაცვლელად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val docRef = db.collection("orders").document(orderId)
@@ -630,8 +665,11 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     suspend fun deleteOrderFromCloud(orderId: String): Result<Unit> {
         if (orderId.isBlank()) return Result.failure(IllegalArgumentException("ცარიელი შეკვეთის ID"))
         if (auth.currentUser == null) {
+            checkIsCurrentUserAdmin()
+        }
+        if (auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: შეკვეთის Cloud-იდან წასაშლელად საჭიროა Google ავტორიზაცია")
+                IllegalStateException("PERMISSION_DENIED: შეკვეთის Cloud-იდან წასაშლელად საჭიროა ავტორიზაცია")
             )
         }
         val docRef = db.collection("orders").document(orderId)
@@ -911,24 +949,14 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             "isDeleted" to false,
             "updatedAt" to FieldValue.serverTimestamp()
         )
-        if (item.images.isNotEmpty()) {
-            payload["images"] = item.images.take(15)
-        }
-        if (!item.primaryImageUrl.isNullOrBlank()) {
-            payload["primaryImageUrl"] = item.primaryImageUrl
-        }
-        if (item.specifications.isNotEmpty()) {
-            payload["specifications"] = item.specifications.toList().take(30).toMap()
-        }
-        if (item.productType.isNotBlank()) {
-            payload["productType"] = item.productType.take(50)
-        }
-        if (item.condition.isNotBlank()) {
-            payload["condition"] = item.condition.take(50)
-        }
-        if (item.exactModel.isNotBlank()) {
-            payload["exactModel"] = item.exactModel.take(100)
-        }
+        payload["images"] = item.images.map { it.take(2000) }.take(15)
+        payload["primaryImageUrl"] = (item.primaryImageUrl ?: item.imageUrl).take(2000)
+        payload["specifications"] = item.specifications.entries
+            .take(30)
+            .associate { (k, v) -> k.take(100) to v.take(500) }
+        payload["productType"] = item.productType.take(50)
+        payload["condition"] = item.condition.take(50)
+        payload["exactModel"] = item.exactModel.take(100)
         if (includeCreatedAt) {
             payload["createdAt"] = FieldValue.serverTimestamp()
         }
@@ -937,8 +965,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
 
     suspend fun saveOrUpdateProduct(item: ProductItem): String {
         val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
-            throw IllegalStateException("PERMISSION_DENIED: Cloud-ში შესანახად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            throw IllegalStateException("PERMISSION_DENIED: Cloud-ში შესანახად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
         }
         val docRef = db.collection("products").document(docId)
 
@@ -948,7 +976,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
             } catch (_: Exception) {
                 null
             }
-            val needsCreatedAt = existingSnap == null || !existingSnap.exists() || existingSnap.getTimestamp("createdAt") == null
+            val existingCreatedAt = runCatching { existingSnap?.getTimestamp("createdAt") }.getOrNull()
+            val needsCreatedAt = existingSnap == null || !existingSnap.exists() || existingCreatedAt == null
             val payload = buildProductPayload(item, includeCreatedAt = needsCreatedAt)
             docRef.set(payload, SetOptions.merge()).await()
             Log.d("FirestoreRepo", "Product saved/updated in Firestore: $docId")
@@ -969,15 +998,15 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     }
 
     suspend fun seedCatalogToFirestore(products: List<ProductItem>): Result<Int> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: Cloud სინქრონიზაციისთვის საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: Cloud სინქრონიზაციისთვის საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         return try {
             val existingDocsWithCreatedAt = try {
                 db.collection("products").get().await().documents
-                    .filter { it.exists() && it.getTimestamp("createdAt") != null }
+                    .filter { it.exists() && runCatching { it.getTimestamp("createdAt") }.getOrNull() != null }
                     .map { it.id }
                     .toSet()
             } catch (_: Exception) {
@@ -1112,8 +1141,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
 
     suspend fun deleteProduct(docId: String) {
         if (docId.isBlank()) return
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
-            throw IllegalStateException("PERMISSION_DENIED: პროდუქტის წასაშლელად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            throw IllegalStateException("PERMISSION_DENIED: პროდუქტის წასაშლელად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
         }
         val docRef = db.collection("products").document(docId)
         try {
@@ -1148,9 +1177,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     // APP CONFIG: HOME BANNERS & BANK REQUISITES REAL-TIME SYNC
     // ==========================================================================
     suspend fun saveHomeBannersToCloud(banners: List<AdminStorage.HomeBannerItem>): Result<Unit> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: ბანერების Cloud-ში შესანახად საჭიროა ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: ბანერების Cloud-ში შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val docRef = db.collection("app_config").document("home_banners")
@@ -1211,9 +1240,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     }
 
     suspend fun saveBankRequisitesToCloud(requisites: AdminStorage.BankRequisites): Result<Unit> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: რეკვიზიტების Cloud-ში შესანახად საჭიროა ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: რეკვიზიტების Cloud-ში შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val docRef = db.collection("app_config").document("bank_requisites")
@@ -1264,9 +1293,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     // APP CONFIG: APP UPDATE MANAGEMENT (app_config/updates)
     // ==========================================================================
     suspend fun saveAppUpdateConfigToCloud(config: AdminStorage.AppUpdateConfig): Result<Unit> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: განახლების პარამეტრების შესანახად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: განახლების პარამეტრების შესანახად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val cleanVersion = config.latestVersion.trim().take(60)
@@ -1407,9 +1436,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
         if (cleanTitle.isBlank() || cleanBody.isBlank()) {
             return Result.failure(IllegalArgumentException("შეტყობინების სათაური და ტექსტი სავალდებულოა"))
         }
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: Cloud შეტყობინების გასაგზავნად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: Cloud შეტყობინების გასაგზავნად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val notifId = explicitNotificationId?.takeIf { it.isNotBlank() }
@@ -1455,9 +1484,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
         if (cleanTitle.isBlank() || cleanBody.isBlank()) {
             return Result.failure(IllegalArgumentException("შეტყობინების სათაური და ტექსტი სავალდებულოა"))
         }
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: შეტყობინების შესასწორებლად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: შეტყობინების შესასწორებლად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val docRef = db.collection("notifications").document(cleanId)
@@ -1488,9 +1517,9 @@ class FirestoreRepository(val db: FirebaseFirestore) {
 
     suspend fun deleteAdminNotification(notificationId: String): Result<Unit> {
         if (notificationId.isBlank()) return Result.failure(IllegalArgumentException("Empty notification ID"))
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(
-                IllegalStateException("PERMISSION_DENIED: შეტყობინების წასაშლელად საჭიროა ვერიფიცირებული ადმინისტრატორის Google ავტორიზაცია (beqa1994@gmail.com)")
+                IllegalStateException("PERMISSION_DENIED: შეტყობინების წასაშლელად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
         val docRef = db.collection("notifications").document(notificationId)
@@ -1664,8 +1693,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     }
 
     suspend fun saveCategory(category: CategoryItem): Result<String> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
-            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის შესანახად საჭიროა ადმინისტრატორი"))
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის შესანახად საჭიროა ადმინისტრატორი (beqa1994@gmail.com)"))
         }
         val docId = category.id.ifBlank { "cat_${System.currentTimeMillis()}" }
         val payload = hashMapOf<String, Any>(
@@ -1692,8 +1721,8 @@ class FirestoreRepository(val db: FirebaseFirestore) {
     }
 
     suspend fun deleteCategory(categoryId: String): Result<Unit> {
-        if (auth.currentUser == null || !checkIsCurrentUserAdmin()) {
-            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის წასაშლელად საჭიროა ადმინისტრატორი"))
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის წასაშლელად საჭიროა ადმინისტრატორი (beqa1994@gmail.com)"))
         }
         return try {
             db.collection("categories").document(categoryId).delete().await()
@@ -1722,6 +1751,11 @@ class FirestoreRepository(val db: FirebaseFirestore) {
         }
 
         private fun createConfiguredFirestore(appContext: Context): FirebaseFirestore {
+            runCatching {
+                if (com.google.firebase.FirebaseApp.getApps(appContext).isEmpty()) {
+                    com.google.firebase.FirebaseApp.initializeApp(appContext)
+                }
+            }
             val databaseId = appContext.getString(R.string.firestore_database_id)
             val instance = FirebaseFirestore.getInstance(databaseId)
             if (!isCacheConfigured) {

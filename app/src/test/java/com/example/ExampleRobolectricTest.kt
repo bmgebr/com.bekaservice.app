@@ -2176,4 +2176,68 @@ class ExampleRobolectricTest {
     assertEquals("", savedItem!!.accountType)
     assertEquals("", savedItem!!.activationTerms)
   }
+
+  @Test
+  fun `sole admin beqa1994@gmail_com has full privileges and product edit save succeeds in AdminPanelScreen`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AuthAndOrderManager.logout(context)
+    AdminStorage.clearAdminSession(context)
+
+    // 1. Only beqa1994@gmail.com is recognized as sole admin
+    assertTrue(AuthAndOrderManager.isSoleAdminEmail("beqa1994@gmail.com"))
+    assertTrue(AuthAndOrderManager.isSoleAdminEmail("BEQA1994@GMAIL.COM"))
+    assertFalse(AuthAndOrderManager.isSoleAdminEmail("otheruser@gmail.com"))
+    assertFalse(AuthAndOrderManager.isSoleAdminEmail(""))
+
+    // 2. Logging in as non-admin does NOT activate admin session
+    AuthAndOrderManager.loginWithGoogle(context, email = "otheruser@gmail.com", name = "გიორგი")
+    assertFalse("Non-admin user must not have admin session active", AdminStorage.isAdminSessionActive(context))
+
+    // 3. Logging in as beqa1994@gmail.com automatically grants full admin session
+    AuthAndOrderManager.loginWithGoogle(context, email = "beqa1994@gmail.com", name = "ბექა (Admin)")
+    assertTrue("beqa1994@gmail.com must have active admin session", AdminStorage.isAdminSessionActive(context))
+
+    // 4. Editing a digital service (e.g. Adobe) in AdminPanelScreen and clicking შენახვა succeeds and updates catalog
+    val initialProducts = listOf(
+      ProductItem(
+        id = 117,
+        firestoreDocId = "prod_117",
+        title = "Adobe Creative Cloud (1 თვე)",
+        price = "35 ₾",
+        category = "პროგრამული სერვისები",
+        type = "software",
+        productType = "software",
+        brand = "Adobe",
+        subcategory = "ვიდეო, დიზაინი და კონტენტის შექმნა",
+        offerType = "პრემიუმ გამოწერა (1 თვე)",
+        duration = "3 თვე",
+        imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+      )
+    )
+    var updatedProductsCallback: List<ProductItem>? = null
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        AdminPanelScreen(
+          products = initialProducts,
+          onProductsUpdated = { updatedProductsCallback = it },
+          onClose = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Click Edit on the product card and save changes
+    composeTestRule.onNodeWithText("ფასი / აღწერა", substring = true).performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("save_product_button").assertIsDisplayed().performClick()
+    composeTestRule.waitUntil(timeoutMillis = 3000) { updatedProductsCallback != null }
+    composeTestRule.waitForIdle()
+
+    assertNotNull("Saving edited product as beqa1994@gmail.com must succeed and update products", updatedProductsCallback)
+    assertEquals(1, updatedProductsCallback!!.size)
+    assertEquals("Adobe", updatedProductsCallback!!.first().brand)
+  }
 }
+

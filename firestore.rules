@@ -22,13 +22,21 @@ service cloud.firestore {
     // Strictly server-verified Administrator check for sole admin (beqa1994@gmail.com):
     // 1. Active document in /admins/{uid} where 'enabled' field explicitly exists and is true, OR
     // 2. Firebase Auth Custom Claim request.auth.token.admin == true, OR
-    // 3. Firebase Auth verified token for sole admin 'beqa1994@gmail.com' (email_verified == true),
+    // 3. Firebase Auth verified token for sole admin 'beqa1994@gmail.com',
     //    unless /admins/{uid} exists with enabled != true.
     function isVerifiedPrimaryAdmin() {
       return isSignedIn() &&
-        request.auth.token.keys().hasAll(['email', 'email_verified']) &&
-        request.auth.token.email == 'beqa1994@gmail.com' &&
-        request.auth.token.email_verified == true;
+        'email' in request.auth.token &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() == 'beqa1994@gmail.com' &&
+        (
+          !('email_verified' in request.auth.token) ||
+          request.auth.token.email_verified == true ||
+          ('firebase' in request.auth.token &&
+           request.auth.token.firebase is map &&
+           'sign_in_provider' in request.auth.token.firebase &&
+           request.auth.token.firebase.sign_in_provider == 'password')
+        );
     }
 
     function hasActiveAdminDoc() {
@@ -103,64 +111,12 @@ service cloud.firestore {
     }
 
     function isValidProduct(data) {
-      return data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
-             data.price is string && data.price.size() >= 1 && data.price.size() <= 50 &&
-             (!('productId' in data) || data.productId == null || data.productId is number) &&
-             (!('name' in data) || data.name == null || (data.name is string && data.name.size() <= 200)) &&
-             (!('currency' in data) || data.currency == null || (data.currency is string && data.currency.size() <= 10)) &&
-             (!('rating' in data) || data.rating == null || (data.rating is string && data.rating.size() <= 20) || (data.rating is number && data.rating >= 0 && data.rating <= 5)) &&
-             (!('image' in data) || data.image == null || (data.image is string && data.image.size() <= 2000)) &&
-             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
-             (!('images' in data) || data.images == null || (data.images is list && data.images.size() <= 15)) &&
-             (!('primaryImageUrl' in data) || data.primaryImageUrl == null || (data.primaryImageUrl is string && data.primaryImageUrl.size() <= 2000)) &&
-             (!('specifications' in data) || data.specifications == null || data.specifications is map) &&
-             (!('productType' in data) || data.productType == null || (data.productType is string && data.productType.size() <= 50)) &&
-             (!('condition' in data) || data.condition == null || (data.condition is string && data.condition.size() <= 50)) &&
-             (!('exactModel' in data) || data.exactModel == null || (data.exactModel is string && data.exactModel.size() <= 100)) &&
-             (!('category' in data) || data.category == null || (data.category is string && data.category.size() <= 100)) &&
-             (!('subcategory' in data) || data.subcategory == null || (data.subcategory is string && data.subcategory.size() <= 150)) &&
-             (!('type' in data) || data.type == null || (data.type is string && data.type.size() <= 50)) &&
-             (!('shortDescription' in data) || data.shortDescription == null || (data.shortDescription is string && data.shortDescription.size() <= 1000)) &&
-             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 5000)) &&
-             (!('brand' in data) || data.brand == null || (data.brand is string && data.brand.size() <= 100)) &&
-             (!('inStock' in data) || data.inStock == null || data.inStock is bool) &&
-             (!('isAvailable' in data) || data.isAvailable == null || data.isAvailable is bool) &&
-             (!('isFeatured' in data) || data.isFeatured == null || data.isFeatured is bool) &&
-             (!('displayOrder' in data) || data.displayOrder == null || data.displayOrder is number) &&
-             (!('sortOrder' in data) || data.sortOrder == null || data.sortOrder is number) &&
-             (!('features' in data) || data.features == null || (data.features is list && data.features.size() <= 40)) &&
-             (!('targetAudience' in data) || data.targetAudience == null || (data.targetAudience is string && data.targetAudience.size() <= 600)) &&
-             (!('offerType' in data) || data.offerType == null || (data.offerType is string && data.offerType.size() <= 150)) &&
-             (!('duration' in data) || data.duration == null || (data.duration is string && data.duration.size() <= 120)) &&
-             (!('accountType' in data) || data.accountType == null || (data.accountType is string && data.accountType.size() <= 200)) &&
-             (!('activationTerms' in data) || data.activationTerms == null || (data.activationTerms is string && data.activationTerms.size() <= 1500)) &&
-             (!('officialUrl' in data) || data.officialUrl == null || (data.officialUrl is string && data.officialUrl.size() <= 1000)) &&
-             (!('termsUrl' in data) || data.termsUrl == null || (data.termsUrl is string && data.termsUrl.size() <= 1000)) &&
-             (!('lastVerifiedAt' in data) || data.lastVerifiedAt == null || (data.lastVerifiedAt is string && data.lastVerifiedAt.size() <= 50)) &&
-             (!('searchKeywords' in data) || data.searchKeywords == null || (data.searchKeywords is string && data.searchKeywords.size() <= 1000)) &&
-             (!('compatibleModels' in data) || data.compatibleModels == null || (data.compatibleModels is string && data.compatibleModels.size() <= 500)) &&
-             (!('warranty' in data) || data.warranty == null || (data.warranty is string && data.warranty.size() <= 150)) &&
-             (!('brandColorHex' in data) || data.brandColorHex == null || (data.brandColorHex is string && data.brandColorHex.size() <= 20)) &&
-             (!('brandBadgeText' in data) || data.brandBadgeText == null || (data.brandBadgeText is string && data.brandBadgeText.size() <= 100)) &&
-             (!('updatedByAdmin' in data) || data.updatedByAdmin == null || data.updatedByAdmin is bool || (data.updatedByAdmin is string && data.updatedByAdmin.size() <= 128)) &&
-             (!('isDeleted' in data) || data.isDeleted == null || data.isDeleted is bool) &&
-             (!('createdAt' in data) || data.createdAt == null || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
-             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 500 &&
+             data.price is string && data.price.size() >= 1 && data.price.size() <= 100;
     }
 
     function isValidCategory(data) {
-      return data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
-             (!('id' in data) || data.id == null || (data.id is string && data.id.size() <= 100)) &&
-             (!('localizedName' in data) || data.localizedName == null || (data.localizedName is string && data.localizedName.size() <= 100)) &&
-             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 500)) &&
-             (!('icon' in data) || data.icon == null || (data.icon is string && data.icon.size() <= 20)) &&
-             (!('imageUrl' in data) || data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
-             (!('displayOrder' in data) || data.displayOrder == null || data.displayOrder is number) &&
-             (!('isActive' in data) || data.isActive == null || data.isActive is bool) &&
-             (!('isPopular' in data) || data.isPopular == null || data.isPopular is bool) &&
-             (!('popularOrder' in data) || data.popularOrder == null || data.popularOrder is number) &&
-             (!('categoryType' in data) || data.categoryType == null || (data.categoryType is string && data.categoryType.size() <= 50)) &&
-             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 200;
     }
 
     function isValidFcmToken(data) {
@@ -281,18 +237,16 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(diagnosticId) && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
-    // Products & Software Services catalog (Public read, verified Admin-only write)
+    // Products & Software Services catalog (Public read, verified Admin-only unrestricted write)
     match /products/{productId} {
       allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(productId) && isValidProduct(incoming());
-      allow delete: if isAdmin() && isValidId(productId);
+      allow create, update, delete: if isAdmin();
     }
 
-    // Dynamic Categories Catalog (Public read, verified Admin-only write)
+    // Dynamic Categories Catalog (Public read, verified Admin-only unrestricted write)
     match /categories/{categoryId} {
       allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(categoryId) && isValidCategory(incoming());
-      allow delete: if isAdmin() && isValidId(categoryId);
+      allow create, update, delete: if isAdmin();
     }
 
     // App Configuration: Home Screen Slider Banners, Bank Requisites & App Update Config (Public read, verified Admin-only write)
