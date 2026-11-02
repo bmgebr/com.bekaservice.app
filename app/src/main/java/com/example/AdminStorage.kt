@@ -267,6 +267,10 @@ object AdminStorage {
     }
 
     fun verifyPin(context: Context, inputPin: String): Boolean {
+        val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+        if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+            return false
+        }
         val currentPin = getAdminPin(context)
         val trimmed = inputPin.trim()
         return trimmed.equals(currentPin, ignoreCase = true) || trimmed == "1234"
@@ -1239,13 +1243,23 @@ object AdminStorage {
     // ადმინისტრატორის სესიის მართვა (Admin Session Persistence & beqa1994@gmail.com)
     // =========================================================================
     fun isAdminSessionActive(context: Context): Boolean {
+        val prefs = getPrefs(context)
+        val isActive = prefs.getBoolean(KEY_ADMIN_SESSION_ACTIVE, false)
+        val sessionEmail = prefs.getString(KEY_ADMIN_SESSION_EMAIL, null)
+        val hasActiveValidSession = isActive && AuthAndOrderManager.isSoleAdminEmail(sessionEmail)
+
+        if (!hasActiveValidSession && !AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+            return false
+        }
         val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
         if (activeEmail.isNotBlank()) {
             return AuthAndOrderManager.isSoleAdminEmail(activeEmail)
         }
-        val prefs = getPrefs(context)
-        val isActive = prefs.getBoolean(KEY_ADMIN_SESSION_ACTIVE, false)
         if (!isActive) return false
+        if (!AuthAndOrderManager.isSoleAdminEmail(sessionEmail)) {
+            clearAdminSession(context)
+            return false
+        }
         val ts = prefs.getLong(KEY_ADMIN_SESSION_TS, 0L)
         val maxSessionDuration = java.util.concurrent.TimeUnit.DAYS.toMillis(7)
         if (System.currentTimeMillis() - ts > maxSessionDuration) {
@@ -1256,19 +1270,33 @@ object AdminStorage {
     }
 
     fun setAdminSessionActive(context: Context, active: Boolean, email: String? = null) {
+        val rawActiveEmail = AuthAndOrderManager.resolveActiveUserEmail(context).trim()
+        if (rawActiveEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(rawActiveEmail)) {
+            clearAdminSession(context)
+            return
+        }
+        val resolvedEmail = (email ?: rawActiveEmail.ifBlank { AuthAndOrderManager.SOLE_ADMIN_EMAIL }).trim()
+        if (active && !AuthAndOrderManager.isSoleAdminEmail(resolvedEmail)) {
+            clearAdminSession(context)
+            return
+        }
         val editor = getPrefs(context).edit()
             .putBoolean(KEY_ADMIN_SESSION_ACTIVE, active)
             .putLong(KEY_ADMIN_SESSION_TS, if (active) System.currentTimeMillis() else 0L)
-        if (email != null) {
-            editor.putString(KEY_ADMIN_SESSION_EMAIL, email)
+        if (active && resolvedEmail.isNotBlank()) {
+            editor.putString(KEY_ADMIN_SESSION_EMAIL, AuthAndOrderManager.SOLE_ADMIN_EMAIL)
         } else if (!active) {
             editor.remove(KEY_ADMIN_SESSION_EMAIL)
         }
-        editor.apply()
+        editor.commit()
     }
 
     fun clearAdminSession(context: Context) {
-        setAdminSessionActive(context, false)
+        getPrefs(context).edit()
+            .putBoolean(KEY_ADMIN_SESSION_ACTIVE, false)
+            .putLong(KEY_ADMIN_SESSION_TS, 0L)
+            .remove(KEY_ADMIN_SESSION_EMAIL)
+            .commit()
     }
 }
 

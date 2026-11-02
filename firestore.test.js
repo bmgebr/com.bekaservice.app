@@ -470,6 +470,20 @@ test("FCM Tokens (/fcm_tokens/{userId}): per-user write ownership, no cross-user
   );
   await assertFails(bobDb.collection("fcm_tokens").doc(ALICE_UID).delete());
 
+  // Alice can also register a second device token under ${ALICE_UID}_${deviceId} and delete it on logout
+  const aliceSecondDeviceDocId = `${ALICE_UID}_dev_tablet_2`;
+  await assertSucceeds(
+    aliceDb.collection("fcm_tokens").doc(aliceSecondDeviceDocId).set({
+      ...sampleTokenDoc,
+      deviceId: "dev_tablet_2",
+      token: "fcm_token_alice_second_device_tablet_1234567890",
+    })
+  );
+  // Bob CANNOT read, overwrite, or delete Alice's second device token
+  await assertFails(bobDb.collection("fcm_tokens").doc(aliceSecondDeviceDocId).get());
+  await assertFails(bobDb.collection("fcm_tokens").doc(aliceSecondDeviceDocId).delete());
+  await assertSucceeds(aliceDb.collection("fcm_tokens").doc(aliceSecondDeviceDocId).delete());
+
   // Regular user CANNOT list all FCM tokens
   await assertFails(aliceDb.collection("fcm_tokens").get());
 
@@ -610,4 +624,334 @@ test("App Update Config (/app_config/updates): public read, admin write with HTT
   }
 });
 
+test("IMEI Check Platform: user isolation, history deletion, immutable price/status, and sole admin full privileges", async () => {
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const verifiedBekaDb = testEnv
+    .authenticatedContext("beka_verified_uid", {
+      email: "beqa1994@gmail.com",
+      email_verified: true,
+    })
+    .firestore();
 
+  const now = new Date(Date.now() - 1000);
+
+  // 1. Admin can manage brands, result fields, and verification sources; non-admin cannot
+  const brandApple = {
+    id: "apple",
+    name: "Apple",
+    localizedName: "Apple (iPhone / iPad)",
+    displayOrder: 1,
+    enabled: true,
+    isPopular: true,
+    updatedAt: now,
+  };
+  await assertFails(aliceDb.collection("imei_brands").doc("apple").set(brandApple));
+  await assertSucceeds(verifiedBekaDb.collection("imei_brands").doc("apple").set(brandApple));
+  await assertSucceeds(unauthDb.collection("imei_brands").doc("apple").get());
+
+  // Verification sources are strictly admin-only (not publicly readable)
+  const sourceDoc = {
+    id: "gsx_source",
+    name: "Official Carrier & GSX Registry",
+    websiteUrl: "https://checkcoverage.apple.com",
+    active: true,
+    internalInstructions: "Verify Find My iPhone and Sim-Lock",
+    updatedAt: now,
+  };
+  await assertFails(aliceDb.collection("imei_sources").doc("gsx_source").set(sourceDoc));
+  await assertSucceeds(verifiedBekaDb.collection("imei_sources").doc("gsx_source").set(sourceDoc));
+  await assertFails(aliceDb.collection("imei_sources").doc("gsx_source").get());
+  await assertSucceeds(verifiedBekaDb.collection("imei_sources").doc("gsx_source").get());
+
+  // 2. Alice can create her own pending IMEI request & history entry, but cannot fake 'completed' or 'paid'
+  const reqId = "imei_req_alice_1";
+  const validReq = {
+    id: reqId,
+    userId: ALICE_UID,
+    userName: "Alice",
+    userEmail: "alice@example.com",
+    imei: "353912101234567",
+    imeiMasked: "***********4567",
+    imeiHash: "hash_alice_353912101234567",
+    tac: "35391210",
+    brandId: "apple",
+    brandName: "Apple",
+    status: "pending",
+    paymentStatus: "pending",
+    quotedPrice: 3,
+    currency: "GEL",
+    estimatedMinMinutes: 5,
+    estimatedMaxMinutes: 30,
+    userDeletedHistory: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await assertFails(
+    aliceDb.collection("imei_requests").doc(reqId).set({
+      ...validReq,
+      status: "completed",
+    })
+  );
+  await assertFails(
+    aliceDb.collection("imei_requests").doc(reqId).set({
+      ...validReq,
+      paymentStatus: "paid",
+    })
+  );
+  await assertSucceeds(aliceDb.collection("imei_requests").doc(reqId).set(validReq));
+
+  const validHist = {
+    id: reqId,
+    userId: ALICE_UID,
+    imeiMasked: "******4567",
+    imeiHash: "hash_alice_353912101234567",
+    brandId: "apple",
+    brandName: "Apple",
+    status: "pending",
+    paymentStatus: "pending",
+    quotedPrice: 3,
+    currency: "GEL",
+    estimatedTimeText: "5–30 წთ",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("imei_history").doc(reqId).set(validHist)
+  );
+
+  // 3. Bob CANNOT read Alice's request, history, or report
+  await assertFails(bobDb.collection("imei_requests").doc(reqId).get());
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("imei_history").doc(reqId).get()
+  );
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("imei_history").doc(reqId).delete()
+  );
+
+  // 4. Alice CANNOT change her request price, status, or create her own report
+  await assertFails(
+    aliceDb.collection("imei_requests").doc(reqId).update({
+      quotedPrice: 0,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertFails(
+    aliceDb.collection("imei_reports").doc(reqId).set({
+      requestId: reqId,
+      userId: ALICE_UID,
+      imeiMasked: "******4567",
+      brandName: "Apple",
+      status: "completed",
+      fields: [],
+      createdAt: now,
+    })
+  );
+
+  // 5. Admin CAN complete the request, publish report, and update Alice's history entry
+  await assertSucceeds(
+    verifiedBekaDb.collection("imei_requests").doc(reqId).update({
+      status: "completed",
+      paymentStatus: "paid",
+      verifiedModel: "iPhone 15 Pro Max",
+      internalNotes: "Admin internal check note",
+      customerNotes: "ტელეფონი სუფთაა და ოფიციალურია",
+      completedAt: new Date(Date.now() - 400),
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+  await assertSucceeds(
+    verifiedBekaDb.collection("imei_reports").doc(reqId).set({
+      requestId: reqId,
+      userId: ALICE_UID,
+      imeiMasked: "******4567",
+      brandName: "Apple",
+      verifiedModel: "iPhone 15 Pro Max",
+      status: "completed",
+      paymentStatus: "paid",
+      quotedPrice: 3,
+      currency: "GEL",
+      fields: [
+        {
+          fieldId: "blacklist_status",
+          titleKa: "შავი სიის სტატუსი (Blacklist)",
+          value: "სუფთა (Clean)",
+          resultStatus: "confirmed_positive",
+        },
+      ],
+      sourcesUsed: ["Official Carrier & GSX Registry"],
+      customerNotes: "ტელეფონი სუფთაა და ოფიციალურია",
+      verifiedAt: new Date(Date.now() - 400),
+      createdAt: now,
+      updatedAt: new Date(Date.now() - 400),
+    })
+  );
+
+  // Alice CAN read her report, Bob CANNOT
+  await assertSucceeds(aliceDb.collection("imei_reports").doc(reqId).get());
+  await assertFails(bobDb.collection("imei_reports").doc(reqId).get());
+
+  // 6. Alice CAN delete her own history entry, delete her own report, and anonymize her request IMEI
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("imei_history").doc(reqId).delete()
+  );
+  await assertSucceeds(aliceDb.collection("imei_reports").doc(reqId).delete());
+  await assertSucceeds(
+    aliceDb.collection("imei_requests").doc(reqId).update({
+      imei: "DELETED",
+      userDeletedHistory: true,
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+});
+
+test("Admin-Only Order Notifications & FCM Tokens: only beqa1994@gmail.com can read/update admin_notifications and register admin_fcm_tokens; customers cannot read or mark as read", async () => {
+  const verifiedBekaDb = testEnv
+    .authenticatedContext("beka_verified_uid", {
+      email: "beqa1994@gmail.com",
+      email_verified: true,
+      admin: true,
+    })
+    .firestore();
+  const aliceDb = testEnv
+    .authenticatedContext(ALICE_UID, {
+      email: "alice@example.com",
+      email_verified: true,
+    })
+    .firestore();
+  const bobDb = testEnv
+    .authenticatedContext(BOB_UID, {
+      email: "bob@example.com",
+      email_verified: true,
+    })
+    .firestore();
+
+  const now = new Date(Date.now() - 1000);
+
+  // 1. Admin device token registration: ONLY verified sole admin can register/read/delete in /admin_fcm_tokens
+  await assertSucceeds(
+    verifiedBekaDb.collection("admin_fcm_tokens").doc("token_device_1").set({
+      tokenId: "token_device_1",
+      token: "fcm_admin_token_device_1_valid_string_12345",
+      uid: "beka_verified_uid",
+      email: "beqa1994@gmail.com",
+      deviceId: "pixel_9_pro_admin_1",
+      deviceModel: "Google Pixel 9 Pro",
+      active: true,
+      updatedAt: now,
+    })
+  );
+  await assertSucceeds(
+    verifiedBekaDb.collection("admin_fcm_tokens").doc("token_device_2").set({
+      tokenId: "token_device_2",
+      token: "fcm_admin_token_device_2_valid_string_67890",
+      uid: "beka_verified_uid",
+      email: "beqa1994@gmail.com",
+      deviceId: "galaxy_s25_ultra_admin_2",
+      deviceModel: "Samsung Galaxy S25 Ultra",
+      active: true,
+      updatedAt: now,
+    })
+  );
+
+  // Customer Alice CANNOT register an admin FCM token or read/delete existing admin tokens
+  await assertFails(
+    aliceDb.collection("admin_fcm_tokens").doc("token_alice_hack").set({
+      tokenId: "token_alice_hack",
+      token: "fcm_alice_token_1234567890",
+      uid: ALICE_UID,
+      email: "beqa1994@gmail.com",
+      deviceId: "alice_phone",
+      active: true,
+      updatedAt: now,
+    })
+  );
+  await assertFails(aliceDb.collection("admin_fcm_tokens").doc("token_device_1").get());
+  await assertFails(aliceDb.collection("admin_fcm_tokens").doc("token_device_1").delete());
+
+  // 2. Alice creates her own valid IMEI request and corresponding sanitized admin notification
+  const reqId = "imei_req_notif_101";
+  await assertSucceeds(
+    aliceDb.collection("imei_requests").doc(reqId).set({
+      id: reqId,
+      userId: ALICE_UID,
+      userName: "Alice Customer",
+      userEmail: "alice@example.com",
+      userPhone: "599112233",
+      imei: "353912101234567",
+      imeiMasked: "******4567",
+      imeiHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      tac: "35391210",
+      brandId: "apple",
+      brandName: "Apple",
+      status: "pending",
+      paymentStatus: "pending",
+      quotedPrice: 3,
+      currency: "GEL",
+      userDeletedHistory: false,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  const notifDocId = `admin_order_${reqId}`;
+  await assertSucceeds(
+    aliceDb.collection("admin_notifications").doc(notifDocId).set({
+      id: notifDocId,
+      orderId: reqId,
+      orderType: "imei_check",
+      title: "ახალი IMEI შეკვეთა",
+      body: "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.",
+      deepLink: `bekaservice://admin/orders/imei/${reqId}`,
+      targetRecipientEmail: "beqa1994@gmail.com",
+      createdByUid: ALICE_UID,
+      read: false,
+      createdAtMillis: Date.now() - 1000,
+      createdAt: now,
+    })
+  );
+
+  // 3. Alice CANNOT create a pre-read notification (read: true) or a notification for an order she does not own
+  await assertFails(
+    bobDb.collection("admin_notifications").doc(`admin_order_${reqId}`).set({
+      id: `admin_order_${reqId}`,
+      orderId: reqId,
+      orderType: "imei_check",
+      title: "ახალი IMEI შეკვეთა",
+      body: "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.",
+      deepLink: `bekaservice://admin/orders/imei/${reqId}`,
+      targetRecipientEmail: "beqa1994@gmail.com",
+      createdByUid: BOB_UID,
+      read: false,
+      createdAt: now,
+    })
+  );
+
+  // 4. Customers (Alice and Bob) CANNOT read, list, update (mark as read), or delete /admin_notifications
+  await assertFails(aliceDb.collection("admin_notifications").doc(notifDocId).get());
+  await assertFails(bobDb.collection("admin_notifications").doc(notifDocId).get());
+  await assertFails(
+    aliceDb.collection("admin_notifications").doc(notifDocId).update({
+      read: true,
+    })
+  );
+  await assertFails(aliceDb.collection("admin_notifications").doc(notifDocId).delete());
+
+  // 5. ONLY verified sole admin (beqa1994@gmail.com) can read and mark /admin_notifications as read
+  await assertSucceeds(verifiedBekaDb.collection("admin_notifications").doc(notifDocId).get());
+  await assertSucceeds(
+    verifiedBekaDb.collection("admin_notifications").doc(notifDocId).update({
+      read: true,
+      readAtMillis: Date.now() - 200,
+      readByEmail: "beqa1994@gmail.com",
+      readAt: new Date(Date.now() - 200),
+    })
+  );
+
+  // Admin can also clean up expired/invalid FCM tokens
+  await assertSucceeds(
+    verifiedBekaDb.collection("admin_fcm_tokens").doc("token_device_2").delete()
+  );
+});

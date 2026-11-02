@@ -6,6 +6,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.MemoryCacheSettings
@@ -289,7 +290,7 @@ class FirestoreRuleTest {
         val fullLocalCatalog = AdminStorage.loadProducts(context)
         assertEquals("Full catalog must contain all 117 products (93 hardware/unlock + 24 digital software)", 117, fullLocalCatalog.size)
 
-        val adminUid = signInTestUser("admin.migration@bekaservice.ge")
+        val adminUid = signInTestUser("beqa1994@gmail.com")
 
         // Provision /admins/{adminUid} with enabled = true via Emulator REST API (bypassing client rules using Bearer owner)
         withContext(Dispatchers.IO) {
@@ -455,7 +456,7 @@ class FirestoreRuleTest {
         assertTrue("Bob must NOT be able to read Alice's FCM token", bobReadAliceToken.isFailure)
 
         // 5. Provision verified admin and verify admin CAN send and delete broadcast notifications
-        val adminUid = signInTestUser("admin.push@bekaservice.ge")
+        val adminUid = signInTestUser("beqa1994@gmail.com")
         withContext(Dispatchers.IO) {
             provisionAdminDocument(adminUid)
         }
@@ -594,7 +595,7 @@ class FirestoreRuleTest {
         assertTrue("Non-admin must NOT be able to write app_config/updates", nonAdminSaveUpdate.isFailure)
 
         // 4. Provision admin and save app_config/updates + send & update notification targeting Tab 7
-        val adminUid = signInTestUser("admin.update@bekaservice.ge")
+        val adminUid = signInTestUser("beqa1994@gmail.com")
         withContext(Dispatchers.IO) {
             provisionAdminDocument(adminUid)
         }
@@ -669,8 +670,205 @@ class FirestoreRuleTest {
         }
         assertTrue("User B must NOT be able to modify User A's favoriteProductIds", overwriteAttempt.isFailure)
     }
+
+    @Test
+    fun testImeiCheckFirestoreSecurityAndUserIsolation() = runBlocking {
+        val userAUid = try {
+            signInTestUser("imei.user.a@bekaservice.ge")
+        } catch (_: Exception) {
+            return@runBlocking
+        }
+        val validImei = ImeiValidator.generateValidImei("35391210123456")
+        val imeiHashA = ImeiValidator.computeUserScopedImeiHash(userAUid, validImei)
+        val reqId = "imei_req_test_${System.currentTimeMillis()}"
+
+        // 1. User A creates a valid IMEI check request and personal history entry
+        val createReqRes = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("imei_requests").document(reqId).set(
+                    mapOf(
+                        "id" to reqId,
+                        "userId" to userAUid,
+                        "userName" to "გიორგი",
+                        "userEmail" to "imei.user.a@bekaservice.ge",
+                        "imei" to validImei,
+                        "imeiMasked" to ImeiValidator.maskImei(validImei),
+                        "imeiHash" to imeiHashA,
+                        "tac" to validImei.take(8),
+                        "brandId" to "apple",
+                        "brandName" to "Apple",
+                        "status" to "pending",
+                        "paymentStatus" to "pending",
+                        "quotedPrice" to 3.0,
+                        "currency" to "GEL",
+                        "userDeletedHistory" to false,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+        }
+        assertTrue("User A must be able to create their own IMEI request", createReqRes.isSuccess)
+
+        val createHistRes = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("users").document(userAUid)
+                    .collection("imei_history").document(reqId).set(
+                        mapOf(
+                            "id" to reqId,
+                            "userId" to userAUid,
+                            "imeiMasked" to ImeiValidator.maskImei(validImei),
+                            "imeiHash" to imeiHashA,
+                            "brandId" to "apple",
+                            "brandName" to "Apple",
+                            "status" to "pending",
+                            "paymentStatus" to "pending",
+                            "quotedPrice" to 3.0,
+                            "currency" to "GEL",
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
+        }
+        assertTrue("User A must be able to create their own IMEI history item", createHistRes.isSuccess)
+
+        // 2. User A cannot self-approve status or tamper with quotedPrice
+        val selfApproveAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("imei_requests").document(reqId)
+                    .update("status", "completed")
+                    .await()
+            }
+        }
+        assertTrue("User A must NOT be able to self-approve IMEI request status", selfApproveAttempt.isFailure)
+
+        // 3. User B signs in and attempts to read or delete User A's IMEI history / request
+        val userBUid = signInTestUser("imei.user.b@bekaservice.ge")
+        assertTrue(userBUid != userAUid)
+
+        val readOtherHistoryAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("users").document(userAUid)
+                    .collection("imei_history").document(reqId)
+                    .get().await()
+            }
+        }
+        assertTrue("User B must NOT be able to read User A's IMEI history", readOtherHistoryAttempt.isFailure)
+
+        val deleteOtherHistoryAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("users").document(userAUid)
+                    .collection("imei_history").document(reqId)
+                    .delete().await()
+            }
+        }
+        assertTrue("User B must NOT be able to delete User A's IMEI history", deleteOtherHistoryAttempt.isFailure)
+
+        val writeSourcesAsUserAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("imei_sources").document("hack_source").set(
+                    mapOf("id" to "hack_source", "name" to "Hack", "active" to true)
+                ).await()
+            }
+        }
+        assertTrue("Non-admin must NOT be able to modify imei_sources", writeSourcesAsUserAttempt.isFailure)
+    }
+
+    @Test
+    fun testAdminOrderNotificationsAndFcmTokensSecurityRules() = runBlocking {
+        // 1. Customer signs in and submits an IMEI request + admin order notification
+        val customerUid = signInTestUser("customer.order.notif@bekaservice.ge")
+        val reqId = "req_admin_notif_${System.currentTimeMillis()}"
+        val validImei = ImeiValidator.generateValidImei("35391210654321")
+        val imeiHash = ImeiValidator.computeUserScopedImeiHash(customerUid, validImei)
+
+        withTimeout(5000L) {
+            firestore.collection("imei_requests").document(reqId).set(
+                mapOf(
+                    "id" to reqId,
+                    "userId" to customerUid,
+                    "userName" to "Customer Order Test",
+                    "userEmail" to "customer.order.notif@bekaservice.ge",
+                    "userPhone" to "599112233",
+                    "imei" to validImei,
+                    "imeiMasked" to ImeiValidator.maskImei(validImei),
+                    "imeiHash" to imeiHash,
+                    "tac" to validImei.take(8),
+                    "brandId" to "apple",
+                    "brandName" to "Apple",
+                    "status" to "pending",
+                    "paymentStatus" to "pending",
+                    "quotedPrice" to 3.0,
+                    "currency" to "GEL",
+                    "userDeletedHistory" to false,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+
+        val createNotifRes = withTimeout(5000L) {
+            repository.createAdminOrderNotification(
+                orderId = reqId,
+                orderType = "imei_check",
+                createdByUid = customerUid
+            )
+        }
+        assertTrue("Customer must be able to create sanitized admin order notification for own order", createNotifRes.isSuccess)
+
+        // 2. Customer MUST NOT be able to read admin_notifications, mark them as read, or register admin FCM tokens
+        val customerFetchNotifs = withTimeout(5000L) {
+            repository.fetchAdminOrderNotifications()
+        }
+        assertTrue("Customer must NOT be able to read /admin_notifications", customerFetchNotifs.isFailure)
+
+        val customerMarkReadAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("admin_notifications").document("admin_order_$reqId")
+                    .update("read", true)
+                    .await()
+            }
+        }
+        assertTrue("Customer must NOT be able to mark admin notification as read", customerMarkReadAttempt.isFailure)
+
+        val customerRegisterTokenAttempt = runCatching {
+            withTimeout(5000L) {
+                firestore.collection("admin_fcm_tokens").document("customer_token_hack").set(
+                    mapOf(
+                        "tokenId" to "customer_token_hack",
+                        "token" to "fcm_token_customer_1234567890",
+                        "uid" to customerUid,
+                        "email" to "beqa1994@gmail.com",
+                        "deviceId" to "customer_device",
+                        "active" to true,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+        }
+        assertTrue("Customer must NOT be able to register admin FCM token", customerRegisterTokenAttempt.isFailure)
+
+        // 3. Provisioned sole admin (beqa1994@gmail.com) CAN read admin_notifications, mark as read, and manage admin_fcm_tokens
+        val adminUid = signInTestUser("beqa1994@gmail.com")
+        provisionAdminDocument(adminUid)
+
+        val adminFetchNotifs = withTimeout(5000L) {
+            repository.fetchAdminOrderNotifications()
+        }
+        assertTrue("Provisioned admin must be able to read /admin_notifications", adminFetchNotifs.isSuccess)
+        val fetchedList = adminFetchNotifs.getOrThrow()
+        assertTrue("Admin notifications must contain the newly created order notification", fetchedList.any { it.orderId == reqId && !it.read })
+
+        val adminMarkReadRes = withTimeout(5000L) {
+            repository.markAdminOrderNotificationRead("admin_order_$reqId", reqId, "imei_check")
+        }
+        assertTrue("Provisioned admin must be able to mark notification as read", adminMarkReadRes.isSuccess)
+
+        val afterReadNotifs = withTimeout(5000L) {
+            repository.fetchAdminOrderNotifications()
+        }.getOrThrow()
+        assertTrue("Notification must be marked as read after admin action", afterReadNotifs.first { it.orderId == reqId }.read)
+    }
 }
-
-
-
 

@@ -597,6 +597,144 @@ fun ProfileAndAuthScreen(
         }
 
         // =====================================================================
+        // 2.5 ჩემი შემოწმებები / IMEI ისტორია (Phase 7)
+        // =====================================================================
+        item {
+            val imeiStateVer = ImeiCheckManager.stateVersion.intValue
+            val resolvedUid = remember(currentUser, imeiStateVer) {
+                ImeiCheckManager.resolveCurrentUserId(context, currentUser)
+            }
+            val imeiHistCount = remember(resolvedUid, imeiStateVer) {
+                if (resolvedUid.isNotBlank()) ImeiCheckManager.loadUserHistoryLocal(context, resolvedUid).size else 0
+            }
+            var profileImeiSubScreen by remember { mutableStateOf("NONE") }
+            var profileImeiReportId by remember { mutableStateOf("") }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF16191E),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("profile_open_imei_history_card")
+                    .clickable { profileImeiSubScreen = "IMEI_HISTORY" }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF38BDF8).copy(alpha = 0.14f),
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFF38BDF8).copy(alpha = 0.35f)),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.QrCodeScanner,
+                                contentDescription = "ჩემი შემოწმებები / IMEI ისტორია",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "ჩემი შემოწმებები / IMEI ისტორია",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "შენახული რეპორტები: $imeiHistCount • PDF ამონაწერი • ისტორიის მართვა",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 9.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF38BDF8).copy(alpha = 0.14f),
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFF38BDF8).copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = "ნახვა ($imeiHistCount)",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = null,
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (profileImeiSubScreen != "NONE") {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { profileImeiSubScreen = "NONE" },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF0A0C10))) {
+                        when (profileImeiSubScreen) {
+                            "IMEI_HISTORY" -> ImeiCustomerHistoryScreen(
+                                currentUser = currentUser,
+                                onBack = { profileImeiSubScreen = "NONE" },
+                                onOpenReport = { repId ->
+                                    profileImeiReportId = repId
+                                    profileImeiSubScreen = "IMEI_REPORT"
+                                },
+                                onStartNewCheck = { profileImeiSubScreen = "IMEI_CHECK" }
+                            )
+                            "IMEI_REPORT" -> ImeiCustomerReportScreen(
+                                requestId = profileImeiReportId,
+                                currentUser = currentUser,
+                                onBack = { profileImeiSubScreen = "IMEI_HISTORY" }
+                            )
+                            "IMEI_CHECK" -> ImeiCheckFullScreen(
+                                currentUser = currentUser,
+                                onBack = { profileImeiSubScreen = "IMEI_HISTORY" },
+                                onOpenHistory = { profileImeiSubScreen = "IMEI_HISTORY" },
+                                onOpenReport = { repId ->
+                                    profileImeiReportId = repId
+                                    profileImeiSubScreen = "IMEI_REPORT"
+                                },
+                                onRequireAuth = {
+                                    profileImeiSubScreen = "NONE"
+                                    showGoogleAuthDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // =====================================================================
         // 3. ადმინისტრატორის მართვის პანელის კომპაქტური ბარათი (PIN-ით შესასვლელი)
         // =====================================================================
         item {

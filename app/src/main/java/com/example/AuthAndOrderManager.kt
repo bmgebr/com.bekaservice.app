@@ -97,7 +97,8 @@ object AuthAndOrderManager {
     }
 
     const val SOLE_ADMIN_EMAIL = "beqa1994@gmail.com"
-    private const val ADMIN_FIREBASE_BRIDGE_PASS = "BekaService#Admin1994!"
+    private const val KEY_VERIFIED_ADMIN_UID = "verified_sole_admin_uid"
+    private const val KEY_ADMIN_CUSTOM_CLAIM_VERIFIED = "verified_sole_admin_custom_claim"
 
     fun isSoleAdminEmail(email: String?): Boolean {
         return email?.trim()?.equals(SOLE_ADMIN_EMAIL, ignoreCase = true) == true
@@ -114,63 +115,98 @@ object AuthAndOrderManager {
         return getCurrentUser(context)?.email?.trim().orEmpty()
     }
 
-    suspend fun ensureAdminFirebaseSession(context: Context): Boolean {
+    /**
+     * Checks whether the currently authenticated user is the sole authorized administrator
+     * ("beqa1994@gmail.com") verified via Firebase Auth / Google Sign-In credentials.
+     * Rejects unauthenticated users, regular customers, and unverified client-side email logins.
+     */
+    fun isCurrentUserVerifiedSoleAdmin(context: Context): Boolean {
+        val fbUser = safeFirebaseUser()
+        if (fbUser != null) {
+            val fbEmail = fbUser.email?.trim().orEmpty().ifBlank {
+                fbUser.providerData.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }.orEmpty()
+            }
+            if (!isSoleAdminEmail(fbEmail)) {
+                return false
+            }
+            return true
+        }
+
+        val prefs = getPrefs(context)
+        if (!prefs.getBoolean(KEY_IS_LOGGED_IN, false)) {
+            return false
+        }
+        val currentUser = getCurrentUser(context) ?: return false
+        if (!isSoleAdminEmail(currentUser.email)) {
+            return false
+        }
+        if (!currentUser.provider.equals("Google", ignoreCase = true)) {
+            return false
+        }
+        val verifiedUid = prefs.getString(KEY_VERIFIED_ADMIN_UID, null)
+        return !verifiedUid.isNullOrBlank() && verifiedUid == currentUser.id
+    }
+
+    /**
+     * Verifies the authenticated Firebase user against the trusted backend:
+     * 1. Inspects the Firebase Auth ID Token claims (`admin == true` or verified token email == "beqa1994@gmail.com").
+     * 2. Verifies / synchronizes `/admins/{uid}` (`enabled == true`) in Firestore.
+     */
+    suspend fun verifyAdminBackendAuthorization(context: Context): Boolean {
         val existingFb = safeFirebaseUser()
         if (existingFb != null) {
             val fbEmail = existingFb.email?.trim().orEmpty().ifBlank {
                 existingFb.providerData.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }.orEmpty()
             }
-            if (isSoleAdminEmail(fbEmail)) {
-                return true
+            if (!isSoleAdminEmail(fbEmail)) {
+                getPrefs(context).edit()
+                    .remove(KEY_VERIFIED_ADMIN_UID)
+                    .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+                    .commit()
+                AdminStorage.clearAdminSession(context)
+                return false
             }
-            // If another user is signed in to FirebaseAuth, check if they have an active /admins/{uid} doc
-            return runCatching {
+
+            val tokenVerified = runCatching {
+                val tokenResult = existingFb.getIdToken(false).await()
+                val claimAdmin = tokenResult.claims["admin"] == true
+                val tokenEmail = (tokenResult.claims["email"] as? String)?.trim().orEmpty().ifBlank { fbEmail }
+                claimAdmin || isSoleAdminEmail(tokenEmail)
+            }.getOrDefault(isSoleAdminEmail(fbEmail))
+
+            val serverDocVerified = runCatching {
                 FirestoreRepository(context).checkIsCurrentUserAdmin()
-            }.getOrDefault(false)
+            }.getOrDefault(tokenVerified)
+
+            val isAuthorized = tokenVerified && (serverDocVerified || isSoleAdminEmail(fbEmail))
+            if (isAuthorized) {
+                getPrefs(context).edit()
+                    .putString(KEY_VERIFIED_ADMIN_UID, existingFb.uid)
+                    .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, true)
+                    .commit()
+                AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            } else {
+                AdminStorage.clearAdminSession(context)
+            }
+            return isAuthorized
         }
 
-        val localEmail = getCurrentUser(context)?.email?.trim().orEmpty()
-        if (localEmail.isNotBlank() && !isSoleAdminEmail(localEmail)) {
-            return false
-        }
-        if (!isSoleAdminEmail(localEmail) && !AdminStorage.isAdminSessionActive(context)) {
+        if (!isCurrentUserVerifiedSoleAdmin(context)) {
             return false
         }
 
-        // 1. Try silent Google Sign-In first
         val autoSigned = kotlinx.coroutines.withTimeoutOrNull(2500L) {
             runCatching { attemptAutoSignIn(context) }.getOrNull()
         }
         if (autoSigned != null && isSoleAdminEmail(autoSigned.email) && safeFirebaseUser() != null) {
-            return true
+            return verifyAdminBackendAuthorization(context)
         }
 
-        // 2. If still not signed in to FirebaseAuth, bridge the sole admin session via FirebaseAuth Email/Password
-        return kotlinx.coroutines.withContext(Dispatchers.IO) {
-            kotlinx.coroutines.withTimeoutOrNull(3500L) {
-                try {
-                    val auth = FirebaseAuth.getInstance()
-                    val savedPass = getPrefs(context).getString(KEY_USER_PASSWORD, null)
-                        ?.takeIf { it.length >= 6 }
-                    val candidatePasswords = listOfNotNull(savedPass, ADMIN_FIREBASE_BRIDGE_PASS, "bmgebr1994", "123456").distinct()
-                    for (pwd in candidatePasswords) {
-                        val signedIn = runCatching {
-                            auth.signInWithEmailAndPassword(SOLE_ADMIN_EMAIL, pwd).await().user
-                        }.getOrNull()
-                        if (signedIn != null) {
-                            return@withTimeoutOrNull true
-                        }
-                    }
-                    val created = runCatching {
-                        auth.createUserWithEmailAndPassword(SOLE_ADMIN_EMAIL, ADMIN_FIREBASE_BRIDGE_PASS).await().user
-                    }.getOrNull()
-                    created != null
-                } catch (e: Exception) {
-                    Log.w("Auth", "Admin Firebase bridge auth skipped: ${e.message}")
-                    false
-                }
-            } ?: false
-        }
+        return isCurrentUserVerifiedSoleAdmin(context)
+    }
+
+    suspend fun ensureAdminFirebaseSession(context: Context): Boolean {
+        return verifyAdminBackendAuthorization(context)
     }
 
     // =========================================================================
@@ -355,8 +391,20 @@ object AuthAndOrderManager {
 
         // Update local session cache ONLY — never overwrite an existing Firestore user document on login!
         saveLocalSessionOnly(context, user)
-        if (email.equals("beqa1994@gmail.com", ignoreCase = true)) {
-            AdminStorage.setAdminSessionActive(context, true, email)
+        if (isSoleAdminEmail(email)) {
+            prefs.edit()
+                .putString(KEY_VERIFIED_ADMIN_UID, uid)
+                .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, true)
+                .commit()
+            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            BekaNotificationManager.onAuthorizedAdminAuthenticated(context)
+        } else {
+            prefs.edit()
+                .remove(KEY_VERIFIED_ADMIN_UID)
+                .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+                .commit()
+            AdminStorage.clearAdminSession(context)
+            BekaNotificationManager.onNonAdminAuthenticated(context)
         }
 
         // Merge any guest favorites & cloud favorites into the authenticated account's favorites
@@ -473,12 +521,22 @@ object AuthAndOrderManager {
         )
         saveLocalSessionOnly(context, user)
         if (isSoleAdminEmail(email)) {
+            prefs.edit()
+                .putString(KEY_VERIFIED_ADMIN_UID, firebaseUid)
+                .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, true)
+                .commit()
             AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
+            BekaNotificationManager.onAuthorizedAdminAuthenticated(context)
             CoroutineScope(Dispatchers.IO).launch {
                 runCatching { ensureAdminFirebaseSession(context) }
             }
         } else {
+            prefs.edit()
+                .remove(KEY_VERIFIED_ADMIN_UID)
+                .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+                .commit()
             AdminStorage.clearAdminSession(context)
+            BekaNotificationManager.onNonAdminAuthenticated(context)
         }
         return user
     }
@@ -512,9 +570,12 @@ object AuthAndOrderManager {
             deviceModel = resolvedModel
         )
         saveLocalSessionOnly(context, user)
-        if (!isSoleAdminEmail(email)) {
-            AdminStorage.clearAdminSession(context)
-        }
+        prefs.edit()
+            .remove(KEY_VERIFIED_ADMIN_UID)
+            .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+            .commit()
+        AdminStorage.clearAdminSession(context)
+        BekaNotificationManager.onNonAdminAuthenticated(context)
         return user
     }
 
@@ -524,6 +585,17 @@ object AuthAndOrderManager {
         }
         if (pass.length < 6) {
             return Pair(false, "პაროლი უნდა შედგებოდეს მინიმუმ 6 სიმბოლოსგან")
+        }
+        if (isSoleAdminEmail(email)) {
+            val fbUser = safeFirebaseUser()
+            val fbVerifiedAdmin = fbUser != null && isSoleAdminEmail(fbUser.email)
+            if (!fbVerifiedAdmin) {
+                AdminStorage.clearAdminSession(context)
+                return Pair(
+                    false,
+                    "ადმინისტრატორის ანგარიშზე შესვლა დასაშვებია მხოლოდ დადასტურებული Google ავტორიზაციით."
+                )
+            }
         }
 
         val prefs = getPrefs(context)
@@ -554,14 +626,12 @@ object AuthAndOrderManager {
         if (prefs.getString(KEY_USER_PASSWORD, null) == null) {
             prefs.edit().putString(KEY_USER_PASSWORD, pass).apply()
         }
-        if (isSoleAdminEmail(email)) {
-            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
-            CoroutineScope(Dispatchers.IO).launch {
-                runCatching { ensureAdminFirebaseSession(context) }
-            }
-        } else {
-            AdminStorage.clearAdminSession(context)
-        }
+        prefs.edit()
+            .remove(KEY_VERIFIED_ADMIN_UID)
+            .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+            .commit()
+        AdminStorage.clearAdminSession(context)
+        BekaNotificationManager.onNonAdminAuthenticated(context)
         return Pair(true, "წარმატებული ავტორიზაცია!")
     }
 
@@ -579,6 +649,13 @@ object AuthAndOrderManager {
         if (name.isBlank() && firstName.isBlank()) return Pair(false, "გთხოვთ მიუთითოთ თქვენი სახელი")
         if (email.isBlank() || !email.contains("@")) return Pair(false, "გთხოვთ შეიყვანოთ სწორი ელ. ფოსტა")
         if (pass.length < 6) return Pair(false, "პაროლი უნდა იყოს მინიმუმ 6 სიმბოლო")
+        if (isSoleAdminEmail(email)) {
+            AdminStorage.clearAdminSession(context)
+            return Pair(
+                false,
+                "ადმინისტრატორის ანგარიშის რეგისტრაცია დაუშვებელია. გთხოვთ გაიაროთ Google ავტორიზაცია."
+            )
+        }
 
         val rFirst = if (firstName.isNotBlank()) firstName else name.split(" ").firstOrNull() ?: name
         val rLast = if (lastName.isNotBlank()) lastName else name.split(" ").drop(1).joinToString(" ")
@@ -598,15 +675,13 @@ object AuthAndOrderManager {
             deviceModel = deviceModel
         )
         saveUserSession(context, user)
-        getPrefs(context).edit().putString(KEY_USER_PASSWORD, pass).apply()
-        if (isSoleAdminEmail(email)) {
-            AdminStorage.setAdminSessionActive(context, true, SOLE_ADMIN_EMAIL)
-            CoroutineScope(Dispatchers.IO).launch {
-                runCatching { ensureAdminFirebaseSession(context) }
-            }
-        } else {
-            AdminStorage.clearAdminSession(context)
-        }
+        getPrefs(context).edit()
+            .putString(KEY_USER_PASSWORD, pass)
+            .remove(KEY_VERIFIED_ADMIN_UID)
+            .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
+            .commit()
+        AdminStorage.clearAdminSession(context)
+        BekaNotificationManager.onNonAdminAuthenticated(context)
         return Pair(true, "რეგისტრაცია წარმატებით დასრულდა!")
     }
 
@@ -651,6 +726,7 @@ object AuthAndOrderManager {
     }
 
     fun logout(context: Context) {
+        BekaNotificationManager.cleanupOnUserLogout(context)
         AdminStorage.clearAdminSession(context)
         val hadFirebaseUser = try {
             val auth = FirebaseAuth.getInstance()
@@ -674,6 +750,8 @@ object AuthAndOrderManager {
         }
         getPrefs(context).edit()
             .putBoolean(KEY_IS_LOGGED_IN, false)
+            .remove(KEY_VERIFIED_ADMIN_UID)
+            .putBoolean(KEY_ADMIN_CUSTOM_CLAIM_VERIFIED, false)
             .remove(KEY_USER_ID)
             .remove(KEY_USER_NAME)
             .remove(KEY_USER_FIRST_NAME)
@@ -909,6 +987,11 @@ object AuthAndOrderManager {
             val currentOrders = getOrders(context).toMutableList()
             currentOrders.add(0, newOrder)
             saveOrders(context, currentOrders)
+            BekaNotificationManager.recordOrderCreatedForAdminOnly(
+                context = context,
+                orderId = newOrder.id,
+                orderType = "service_order"
+            )
             Result.success(newOrder)
         }
     }
@@ -918,6 +1001,11 @@ object AuthAndOrderManager {
         val currentOrders = getOrders(context).toMutableList()
         currentOrders.add(0, newOrder)
         saveOrders(context, currentOrders)
+        BekaNotificationManager.recordOrderCreatedForAdminOnly(
+            context = context,
+            orderId = newOrder.id,
+            orderType = "service_order"
+        )
 
         // Sync snapshot order to Firestore orders/{orderId}
         CoroutineScope(Dispatchers.IO).launch {

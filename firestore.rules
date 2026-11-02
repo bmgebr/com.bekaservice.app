@@ -94,6 +94,8 @@ service cloud.firestore {
              (!('currency' in data) || data.currency == null || (data.currency is string && data.currency.size() <= 10)) &&
              (!('paymentMethod' in data) || data.paymentMethod == null || (data.paymentMethod is string && data.paymentMethod.size() <= 120)) &&
              (!('trackingCode' in data) || data.trackingCode == null || (data.trackingCode is string && data.trackingCode.size() <= 60)) &&
+             (!('adminRead' in data) || data.adminRead is bool) &&
+             (!('adminReadAt' in data) || data.adminReadAt == null || (data.adminReadAt is timestamp && data.adminReadAt <= request.time)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
     }
@@ -122,6 +124,7 @@ service cloud.firestore {
     function isValidFcmToken(data) {
       return data.userId is string && data.userId == request.auth.uid &&
              data.token is string && data.token.size() >= 10 && data.token.size() <= 4096 &&
+             (!('deviceId' in data) || data.deviceId == null || (data.deviceId is string && data.deviceId.size() <= 120)) &&
              (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 150)) &&
              (!('deviceModel' in data) || data.deviceModel == null || (data.deviceModel is string && data.deviceModel.size() <= 120)) &&
              (!('platform' in data) || data.platform == null || (data.platform is string && data.platform.size() <= 30)) &&
@@ -133,7 +136,7 @@ service cloud.firestore {
       return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
              data.body is string && data.body.size() >= 1 && data.body.size() <= 1500 &&
-             (!('type' in data) || data.type == null || data.type in ['announcement', 'product_offer', 'service_update']) &&
+             (!('type' in data) || data.type == null || data.type in ['announcement', 'product_offer', 'service_update', 'imei_update']) &&
              (!('targetProductId' in data) || data.targetProductId == null || (data.targetProductId is number && data.targetProductId >= 0)) &&
              (!('targetTab' in data) || data.targetTab == null || (data.targetTab is number && data.targetTab >= 0 && data.targetTab <= 7)) &&
              (!('senderEmail' in data) || data.senderEmail == null || (data.senderEmail is string && data.senderEmail.size() <= 150)) &&
@@ -141,6 +144,76 @@ service cloud.firestore {
              (!('status' in data) || data.status == null || (data.status is string && data.status.size() <= 40)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidAdminFcmToken(data, tokenId) {
+      return data.keys().hasAll(['email', 'token', 'deviceId', 'active', 'updatedAt']) &&
+             data.keys().hasOnly(['id', 'tokenId', 'userId', 'uid', 'email', 'token', 'deviceId', 'deviceModel', 'platform', 'active', 'createdAt', 'updatedAt']) &&
+             (
+               ('id' in data && data.id is string && data.id == tokenId) ||
+               ('tokenId' in data && data.tokenId is string && data.tokenId == tokenId)
+             ) &&
+             (
+               ('userId' in data && data.userId is string && data.userId == request.auth.uid) ||
+               ('uid' in data && data.uid is string && data.uid == request.auth.uid)
+             ) &&
+             data.email is string && data.email.lower() == 'beqa1994@gmail.com' &&
+             data.token is string && data.token.size() >= 10 && data.token.size() <= 4096 &&
+             data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 120 &&
+             (!('deviceModel' in data) || data.deviceModel == null || (data.deviceModel is string && data.deviceModel.size() <= 120)) &&
+             (!('platform' in data) || data.platform == 'android') &&
+             data.active is bool &&
+             (!('createdAt' in data) || data.createdAt == null || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidAdminOrderNotification(data, notificationId) {
+      return data.keys().hasAll(['title', 'body', 'orderId', 'orderType', 'deepLink', 'read', 'createdAt']) &&
+             data.keys().hasOnly([
+               'id', 'notificationId', 'title', 'body', 'orderId', 'orderType', 'deepLink',
+               'actorUid', 'createdByUid', 'targetAdminEmail', 'targetRecipientEmail',
+               'read', 'readAt', 'readAtMillis', 'readByUid', 'readByEmail',
+               'createdAtMillis', 'createdAt', 'updatedAt'
+             ]) &&
+             (
+               ('id' in data && data.id is string && data.id == notificationId) ||
+               ('notificationId' in data && data.notificationId is string && data.notificationId == notificationId)
+             ) &&
+             data.title is string && data.title in ['ახალი IMEI შეკვეთა', 'ახალი შეკვეთა'] &&
+             data.body is string && data.body in [
+               'შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.',
+               'შემოვიდა ახალი სერვისის შეკვეთა.'
+             ] &&
+             !data.title.matches('.*[0-9]{15}.*') &&
+             !data.body.matches('.*[0-9]{15}.*') &&
+             data.orderId is string && data.orderId.size() >= 1 && data.orderId.size() <= 100 &&
+             data.orderType in ['imei_check', 'service_order'] &&
+             data.deepLink is string && data.deepLink.size() >= 10 && data.deepLink.size() <= 300 &&
+             data.deepLink.matches('^bekaservice://admin/orders/(imei|service)/[A-Za-z0-9_\\-]+$') &&
+             (!('actorUid' in data) || (data.actorUid is string && data.actorUid.size() >= 1 && data.actorUid.size() <= 128)) &&
+             (!('createdByUid' in data) || (data.createdByUid is string && data.createdByUid.size() >= 1 && data.createdByUid.size() <= 128)) &&
+             (!('targetAdminEmail' in data) || data.targetAdminEmail == 'beqa1994@gmail.com') &&
+             (!('targetRecipientEmail' in data) || data.targetRecipientEmail == 'beqa1994@gmail.com') &&
+             data.read is bool &&
+             (!('readAt' in data) || data.readAt == null || (data.readAt is timestamp && data.readAt <= request.time)) &&
+             (!('readAtMillis' in data) || data.readAtMillis == null || data.readAtMillis is number) &&
+             (!('readByUid' in data) || data.readByUid == null || (data.readByUid is string && data.readByUid.size() <= 128)) &&
+             (!('readByEmail' in data) || data.readByEmail == null || data.readByEmail == 'beqa1994@gmail.com') &&
+             (!('createdAtMillis' in data) || data.createdAtMillis == null || data.createdAtMillis is number) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isCorrespondingOrderOwnedByCaller(orderType, orderId) {
+      return (
+        orderType == 'imei_check' &&
+        exists(/databases/$(database)/documents/imei_requests/$(orderId)) &&
+        get(/databases/$(database)/documents/imei_requests/$(orderId)).data.userId == request.auth.uid
+      ) || (
+        orderType == 'service_order' &&
+        exists(/databases/$(database)/documents/orders/$(orderId)) &&
+        get(/databases/$(database)/documents/orders/$(orderId)).data.userId == request.auth.uid
+      );
     }
 
     function isValidAppUpdateConfig(data) {
@@ -153,6 +226,142 @@ service cloud.firestore {
              (!data.isPublished || (data.latestVersion.size() >= 1 && data.changeLog.size() >= 1 && data.downloadUrl.matches('^https://[^\\s]+$'))) &&
              (!('updatedBy' in data) || data.updatedBy == null || (data.updatedBy is string && data.updatedBy.size() <= 150)) &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidImeiBrand(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 100 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             (!('localizedName' in data) || data.localizedName == null || (data.localizedName is string && data.localizedName.size() <= 100)) &&
+             (!('logoUrl' in data) || data.logoUrl == null || (data.logoUrl is string && data.logoUrl.size() <= 2048)) &&
+             (!('iconEmoji' in data) || data.iconEmoji == null || (data.iconEmoji is string && data.iconEmoji.size() <= 30)) &&
+             data.displayOrder is number && data.displayOrder >= 0 &&
+             data.enabled is bool &&
+             (!('isPopular' in data) || data.isPopular is bool) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiResultField(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 100 &&
+             data.titleKa is string && data.titleKa.size() >= 1 && data.titleKa.size() <= 200 &&
+             (!('descriptionKa' in data) || data.descriptionKa == null || (data.descriptionKa is string && data.descriptionKa.size() <= 1000)) &&
+             (!('supportedBrands' in data) || data.supportedBrands == null || (data.supportedBrands is list && data.supportedBrands.size() <= 50)) &&
+             data.displayOrder is number && data.displayOrder >= 0 &&
+             data.enabled is bool &&
+             (!('isImportant' in data) || data.isImportant is bool) &&
+             (!('inputType' in data) || data.inputType == null || (data.inputType is string && data.inputType.size() <= 40)) &&
+             (!('availableStatuses' in data) || data.availableStatuses == null || (data.availableStatuses is list && data.availableStatuses.size() <= 10)) &&
+             (!('internalInstructions' in data) || data.internalInstructions == null || (data.internalInstructions is string && data.internalInstructions.size() <= 2000)) &&
+             (!('sourceIds' in data) || data.sourceIds == null || (data.sourceIds is list && data.sourceIds.size() <= 30)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiSource(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 100 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 1500)) &&
+             (!('websiteUrl' in data) || data.websiteUrl == null || (data.websiteUrl is string && data.websiteUrl.size() <= 2048)) &&
+             (!('supportedBrands' in data) || data.supportedBrands == null || (data.supportedBrands is list && data.supportedBrands.size() <= 50)) &&
+             (!('supportedFields' in data) || data.supportedFields == null || (data.supportedFields is list && data.supportedFields.size() <= 100)) &&
+             (!('internalInstructions' in data) || data.internalInstructions == null || (data.internalInstructions is string && data.internalInstructions.size() <= 2000)) &&
+             data.active is bool &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiRequest(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             (!('userName' in data) || data.userName == null || (data.userName is string && data.userName.size() <= 120)) &&
+             (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('userPhone' in data) || data.userPhone == null || (data.userPhone is string && data.userPhone.size() <= 40)) &&
+             data.imei is string && (data.imei.matches('^[0-9]{15}$') || data.imei == 'DELETED') &&
+             data.imeiMasked is string && data.imeiMasked.size() >= 4 && data.imeiMasked.size() <= 30 &&
+             data.imeiHash is string && data.imeiHash.size() >= 8 && data.imeiHash.size() <= 128 &&
+             (!('tac' in data) || data.tac == null || (data.tac is string && data.tac.size() <= 16)) &&
+             data.brandId is string && data.brandId.size() >= 1 && data.brandId.size() <= 100 &&
+             data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 100 &&
+             (!('verifiedModel' in data) || data.verifiedModel == null || (data.verifiedModel is string && data.verifiedModel.size() <= 200)) &&
+             data.status in ['pending', 'in_progress', 'waiting_for_information', 'completed', 'rejected'] &&
+             data.paymentStatus in ['unpaid', 'pending', 'paid', 'refunded'] &&
+             data.quotedPrice is number && data.quotedPrice >= 0 && data.quotedPrice <= 10000 &&
+             data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10 &&
+             (!('estimatedMinMinutes' in data) || data.estimatedMinMinutes == null || (data.estimatedMinMinutes is number && data.estimatedMinMinutes >= 0)) &&
+             (!('estimatedMaxMinutes' in data) || data.estimatedMaxMinutes == null || (data.estimatedMaxMinutes is number && data.estimatedMaxMinutes >= 0)) &&
+             (!('internalNotes' in data) || data.internalNotes == null || (data.internalNotes is string && data.internalNotes.size() <= 10000)) &&
+             (!('customerNotes' in data) || data.customerNotes == null || (data.customerNotes is string && data.customerNotes.size() <= 20000)) &&
+             (!('draftResultText' in data) || data.draftResultText == null || (data.draftResultText is string && data.draftResultText.size() <= 20000)) &&
+             (!('resultText' in data) || data.resultText == null || (data.resultText is string && data.resultText.size() <= 20000)) &&
+             (!('isPublished' in data) || data.isPublished is bool) &&
+             (!('userDeletedHistory' in data) || data.userDeletedHistory is bool) &&
+             (!('adminRead' in data) || data.adminRead is bool) &&
+             (!('adminReadAt' in data) || data.adminReadAt == null || (data.adminReadAt is timestamp && data.adminReadAt <= request.time)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('completedAt' in data) || data.completedAt == null || (data.completedAt is timestamp && data.completedAt <= request.time)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiReport(data) {
+      return data.requestId is string && data.requestId.size() >= 1 && data.requestId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.imeiMasked is string && data.imeiMasked.size() >= 4 && data.imeiMasked.size() <= 30 &&
+             (!('imeiHash' in data) || data.imeiHash == null || (data.imeiHash is string && data.imeiHash.size() <= 128)) &&
+             (!('brandId' in data) || data.brandId == null || (data.brandId is string && data.brandId.size() <= 100)) &&
+             data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 100 &&
+             (!('verifiedModel' in data) || data.verifiedModel == null || (data.verifiedModel is string && data.verifiedModel.size() <= 200)) &&
+             data.status in ['pending', 'in_progress', 'waiting_for_information', 'completed', 'rejected'] &&
+             (!('paymentStatus' in data) || data.paymentStatus == null || data.paymentStatus in ['unpaid', 'pending', 'paid', 'refunded']) &&
+             (!('quotedPrice' in data) || data.quotedPrice == null || (data.quotedPrice is number && data.quotedPrice >= 0)) &&
+             (!('currency' in data) || data.currency == null || (data.currency is string && data.currency.size() <= 10)) &&
+             data.fields is list && data.fields.size() <= 50 &&
+             (!('sourcesUsed' in data) || data.sourcesUsed == null || (data.sourcesUsed is list && data.sourcesUsed.size() <= 30)) &&
+             (!('customerNotes' in data) || data.customerNotes == null || (data.customerNotes is string && data.customerNotes.size() <= 20000)) &&
+             (!('resultText' in data) || data.resultText == null || (data.resultText is string && data.resultText.size() <= 20000)) &&
+             (!('draftResultText' in data) || data.draftResultText == null || (data.draftResultText is string && data.draftResultText.size() <= 20000)) &&
+             (!('isPublished' in data) || data.isPublished is bool) &&
+             (!('verifiedAt' in data) || data.verifiedAt == null || (data.verifiedAt is timestamp && data.verifiedAt <= request.time)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiHistoryEntry(data, ownerUid) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.userId is string && data.userId == ownerUid &&
+             data.imeiMasked is string && data.imeiMasked.size() >= 4 && data.imeiMasked.size() <= 30 &&
+             data.imeiHash is string && data.imeiHash.size() >= 8 && data.imeiHash.size() <= 128 &&
+             data.brandId is string && data.brandId.size() >= 1 && data.brandId.size() <= 100 &&
+             data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 100 &&
+             (!('verifiedModel' in data) || data.verifiedModel == null || (data.verifiedModel is string && data.verifiedModel.size() <= 200)) &&
+             data.status in ['pending', 'in_progress', 'waiting_for_information', 'completed', 'rejected'] &&
+             (!('paymentStatus' in data) || data.paymentStatus == null || data.paymentStatus in ['unpaid', 'pending', 'paid', 'refunded']) &&
+             data.quotedPrice is number && data.quotedPrice >= 0 && data.quotedPrice <= 10000 &&
+             data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10 &&
+             (!('estimatedTimeText' in data) || data.estimatedTimeText == null || (data.estimatedTimeText is string && data.estimatedTimeText.size() <= 120)) &&
+             (!('customerNotes' in data) || data.customerNotes == null || (data.customerNotes is string && data.customerNotes.size() <= 20000)) &&
+             (!('resultText' in data) || data.resultText == null || (data.resultText is string && data.resultText.size() <= 20000)) &&
+             (!('isPublished' in data) || data.isPublished is bool) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('completedAt' in data) || data.completedAt == null || (data.completedAt is timestamp && data.completedAt <= request.time)) &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiAccounting(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.brandName is string && data.brandName.size() >= 1 && data.brandName.size() <= 100 &&
+             data.quotedPrice is number && data.quotedPrice >= 0 && data.quotedPrice <= 10000 &&
+             data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10 &&
+             data.paymentStatus in ['unpaid', 'pending', 'paid', 'refunded'] &&
+             (!('requestStatus' in data) || data.requestStatus == null || data.requestStatus in ['pending', 'in_progress', 'waiting_for_information', 'completed', 'rejected']) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidImeiAuditLog(data) {
+      return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
+             data.actorUid is string && data.actorUid == request.auth.uid &&
+             data.action is string && data.action.size() >= 1 && data.action.size() <= 80 &&
+             (!('targetRequestId' in data) || data.targetRequestId == null || (data.targetRequestId is string && data.targetRequestId.size() <= 128)) &&
+             (!('details' in data) || data.details == null || (data.details is string && data.details.size() <= 1000)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
     // Server-managed Admins lookup collection (never writable from client)
@@ -180,6 +389,34 @@ service cloud.firestore {
                        (!('createdAt' in existing()) ? incoming().createdAt <= request.time : incoming().createdAt == existing().createdAt) &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'displayName', 'email', 'phoneNumber', 'photoUrl', 'address', 'deviceModel', 'favoriteProductIds', 'createdAt', 'updatedAt']);
       allow delete: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+
+      // Customer IMEI Check History subcollection:
+      // - User can read and delete only their own history entries
+      // - User can create their own pending history entry when submitting an IMEI check
+      // - User CANNOT update status, price, or verification results (only Admin can update)
+      match /imei_history/{historyId} {
+        allow get, list: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+        allow create: if isValidId(userId) &&
+                         isValidId(historyId) &&
+                         incoming().id == historyId &&
+                         isValidImeiHistoryEntry(incoming(), userId) &&
+                         (
+                           isAdmin() ||
+                           (
+                             isOwner(userId) &&
+                             incoming().status == 'pending' &&
+                             (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['unpaid', 'pending'])
+                           )
+                         );
+        allow update: if isAdmin() &&
+                         isValidId(userId) &&
+                         isValidId(historyId) &&
+                         isValidImeiHistoryEntry(incoming(), userId) &&
+                         incoming().id == existing().id &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt;
+        allow delete: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(historyId);
+      }
     }
 
     // Service & Product Orders collection:
@@ -194,8 +431,9 @@ service cloud.firestore {
                        incoming().userId == request.auth.uid &&
                        incoming().status == 'pending' &&
                        (!('priceVerified' in incoming()) || incoming().priceVerified == false) &&
+                       (!('adminRead' in incoming()) || incoming().adminRead == false) &&
                        incoming().keys().hasAll(['id', 'userId', 'userPhone', 'deviceModel', 'serviceType', 'status', 'createdAt']) &&
-                       incoming().keys().hasOnly(['id', 'orderNumber', 'userId', 'userName', 'userPhone', 'userEmail', 'deliveryAddress', 'deviceModel', 'serviceType', 'issueDescription', 'items', 'status', 'price', 'totalAmount', 'priceVerified', 'currency', 'paymentMethod', 'trackingCode', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['id', 'orderNumber', 'userId', 'userName', 'userPhone', 'userEmail', 'deliveryAddress', 'deviceModel', 'serviceType', 'issueDescription', 'items', 'status', 'price', 'totalAmount', 'priceVerified', 'currency', 'paymentMethod', 'trackingCode', 'adminRead', 'adminReadAt', 'createdAt', 'updatedAt']) &&
                        isValidServiceOrder(incoming());
       allow update: if isSignedIn() &&
                        isValidId(orderId) &&
@@ -204,10 +442,10 @@ service cloud.firestore {
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
                        (
-                         // Admin can update order status, trackingCode, or priceVerified, but CANNOT change order owner (userId)
+                         // Admin can update order status, trackingCode, priceVerified, or adminRead, but CANNOT change order owner (userId)
                          (
                            isAdmin() &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'trackingCode', 'price', 'totalAmount', 'priceVerified', 'updatedAt'])
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'trackingCode', 'price', 'totalAmount', 'priceVerified', 'adminRead', 'adminReadAt', 'updatedAt'])
                          ) ||
                          // Regular user can only cancel their own active order and CANNOT modify price, totalAmount, items, or owner
                          (
@@ -249,7 +487,7 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // App Configuration: Home Screen Slider Banners, Bank Requisites & App Update Config (Public read, verified Admin-only write)
+    // App Configuration: Home Screen Slider Banners, Bank Requisites, App Update Config & IMEI Check Config (Public read, verified Admin-only write)
     match /app_config/{configId} {
       allow get, list: if true;
       allow create, update: if isAdmin() &&
@@ -265,17 +503,27 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(configId);
     }
 
-    // FCM Registration Tokens (Strictly isolated per user; readable/listable by Admin only; never cross-user writable)
+    // FCM Registration Tokens (Strictly isolated per user and device; readable/listable by Admin only; never cross-user writable)
     match /fcm_tokens/{userId} {
-      allow get: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow get: if isValidId(userId) && (
+                   isOwner(userId) ||
+                   isAdmin() ||
+                   (isSignedIn() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
+                 );
       allow list: if isAdmin();
-      allow create, update: if isOwner(userId) &&
+      allow create, update: if isSignedIn() &&
                                isValidId(userId) &&
+                               (userId == request.auth.uid || userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$')) &&
+                               (resource == null || resource.data.userId == request.auth.uid) &&
                                incoming().userId == request.auth.uid &&
                                incoming().keys().hasAll(['userId', 'token', 'updatedAt']) &&
-                               incoming().keys().hasOnly(['userId', 'token', 'email', 'deviceModel', 'platform', 'notificationsEnabled', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['userId', 'token', 'deviceId', 'email', 'deviceModel', 'platform', 'notificationsEnabled', 'updatedAt']) &&
                                isValidFcmToken(incoming());
-      allow delete: if (isOwner(userId) || isAdmin()) && isValidId(userId);
+      allow delete: if isValidId(userId) && (
+                      isOwner(userId) ||
+                      isAdmin() ||
+                      (isSignedIn() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
+                    );
     }
 
     // Official Push Notifications Broadcasts (Public read for device delivery; strictly verified Admin-only write)
@@ -289,6 +537,162 @@ service cloud.firestore {
                                isValidNotification(incoming());
       allow delete: if isAdmin() && isValidId(notificationId);
     }
+
+    // Administrator-Only Multi-Device FCM Tokens (Exclusively for beqa1994@gmail.com)
+    match /admin_fcm_tokens/{tokenId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin() &&
+                               isValidId(tokenId) &&
+                               isValidAdminFcmToken(incoming(), tokenId);
+      allow delete: if isAdmin() &&
+                       isValidId(tokenId) &&
+                       (
+                         ('userId' in resource.data && resource.data.userId == request.auth.uid) ||
+                         ('uid' in resource.data && resource.data.uid == request.auth.uid)
+                       );
+    }
+
+    // Administrator-Only Order Notifications (Exclusively readable & mark-as-read by beqa1994@gmail.com)
+    match /admin_notifications/{notificationId} {
+      allow get, list: if isAdmin();
+      allow create: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       notificationId == ('admin_order_' + incoming().orderId) &&
+                       (
+                         ('actorUid' in incoming() && incoming().actorUid == request.auth.uid) ||
+                         ('createdByUid' in incoming() && incoming().createdByUid == request.auth.uid)
+                       ) &&
+                       incoming().read == false &&
+                       isValidAdminOrderNotification(incoming(), notificationId) &&
+                       (
+                         isAdmin() ||
+                         isCorrespondingOrderOwnedByCaller(incoming().orderType, incoming().orderId)
+                       );
+      allow update: if isAdmin() &&
+                       isValidId(notificationId) &&
+                       incoming().orderId == existing().orderId &&
+                       incoming().orderType == existing().orderType &&
+                       incoming().deepLink == existing().deepLink &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidAdminOrderNotification(incoming(), notificationId);
+      allow delete: if isAdmin() && isValidId(notificationId);
+    }
+
+    // =========================================================================
+    // IMEI CHECK PLATFORM COLLECTIONS
+    // =========================================================================
+
+    // 1. IMEI Manufacturer / Brand Configurations (Public read, Admin-only write)
+    match /imei_brands/{brandId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidId(brandId) && isValidImeiBrand(incoming());
+      allow delete: if isAdmin() && isValidId(brandId);
+    }
+
+    // 2. IMEI Dynamic Result Field Definitions (Public read, Admin-only write)
+    match /imei_result_fields/{fieldId} {
+      allow get, list: if true;
+      allow create, update: if isAdmin() && isValidId(fieldId) && isValidImeiResultField(incoming());
+      allow delete: if isAdmin() && isValidId(fieldId);
+    }
+
+    // 3. IMEI Verification Sources (Admin-only read & write — internal instructions never exposed to public)
+    match /imei_sources/{sourceId} {
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(sourceId) && isValidImeiSource(incoming());
+      allow delete: if isAdmin() && isValidId(sourceId);
+    }
+
+    // 4. IMEI Verification Requests
+    // - Users can create their own pending request with a 15-digit IMEI, and read only their own requests.
+    // - Users CANNOT change status, quotedPrice, paymentStatus, or verification fields.
+    // - Users CAN anonymize/flag their own request upon history deletion (imei = 'DELETED', userDeletedHistory = true).
+    // - Admins have full processing & status management access.
+    match /imei_requests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() &&
+                       isValidId(requestId) &&
+                       incoming().id == requestId &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().imei.matches('^[0-9]{15}$') &&
+                       incoming().status == 'pending' &&
+                       incoming().paymentStatus in ['unpaid', 'pending'] &&
+                       (!('internalNotes' in incoming()) || incoming().internalNotes == '') &&
+                       (!('adminRead' in incoming()) || incoming().adminRead == false) &&
+                       isValidImeiRequest(incoming());
+      allow update: if isSignedIn() &&
+                       isValidId(requestId) &&
+                       isValidImeiRequest(incoming()) &&
+                       incoming().id == existing().id &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           existing().userId == request.auth.uid &&
+                           incoming().status == existing().status &&
+                           incoming().paymentStatus == existing().paymentStatus &&
+                           incoming().quotedPrice == existing().quotedPrice &&
+                           incoming().imei == 'DELETED' &&
+                           incoming().userDeletedHistory == true &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['imei', 'userDeletedHistory', 'updatedAt'])
+                         )
+                       );
+      allow delete: if isAdmin() && isValidId(requestId);
+    }
+
+    // 5. Customer-Facing IMEI Verification Reports
+    // - Readable by the request owner or Admin.
+    // - Created/updated exclusively by Admin.
+    // - Deletable by the request owner (when deleting their IMEI history) or Admin.
+    match /imei_reports/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if isAdmin() &&
+                               isValidId(requestId) &&
+                               incoming().requestId == requestId &&
+                               isValidImeiReport(incoming());
+      allow delete: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // 6. Minimal Anonymized Transaction / Accounting Records (no full IMEI stored)
+    match /imei_accounting/{recordId} {
+      allow get, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() &&
+                       isValidId(recordId) &&
+                       incoming().id == recordId &&
+                       isValidImeiAccounting(incoming()) &&
+                       (
+                         isAdmin() ||
+                         (
+                           incoming().userId == request.auth.uid &&
+                           incoming().paymentStatus in ['unpaid', 'pending']
+                         )
+                       );
+      allow update: if isAdmin() &&
+                       isValidId(recordId) &&
+                       isValidImeiAccounting(incoming()) &&
+                       incoming().id == existing().id &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(recordId);
+    }
+
+    // 7. Aggregated IMEI Analytics Summary Documents (Admin-only)
+    match /imei_analytics/{periodId} {
+      allow get, list: if isAdmin();
+      allow create, update, delete: if isAdmin() && isValidId(periodId);
+    }
+
+    // 8. IMEI Audit Logs (Append-only for authenticated actor on own UID, readable by Admin)
+    match /imei_audit_logs/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isSignedIn() &&
+                       isValidId(eventId) &&
+                       incoming().id == eventId &&
+                       isValidImeiAuditLog(incoming());
+      allow update, delete: if isAdmin() && isValidId(eventId);
+    }
   }
 }
-

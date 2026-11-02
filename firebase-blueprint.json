@@ -101,10 +101,10 @@
     },
     "AppConfig": {
       "title": "AppConfig",
-      "description": "Global application configuration such as Home Screen slider banners, bank requisites, and app updates",
+      "description": "Global application configuration such as Home Screen slider banners, bank requisites, app updates, and IMEI Check config",
       "type": "object",
       "properties": {
-        "configType": { "type": "string", "description": "Configuration document type (home_banners, bank_requisites, or updates)" },
+        "configType": { "type": "string", "description": "Configuration document type (home_banners, bank_requisites, updates, or imei_check)" },
         "banners": { "type": "array", "description": "List of Home Screen slider items" },
         "bogIban": { "type": "string", "description": "Bank of Georgia IBAN" },
         "bogRecipient": { "type": "string", "description": "BOG recipient name" },
@@ -127,7 +127,7 @@
         "id": { "type": "string", "description": "Unique notification document ID" },
         "title": { "type": "string", "description": "Notification title" },
         "body": { "type": "string", "description": "Notification message body" },
-        "type": { "type": "string", "description": "Notification category (announcement, product_offer, discount, order_update)" },
+        "type": { "type": "string", "description": "Notification category (announcement, product_offer, service_update)" },
         "targetProductId": { "type": "number", "description": "Optional target product ID for deep-linking (-1 if none)" },
         "targetTab": { "type": "number", "description": "Target navigation tab index (0..7, or -1)" },
         "senderUid": { "type": "string", "description": "Admin Firebase Auth UID" },
@@ -149,12 +149,262 @@
         "role": { "type": "string", "description": "Admin role label" }
       },
       "required": ["uid"]
+    },
+    "ImeiBrand": {
+      "title": "ImeiBrand",
+      "description": "Manufacturer configuration for IMEI Check service",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique brand identifier" },
+        "name": { "type": "string", "description": "Manufacturer name (e.g. Apple, Samsung)" },
+        "localizedName": { "type": "string", "description": "Localized Georgian/display label" },
+        "logoUrl": { "type": "string", "description": "Optional brand logo URL" },
+        "iconEmoji": { "type": "string", "description": "Fallback brand badge/icon text" },
+        "displayOrder": { "type": "number", "description": "Display sort order" },
+        "enabled": { "type": "boolean", "description": "Whether brand is visible for user selection" },
+        "isPopular": { "type": "boolean", "description": "Whether brand is marked popular" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "name", "displayOrder", "enabled"]
+    },
+    "ImeiResultField": {
+      "title": "ImeiResultField",
+      "description": "Dynamic verification result field definition configured by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique field ID" },
+        "titleKa": { "type": "string", "description": "Georgian field title" },
+        "descriptionKa": { "type": "string", "description": "Georgian field description" },
+        "supportedBrands": { "type": "array", "description": "List of brand names or ALL" },
+        "displayOrder": { "type": "number", "description": "Display sort order in report" },
+        "enabled": { "type": "boolean", "description": "Whether field is active" },
+        "isImportant": { "type": "boolean", "description": "Whether field is highlighted in report" },
+        "inputType": { "type": "string", "description": "Input type (text, status_only, date, badge)" },
+        "availableStatuses": { "type": "array", "description": "Allowed status values for this field" },
+        "internalInstructions": { "type": "string", "description": "Admin-only verification instructions" },
+        "sourceIds": { "type": "array", "description": "Associated verification source IDs" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "titleKa", "displayOrder", "enabled"]
+    },
+    "ImeiVerificationSource": {
+      "title": "ImeiVerificationSource",
+      "description": "External manual verification source definition managed by Admin",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique source ID" },
+        "name": { "type": "string", "description": "Source name" },
+        "description": { "type": "string", "description": "Source description" },
+        "websiteUrl": { "type": "string", "description": "Official verification website URL" },
+        "supportedBrands": { "type": "array", "description": "Supported manufacturers" },
+        "supportedFields": { "type": "array", "description": "Supported result field IDs" },
+        "internalInstructions": { "type": "string", "description": "Internal admin instructions" },
+        "active": { "type": "boolean", "description": "Whether source is active" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "name", "active"]
+    },
+    "ImeiRequest": {
+      "title": "ImeiRequest",
+      "description": "Customer IMEI verification request stored in imei_requests/{requestId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique request ID" },
+        "userId": { "type": "string", "description": "Authenticated requester UID" },
+        "userName": { "type": "string", "description": "Customer display name" },
+        "userEmail": { "type": "string", "description": "Customer email" },
+        "userPhone": { "type": "string", "description": "Customer phone number" },
+        "imei": { "type": "string", "description": "15-digit validated IMEI (or DELETED after customer history deletion)" },
+        "imeiMasked": { "type": "string", "description": "Masked IMEI (e.g. ***********1234)" },
+        "imeiHash": { "type": "string", "description": "Normalized hash for user-scoped duplicate detection" },
+        "tac": { "type": "string", "description": "8-digit Type Allocation Code prefix" },
+        "brandId": { "type": "string", "description": "Selected brand ID snapshot" },
+        "brandName": { "type": "string", "description": "Selected brand name snapshot" },
+        "verifiedModel": { "type": "string", "description": "Admin-verified device model" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "waiting_for_information", "completed", "rejected"],
+          "description": "Verification workflow status"
+        },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["unpaid", "pending", "paid", "refunded"],
+          "description": "Payment verification status"
+        },
+        "quotedPrice": { "type": "number", "description": "Original service price snapshot in GEL" },
+        "currency": { "type": "string", "description": "Currency snapshot (GEL)" },
+        "estimatedMinMinutes": { "type": "number", "description": "Estimated min processing time snapshot" },
+        "estimatedMaxMinutes": { "type": "number", "description": "Estimated max processing time snapshot" },
+        "internalNotes": { "type": "string", "description": "Admin-only internal notes" },
+        "customerNotes": { "type": "string", "description": "Customer-visible notes" },
+        "userDeletedHistory": { "type": "boolean", "description": "True if customer deleted this item from their history" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Request submission server timestamp" },
+        "completedAt": { "type": "string", "format": "date-time", "description": "Completion server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "userId", "imei", "imeiMasked", "imeiHash", "brandId", "brandName", "status", "paymentStatus", "quotedPrice", "currency", "createdAt"]
+    },
+    "ImeiReport": {
+      "title": "ImeiReport",
+      "description": "Customer-facing IMEI verification report stored in imei_reports/{requestId}",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string", "description": "Matching IMEI request ID" },
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "imeiMasked": { "type": "string", "description": "Masked IMEI" },
+        "imeiHash": { "type": "string", "description": "Normalized user-scoped IMEI hash" },
+        "brandId": { "type": "string", "description": "Manufacturer ID snapshot" },
+        "brandName": { "type": "string", "description": "Manufacturer name snapshot" },
+        "verifiedModel": { "type": "string", "description": "Verified exact device model" },
+        "status": { "type": "string", "description": "Report status" },
+        "paymentStatus": { "type": "string", "description": "Payment status" },
+        "quotedPrice": { "type": "number", "description": "Original service price snapshot" },
+        "currency": { "type": "string", "description": "Currency (GEL)" },
+        "fields": { "type": "array", "description": "List of verified dynamic result field entries" },
+        "sourcesUsed": { "type": "array", "description": "List of verification source names used" },
+        "customerNotes": { "type": "string", "description": "Customer-visible summary notes" },
+        "verifiedAt": { "type": "string", "format": "date-time", "description": "Verification completion timestamp" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Report creation server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Report update server timestamp" }
+      },
+      "required": ["requestId", "userId", "imeiMasked", "brandName", "status", "fields", "createdAt"]
+    },
+    "ImeiHistoryEntry": {
+      "title": "ImeiHistoryEntry",
+      "description": "User-scoped IMEI check history item in users/{userId}/imei_history/{historyId}",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "History entry ID matching requestId" },
+        "userId": { "type": "string", "description": "Owner user UID" },
+        "imeiMasked": { "type": "string", "description": "Masked IMEI (******1234)" },
+        "imeiHash": { "type": "string", "description": "Normalized hash for smart repeat check" },
+        "brandId": { "type": "string", "description": "Brand ID snapshot" },
+        "brandName": { "type": "string", "description": "Brand name snapshot" },
+        "verifiedModel": { "type": "string", "description": "Verified model if available" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "in_progress", "waiting_for_information", "completed", "rejected"],
+          "description": "Current request status"
+        },
+        "paymentStatus": { "type": "string", "description": "Payment status" },
+        "quotedPrice": { "type": "number", "description": "Original service price snapshot" },
+        "currency": { "type": "string", "description": "Currency (GEL)" },
+        "estimatedTimeText": { "type": "string", "description": "Estimated processing time snapshot" },
+        "customerNotes": { "type": "string", "description": "Customer-visible notes" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Request date timestamp" },
+        "completedAt": { "type": "string", "format": "date-time", "description": "Completion date timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["id", "userId", "imeiMasked", "imeiHash", "brandId", "brandName", "status", "quotedPrice", "currency", "createdAt"]
+    },
+    "ImeiAccountingRecord": {
+      "title": "ImeiAccountingRecord",
+      "description": "Minimal anonymized transaction record separated from private IMEI/report data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Accounting record ID matching requestId" },
+        "userId": { "type": "string", "description": "Customer UID" },
+        "brandName": { "type": "string", "description": "Brand name snapshot" },
+        "quotedPrice": { "type": "number", "description": "Service price in GEL" },
+        "currency": { "type": "string", "description": "Currency (GEL)" },
+        "paymentStatus": { "type": "string", "description": "Payment status (unpaid, pending, paid, refunded)" },
+        "requestStatus": { "type": "string", "description": "Operational status" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "userId", "brandName", "quotedPrice", "currency", "paymentStatus", "createdAt"]
+    },
+    "ImeiAnalyticsSummary": {
+      "title": "ImeiAnalyticsSummary",
+      "description": "Aggregated IMEI Check operational and revenue analytics document",
+      "type": "object",
+      "properties": {
+        "periodId": { "type": "string", "description": "Summary period ID (e.g. global_summary, daily_2026_11_01)" },
+        "totalRequests": { "type": "number", "description": "Total requests count" },
+        "completedRequests": { "type": "number", "description": "Completed requests count" },
+        "pendingRequests": { "type": "number", "description": "Pending requests count" },
+        "inProgressRequests": { "type": "number", "description": "In-progress requests count" },
+        "waitingInfoRequests": { "type": "number", "description": "Waiting for info requests count" },
+        "rejectedRequests": { "type": "number", "description": "Rejected requests count" },
+        "paidRequestsCount": { "type": "number", "description": "Confirmed paid requests count" },
+        "confirmedRevenueGel": { "type": "number", "description": "Confirmed paid revenue in GEL" },
+        "refundedTotalGel": { "type": "number", "description": "Total refunded amount in GEL" },
+        "outstandingPaymentGel": { "type": "number", "description": "Unpaid/pending payment total in GEL" },
+        "brandCounts": { "type": "object", "description": "Map of brand name to request count" },
+        "brandCompletedCounts": { "type": "object", "description": "Map of brand name to completed count" },
+        "sourceUsageCounts": { "type": "object", "description": "Map of source name to usage count" },
+        "fieldAvailabilityCounts": { "type": "object", "description": "Map of field ID to available count" },
+        "fieldUnavailableCounts": { "type": "object", "description": "Map of field ID to unavailable count" },
+        "totalProcessingMinutes": { "type": "number", "description": "Cumulative processing minutes for completed checks" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last aggregation timestamp" }
+      },
+      "required": ["periodId", "totalRequests", "updatedAt"]
+    },
+    "ImeiAuditLog": {
+      "title": "ImeiAuditLog",
+      "description": "Audit log event for IMEI request, report, or history deletion actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Audit event ID" },
+        "actorUid": { "type": "string", "description": "UID of actor performing the action" },
+        "action": { "type": "string", "description": "Action type (history_deleted, history_cleared, report_completed, config_updated)" },
+        "targetRequestId": { "type": "string", "description": "Related request ID if applicable" },
+        "details": { "type": "string", "description": "Non-sensitive audit description (never contains full IMEI)" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Event server timestamp" }
+      },
+      "required": ["id", "actorUid", "action", "createdAt"]
+    },
+    "AdminOrderNotification": {
+      "title": "AdminOrderNotification",
+      "description": "Administrator-only incoming order notification stored in admin_notifications/{notificationId}. Never contains full IMEI or customer PII.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Deterministic notification ID (admin_order_{orderId})" },
+        "title": { "type": "string", "description": "Privacy-safe Georgian notification title" },
+        "body": { "type": "string", "description": "Privacy-safe Georgian notification body" },
+        "orderId": { "type": "string", "description": "Target IMEI request ID or service order ID" },
+        "orderType": {
+          "type": "string",
+          "enum": ["imei_check", "service_order"],
+          "description": "Incoming order category"
+        },
+        "deepLink": { "type": "string", "description": "Secure admin deep link URI to open the specific order" },
+        "actorUid": { "type": "string", "description": "Authenticated UID that created the order" },
+        "read": { "type": "boolean", "description": "Whether the authorized administrator has read this notification" },
+        "readAt": { "type": "string", "format": "date-time", "description": "Server timestamp when marked as read by the administrator" },
+        "readByUid": { "type": "string", "description": "Admin UID who marked the notification as read" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
+      },
+      "required": ["id", "title", "body", "orderId", "orderType", "deepLink", "actorUid", "read", "createdAt", "updatedAt"]
+    },
+    "AdminFcmToken": {
+      "title": "AdminFcmToken",
+      "description": "Multi-device FCM registration token exclusively for the sole authorized administrator (beqa1994@gmail.com)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Deterministic device token document ID" },
+        "userId": { "type": "string", "description": "Authorized admin Firebase Auth UID" },
+        "email": { "type": "string", "description": "Authorized admin email (beqa1994@gmail.com)" },
+        "token": { "type": "string", "description": "FCM registration token" },
+        "deviceId": { "type": "string", "description": "Unique device installation identifier" },
+        "deviceModel": { "type": "string", "description": "Device model name" },
+        "platform": { "type": "string", "description": "Platform identifier (android)" },
+        "active": { "type": "boolean", "description": "Whether this device token is currently active" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Registration timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last token refresh timestamp" }
+      },
+      "required": ["id", "userId", "email", "token", "deviceId", "platform", "active", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
       "description": "User profiles partitioned by UID"
+    },
+    "/users/{userId}/imei_history/{historyId}": {
+      "schema": "ImeiHistoryEntry",
+      "description": "Authenticated user's private IMEI check history"
     },
     "/orders/{orderId}": {
       "schema": "ServiceOrder",
@@ -170,15 +420,55 @@
     },
     "/app_config/{configId}": {
       "schema": "AppConfig",
-      "description": "Publicly readable app configuration (home slider banners, bank requisites, app updates; admin write only)"
+      "description": "Publicly readable app configuration (home slider banners, bank requisites, app updates, imei_check; admin write only)"
     },
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "Publicly readable broadcast push notifications history (admin write/delete only)"
     },
+    "/admin_notifications/{notificationId}": {
+      "schema": "AdminOrderNotification",
+      "description": "Admin-only incoming order notifications and read/unread history (exclusively readable/updatable by beqa1994@gmail.com)"
+    },
+    "/admin_fcm_tokens/{tokenId}": {
+      "schema": "AdminFcmToken",
+      "description": "Admin-only multi-device FCM registration tokens (exclusively accessible by beqa1994@gmail.com)"
+    },
     "/admins/{adminId}": {
       "schema": "AdminRole",
       "description": "Server-managed administrator UID registry"
+    },
+    "/imei_brands/{brandId}": {
+      "schema": "ImeiBrand",
+      "description": "Publicly readable IMEI manufacturer configurations (admin write only)"
+    },
+    "/imei_result_fields/{fieldId}": {
+      "schema": "ImeiResultField",
+      "description": "Publicly readable dynamic IMEI report field definitions (admin write only)"
+    },
+    "/imei_sources/{sourceId}": {
+      "schema": "ImeiVerificationSource",
+      "description": "Admin-only external IMEI verification source definitions"
+    },
+    "/imei_requests/{requestId}": {
+      "schema": "ImeiRequest",
+      "description": "Customer IMEI verification requests isolated by userId and managed by Admin"
+    },
+    "/imei_reports/{requestId}": {
+      "schema": "ImeiReport",
+      "description": "Customer-facing IMEI verification reports isolated by userId"
+    },
+    "/imei_accounting/{recordId}": {
+      "schema": "ImeiAccountingRecord",
+      "description": "Minimal anonymized transaction records separated from private IMEI data"
+    },
+    "/imei_analytics/{periodId}": {
+      "schema": "ImeiAnalyticsSummary",
+      "description": "Aggregated IMEI Check analytics summary documents (admin only)"
+    },
+    "/imei_audit_logs/{eventId}": {
+      "schema": "ImeiAuditLog",
+      "description": "Audit logs for IMEI administrative and deletion actions"
     }
   }
 }

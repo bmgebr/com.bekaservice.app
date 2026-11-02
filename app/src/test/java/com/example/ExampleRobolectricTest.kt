@@ -27,6 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -742,7 +743,7 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("product_edit_lazy_column")
       .performScrollToNode(hasTestTag("photo_mode_url_button"))
     composeTestRule.onNodeWithTag("photo_mode_gallery_button").assertIsDisplayed()
-    composeTestRule.onNodeWithText("გალერეა", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithText("გალერეა", substring = true, useUnmergedTree = true).assertIsDisplayed()
     composeTestRule.onNodeWithTag("photo_mode_url_button").performClick()
     composeTestRule.waitForIdle()
 
@@ -842,6 +843,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
   fun `multimodal AI diagnostics workspace supports free-form Georgian conversation, image attachments, Standard and Technician modes, contextual actions, and session history`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     DiagnosticsSessionRepository.clearAllSessions(context)
@@ -870,9 +872,11 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("diagnostics_workspace_root").assertIsDisplayed()
     composeTestRule.onNodeWithTag("diag_header_card").assertIsDisplayed()
     composeTestRule.onNodeWithText("AI დიაგნოსტიკა").assertIsDisplayed()
-    composeTestRule.onNodeWithText("რა პრობლემა აქვს ტელეფონს?").assertIsDisplayed()
     composeTestRule.onNodeWithTag("diag_mode_standard").assertIsDisplayed()
     composeTestRule.onNodeWithTag("diag_mode_technician").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("diag_empty_state")
+      .performScrollToNode(hasTestTag("diag_intro_card"))
+    composeTestRule.onNodeWithText("რა პრობლემა აქვს ტელეფონს?").assertIsDisplayed()
     composeTestRule.onNodeWithTag("diag_attach_gallery_button").assertIsDisplayed()
     composeTestRule.onNodeWithTag("diag_attach_camera_button").assertIsDisplayed()
 
@@ -2239,5 +2243,691 @@ class ExampleRobolectricTest {
     assertEquals(1, updatedProductsCallback!!.size)
     assertEquals("Adobe", updatedProductsCallback!!.first().brand)
   }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `imei check platform end to end workflow entry card luhn validation brands smart repeat check admin report history deletion and analytics`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    // Reset preferences for clean test state
+    context.getSharedPreferences("bekaservice_imei_platform_prefs_v1", Context.MODE_PRIVATE).edit().clear().commit()
+
+    kotlinx.coroutines.runBlocking {
+      // 1. Verify Default Configuration (Price: 3 GEL, Time: 5-30 წთ) and exact 12 Initial Brands order
+      val initialConfig = ImeiCheckManager.loadConfig(context)
+      assertEquals(3.0, initialConfig.priceGel, 0.001)
+      assertEquals("3 ₾", initialConfig.formattedPrice)
+      assertEquals(5, initialConfig.estimatedMinMinutes)
+      assertEquals(30, initialConfig.estimatedMaxMinutes)
+
+      val brands = ImeiCheckManager.loadBrands(context)
+      assertEquals(12, brands.size)
+      val expectedBrandNames = listOf(
+        "Apple", "Samsung", "Xiaomi", "Google Pixel", "Huawei", "Honor",
+        "OnePlus", "Motorola", "Oppo", "Vivo", "Realme", "Other"
+      )
+      assertEquals(expectedBrandNames, brands.map { it.name })
+
+      // 2. Verify 15-Digit Luhn Validation & Masking
+      val validImei = ImeiValidator.generateValidImei("35391210123456")
+      assertEquals(15, validImei.length)
+      val valRes = ImeiValidator.validateImei(validImei)
+      assertTrue("Generated 15-digit IMEI must pass Luhn validation", valRes.isValid)
+      assertEquals("35391210", valRes.tac)
+      assertEquals("******" + validImei.takeLast(4), ImeiValidator.maskImei(validImei))
+
+      val invalidLuhnImei = validImei.dropLast(1) + ((validImei.last().digitToInt() + 1) % 10).toString()
+      val invalidRes = ImeiValidator.validateImei(invalidLuhnImei)
+      assertFalse("Corrupted check digit must fail Luhn validation", invalidRes.isValid)
+
+      val shortRes = ImeiValidator.validateImei("35391210")
+      assertFalse("8-digit input must fail 15-digit validation", shortRes.isValid)
+
+      // 3. Submit IMEI Check Request as User A
+      val userA = UserProfile(
+        id = "user_a_uid_101",
+        name = "გიორგი მომხმარებელი",
+        email = "giorgi@example.com",
+        phone = "599112233",
+        provider = "Google"
+      )
+      val appleBrand = brands.first { it.id == "apple" }
+      val submitRes = ImeiCheckManager.submitImeiCheckRequest(
+        context = context,
+        rawImei = validImei,
+        selectedBrand = appleBrand,
+        currentUser = userA
+      )
+      assertTrue("Valid 15-digit IMEI submission must succeed", submitRes.isSuccess)
+      val entryA = submitRes.getOrThrow()
+      assertEquals("user_a_uid_101", entryA.userId)
+      assertEquals("Apple", entryA.brandName)
+      assertEquals(3.0, entryA.quotedPrice, 0.001)
+      assertEquals("pending", entryA.status)
+
+      // 4. Verify Smart Repeat Check works for User A, and NEVER leaks to User B
+      val repeatForA = ImeiCheckManager.findPreviousCheckForCurrentUser(
+        context = context,
+        currentUserId = "user_a_uid_101",
+        rawImei = validImei
+      )
+      assertNotNull("Smart Repeat Check must find User A's previous check", repeatForA)
+      assertEquals(entryA.id, repeatForA?.id)
+
+      val repeatForB = ImeiCheckManager.findPreviousCheckForCurrentUser(
+        context = context,
+        currentUserId = "user_b_uid_202",
+        rawImei = validImei
+      )
+      assertTrue("Smart Repeat Check must NEVER expose User A's check to User B", repeatForB == null)
+
+      // 5. Admin processes the request, fills dynamic result fields, attaches sources, and completes report
+      val adminReqs = ImeiCheckManager.loadAllRequestsLocal(context)
+      assertEquals(1, adminReqs.size)
+      val reqToVerify = adminReqs.first()
+      assertEquals(validImei, reqToVerify.imei)
+
+      val sampleFields = listOf(
+        ImeiResultFieldValue(
+          fieldId = "icloud_fmi_status",
+          titleKa = "iCloud / Find My iPhone (FMI) სტატუსი",
+          descriptionKa = "აქტივაციის ბლოკირება",
+          value = "OFF (სუფთა)",
+          resultStatus = ImeiResultStatus.CONFIRMED_POSITIVE.id,
+          isImportant = true,
+          sourceName = "Apple GSX / Official Carrier Lookup"
+        ),
+        ImeiResultFieldValue(
+          fieldId = "sim_lock_status",
+          titleKa = "SIM Lock / ქსელის ბლოკირება",
+          descriptionKa = "ოპერატორის ბლოკი",
+          value = "Unlocked (ყველა ქსელზე თავისუფალი)",
+          resultStatus = ImeiResultStatus.CONFIRMED_POSITIVE.id,
+          isImportant = true,
+          sourceName = "Apple GSX / Official Carrier Lookup"
+        ),
+        ImeiResultFieldValue(
+          fieldId = "mdm_enterprise_status",
+          titleKa = "MDM / კორპორატიული მართვის პროფილი",
+          descriptionKa = "კორპორატიული პროფილი",
+          value = "ინფორმაცია მიუწვდომელია",
+          resultStatus = ImeiResultStatus.UNAVAILABLE.id,
+          isImportant = true,
+          sourceName = ""
+        )
+      )
+
+      val adminSaveRes = ImeiCheckManager.saveAdminVerificationProgress(
+        context = context,
+        request = reqToVerify,
+        newStatus = ImeiRequestStatus.COMPLETED,
+        newPaymentStatus = ImeiPaymentStatus.PAID,
+        verifiedModel = "iPhone 15 Pro Max 256GB Natural Titanium",
+        fieldValues = sampleFields,
+        sourcesUsed = listOf("Apple GSX / Official Carrier Lookup", "GSMA TAC & International Blacklist Registry"),
+        internalNotes = "შიდა შენიშვნა მხოლოდ ადმინისთვის",
+        customerNotes = "მოწყობილობა სრულად სუფთაა (iCloud OFF, Unlocked).",
+        notifyCustomer = true
+      )
+      assertTrue("Admin verification completion must succeed", adminSaveRes.isSuccess)
+
+      // 6. Verify Customer A can fetch the completed report, while Customer B is denied
+      val fetchReportA = ImeiCheckManager.fetchReportForRequest(
+        context = context,
+        requestId = reqToVerify.id,
+        currentUserId = "user_a_uid_101"
+      )
+      assertTrue("User A must be able to read their own completed report", fetchReportA.isSuccess)
+      val reportA = fetchReportA.getOrThrow()
+      assertEquals("iPhone 15 Pro Max 256GB Natural Titanium", reportA.verifiedModel)
+      assertEquals(3, reportA.fields.size)
+      assertEquals("მოწყობილობა სრულად სუფთაა (iCloud OFF, Unlocked).", reportA.customerNotes)
+
+      val fetchReportB = ImeiCheckManager.fetchReportForRequest(
+        context = context,
+        requestId = reqToVerify.id,
+        currentUserId = "user_b_uid_202"
+      )
+      assertTrue("User B must be denied access to User A's report", fetchReportB.isFailure)
+
+      // 7. Verify PDF Report Generation works
+      val pdfRes = ImeiCheckManager.generateReportPdfFile(context, reportA)
+      assertTrue("PDF report generation must succeed", pdfRes.isSuccess)
+      assertTrue("Generated PDF file must exist and be non-empty", pdfRes.getOrThrow().length() > 0L)
+
+      // 8. Verify Price Snapshot Preservation when Admin changes service price from 3 GEL to 5 GEL
+      val updatedConfig = initialConfig.copy(priceGel = 5.0)
+      ImeiCheckManager.saveConfigLocal(context, updatedConfig)
+      assertEquals(5.0, ImeiCheckManager.loadConfig(context).priceGel, 0.001)
+      val historyAfterPriceChange = ImeiCheckManager.loadUserHistoryLocal(context, "user_a_uid_101")
+      assertEquals("Existing request must preserve its original 3.0 GEL price snapshot", 3.0, historyAfterPriceChange.first().quotedPrice, 0.001)
+
+      // 9. Verify Analytics Calculation (Operational, Revenue, Brand, and Quality stats)
+      val analytics = ImeiCheckManager.computeAnalytics(
+        requests = ImeiCheckManager.loadAllRequestsLocal(context),
+        reports = ImeiCheckManager.loadAllReportsLocal(context),
+        fields = ImeiCheckManager.loadResultFields(context)
+      )
+      assertEquals(1, analytics.totalRequests)
+      assertEquals(1, analytics.completedRequests)
+      assertEquals(1, analytics.paidChecksCount)
+      assertEquals(3.0, analytics.confirmedPaidRevenueGel, 0.001)
+      assertEquals("Apple", analytics.mostCheckedManufacturer)
+      assertEquals(1, analytics.unavailableOrUnverifiedFieldCounts["MDM / კორპორატიული მართვის პროფილი"])
+
+      // 10. Verify Individual History Deletion & Anonymization
+      val delRes = ImeiCheckManager.deleteUserHistoryEntry(
+        context = context,
+        currentUserId = "user_a_uid_101",
+        entryId = reqToVerify.id
+      )
+      assertTrue("User A deleting their own history entry must succeed", delRes.isSuccess)
+      assertTrue("User A history must be empty after deletion", ImeiCheckManager.loadUserHistoryLocal(context, "user_a_uid_101").isEmpty())
+      val anonymizedAdminReq = ImeiCheckManager.loadAllRequestsLocal(context).first()
+      assertEquals("DELETED", anonymizedAdminReq.imei)
+      assertTrue(anonymizedAdminReq.userDeletedHistory)
+    }
+
+    // 11. Verify UI Rendering of IMEI Entry Card inside DiagnosticsWorkspaceScreen and navigating to IMEI Check Page
+    ImeiCheckManager.saveConfigLocal(context, ImeiServiceConfig())
+    val catalog = ProductRepository.getAllProducts().take(4)
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        DiagnosticsWorkspaceScreen(
+          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 0.dp, bottom = 0.dp),
+          onProductClick = {},
+          products = catalog
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("imei_diagnostics_entry_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("open_imei_check_screen_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("imei_check_full_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("imei_input_field").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("imei_brand_item_apple").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("imei_brand_item_samsung").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w411dp-h891dp")
+  fun `secure admin only imei and service order notifications enforce sole admin authorization payload privacy multi device tokens deep links and mark as read`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    context.getSharedPreferences("bekaservice_imei_platform_prefs_v1", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_push_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_notifications_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_auth_orders_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_admin_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+
+    val validImei = ImeiValidator.generateValidImei("35391210987654")
+    val appleBrand = ImeiCheckManager.loadBrands(context).first { it.id == "apple" }
+
+    // -------------------------------------------------------------------------
+    // SCENARIO 1: Regular customer account ("customer.regular@gmail.com")
+    // -------------------------------------------------------------------------
+    val customerUser = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "customer.regular@gmail.com",
+      name = "ნიკა მომხმარებელი"
+    )
+    assertFalse(
+      "Regular customer must NEVER be recognized as sole admin",
+      AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
+    )
+    assertFalse(
+      "Admin PIN verification must fail when a regular customer is signed in",
+      AdminStorage.verifyPin(context, "bmgebr")
+    )
+
+    // Customer cannot register an admin FCM token
+    val customerTokenAttempt = BekaNotificationManager.registerAdminDeviceToken(
+      context = context,
+      token = "fcm_customer_token_should_be_rejected_12345",
+      deviceId = "customer_device_1"
+    )
+    assertFalse("Regular customer must NOT be able to register an admin FCM token", customerTokenAttempt)
+    assertTrue(
+      "Registered admin tokens list must be empty for regular customer",
+      BekaNotificationManager.getRegisteredAdminDeviceTokens(context).isEmpty()
+    )
+
+    // Customer submits an IMEI Check request and a Service Order
+    val imeiEntry = kotlinx.coroutines.runBlocking {
+      ImeiCheckManager.submitImeiCheckRequest(
+        context = context,
+        rawImei = validImei,
+        selectedBrand = appleBrand,
+        currentUser = customerUser
+      ).getOrThrow()
+    }
+    val cartOrder = kotlinx.coroutines.runBlocking {
+      AuthAndOrderManager.createAndPersistOrderFromCart(
+        context = context,
+        cartItems = listOf(
+          CartItem(
+            product = ProductRepository.getAllProducts().first(),
+            quantity = 1,
+            selectedQuality = "Original"
+          )
+        )
+      ).getOrThrow()
+    }
+
+    // Customer must NOT receive or view admin order notifications, unread counts, or mark them as read
+    assertEquals(
+      "Regular customer must see 0 unread admin orders",
+      0,
+      BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    )
+    assertTrue(
+      "Regular customer must NOT be able to load admin order notifications",
+      BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context).isEmpty()
+    )
+    assertFalse(
+      "Regular customer must NOT be able to mark an admin order notification as read",
+      BekaNotificationManager.markAdminOrderNotificationAsRead(context, imeiEntry.id, "imei_check")
+    )
+    assertTrue(
+      "Regular customer must NOT be able to load admin IMEI requests list",
+      ImeiCheckManager.loadAllRequestsLocal(context).isEmpty()
+    )
+
+    // Incoming FCM admin order push on a device where a regular customer is logged in must be rejected (return false)
+    val shownForCustomer = BekaNotificationManager.handleIncomingFcmMessageData(
+      context = context,
+      data = mapOf(
+        "type" to "admin_order_notification",
+        "orderId" to imeiEntry.id,
+        "orderType" to "imei_check",
+        "title" to "ახალი IMEI შეკვეთა",
+        "body" to "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა. IMEI: $validImei customer.regular@gmail.com"
+      ),
+      notificationTitle = null,
+      notificationBody = null
+    )
+    assertFalse("Admin order FCM payload must be rejected and never displayed for non-admin user", shownForCustomer)
+    assertEquals(0, BekaNotificationManager.getUnreadAdminOrdersCount(context))
+
+    // Attempt to spoof sole admin via unverified client-side email login must fail
+    val spoofRegisterRes = AuthAndOrderManager.registerWithEmail(
+      context = context,
+      name = "Spoof Admin",
+      email = "beqa1994@gmail.com",
+      phone = "599000000",
+      pass = "password123"
+    )
+    assertFalse("Registering beqa1994@gmail.com via client-side email registration must be blocked", spoofRegisterRes.first)
+
+    val unverifiedEmailLogin = AuthAndOrderManager.loginWithEmail(
+      context = context,
+      email = "beqa1994@gmail.com",
+      pass = "password123"
+    )
+    assertFalse(
+      "Client-side email login without verified Google/Firebase token must NOT grant sole admin access",
+      AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
+    )
+    assertFalse("Unverified email login for beqa1994@gmail.com must be rejected", unverifiedEmailLogin.first)
+
+    // -------------------------------------------------------------------------
+    // SCENARIO 2: Sole Authorized Administrator ("beqa1994@gmail.com")
+    // Multi-device token registration, payload sanitization, unread counts,
+    // deep-link opening, mark-as-read, and logout/invalid token cleanup
+    // -------------------------------------------------------------------------
+    AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "beqa1994@gmail.com",
+      name = "ბექა (Sole Admin)"
+    )
+    assertTrue(
+      "Verified Google account beqa1994@gmail.com must be authorized as sole admin",
+      AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
+    )
+
+    // Register two admin devices (Device 1 = current device & Device 2 = second admin device) authenticated with beqa1994@gmail.com
+    val currentDeviceId = BekaNotificationManager.getOrCreateDeviceId(context)
+    val regDevice1 = BekaNotificationManager.registerAdminDeviceToken(
+      context = context,
+      token = "fcm_beka_admin_device_1_pixel9pro_token",
+      deviceId = currentDeviceId
+    )
+    val regDevice2 = BekaNotificationManager.registerAdminDeviceToken(
+      context = context,
+      token = "fcm_beka_admin_device_2_tablet_token",
+      deviceId = "admin_device_2"
+    )
+    assertTrue("Admin Device 1 token registration must succeed", regDevice1)
+    assertTrue("Admin Device 2 token registration must succeed", regDevice2)
+    val registeredTokens = BekaNotificationManager.getRegisteredAdminDeviceTokens(context)
+    assertEquals("Both admin device tokens must be stored for multi-device push delivery", 2, registeredTokens.size)
+
+    // Simulate expired/invalid token cleanup for Device 2
+    BekaNotificationManager.removeExpiredOrInvalidAdminToken(
+      context = context,
+      invalidToken = "fcm_beka_admin_device_2_tablet_token"
+    )
+    val remainingTokens = BekaNotificationManager.getRegisteredAdminDeviceTokens(context)
+    assertEquals("Expired/invalid token must be removed leaving only active Device 1 token", 1, remainingTokens.size)
+    assertEquals("fcm_beka_admin_device_1_pixel9pro_token", remainingTokens.first().token)
+
+    // Verify unread admin notifications count (1 IMEI request + 1 Service order = 2 unread)
+    val adminNotifs = BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
+    assertEquals("Admin must see both incoming orders in notification history", 2, adminNotifs.size)
+    assertEquals("Admin must see 2 unread order notifications", 2, BekaNotificationManager.getUnreadAdminOrdersCount(context))
+
+    // Verify notification payload privacy: NEVER contains full 15-digit IMEI, customer email, or phone
+    adminNotifs.forEach { notif ->
+      assertFalse(
+        "Notification title/body must NEVER contain full IMEI or customer PII",
+        BekaNotificationManager.containsSensitiveOrderData("${notif.title} ${notif.body}")
+      )
+      assertFalse(notif.body.contains(validImei))
+      assertFalse(notif.body.contains("customer.regular@gmail.com"))
+    }
+    val imeiNotif = adminNotifs.first { it.orderId == imeiEntry.id }
+    assertEquals("ახალი IMEI შეკვეთა", imeiNotif.title)
+    assertEquals("შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.", imeiNotif.body)
+    assertEquals("bekaservice://admin/orders/imei/${imeiEntry.id}", imeiNotif.deepLink)
+
+    // Verify stripSensitiveDataFromPayload scrubs accidental IMEI/email/phone strings
+    val scrubbed = BekaNotificationManager.stripSensitiveDataFromPayload(
+      "შემოწმება: $validImei user: customer.regular@gmail.com ტელ: +995599112233"
+    )
+    assertFalse("Scrubbed text must not contain 15-digit IMEI or email", BekaNotificationManager.containsSensitiveOrderData(scrubbed))
+
+    // Verify deep-link intent builder targets the exact order
+    val deepLinkIntent = BekaNotificationManager.buildAdminOrderDeepLinkIntent(
+      context = context,
+      notificationId = imeiNotif.id,
+      orderId = imeiEntry.id,
+      orderType = "imei_check"
+    )
+    assertEquals("bekaservice://admin/orders/imei/${imeiEntry.id}", deepLinkIntent.data?.toString())
+
+    // Render AdminPanelScreen opened via deep-link to the specific IMEI order
+    val catalog = ProductRepository.getAllProducts().take(3)
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        AdminPanelScreen(
+          products = catalog,
+          onProductsUpdated = {},
+          onClose = {},
+          initialTab = 10,
+          initialTargetImeiRequestId = imeiEntry.id
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Opening the IMEI order via deep-link automatically marks that notification as read (unread count drops from 2 to 1)
+    assertEquals(
+      "Opening IMEI order via deep link must mark its notification as read",
+      1,
+      BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    )
+    composeTestRule.onNodeWithTag("admin_notifications_toggle_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_unread_orders_badge", useUnmergedTree = true).assertExists()
+
+    // Mark remaining notifications as read and verify unread count becomes 0
+    assertTrue(BekaNotificationManager.markAdminOrderNotificationAsRead(context, cartOrder.id, "service_order"))
+    assertEquals(
+      "After marking service order notification as read, unread count must be 0",
+      0,
+      BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    )
+
+    // Verify admin logout cleans up active device FCM tokens and blocks admin notification access when logged out
+    AuthAndOrderManager.logout(context)
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertTrue(
+      "Admin device FCM tokens must be cleaned up on logout",
+      BekaNotificationManager.getRegisteredAdminDeviceTokens(context).isEmpty()
+    )
+    assertEquals(
+      "Logged-out state must not expose unread admin orders",
+      0,
+      BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    )
+  }
+
+  @Test
+  fun testAdminImeiVerificationDraftAndPublishFlow() = runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Setup Customer and Order
+    val customerUid = "cust_user_${System.currentTimeMillis()}"
+    val customerEmail = "client@example.ge"
+    val customerUser = UserProfile(
+      id = customerUid,
+      name = "გიორგი კლიენტი",
+      email = customerEmail,
+      phone = "599000111",
+      provider = "Google"
+    )
+    val appleBrand = ImeiCheckManager.loadBrands(context).first { it.id.equals("apple", ignoreCase = true) }
+
+    val testImei = ImeiValidator.generateValidImei("35209900176148")
+    val reqRes = ImeiCheckManager.submitImeiCheckRequest(
+      context = context,
+      rawImei = testImei,
+      selectedBrand = appleBrand,
+      currentUser = customerUser
+    )
+    assertTrue("IMEI order creation should succeed", reqRes.isSuccess)
+    val historyEntry = reqRes.getOrThrow()
+    val reqId = historyEntry.id
+
+    val originalReq = ImeiCheckManager.loadAllRequestsLocal(context).firstOrNull { it.id == reqId }
+    assertNotNull("Original request must be stored", originalReq)
+
+    // 2. Customer fetches report before admin checks — provisional report exists but resultText is blank and unpublished
+    val preReport = ImeiCheckManager.fetchReportForRequest(
+      context = context,
+      requestId = reqId,
+      currentUserId = customerUid,
+      isAdminCaller = false
+    )
+    assertTrue("Provisional preview exists for customer request", preReport.isSuccess)
+    assertFalse("Report must not be marked as published yet", preReport.getOrThrow().isPublished)
+    assertTrue("Customer must NOT see any result text yet", preReport.getOrThrow().resultText.isBlank())
+
+    // 3. Admin logs in with sole admin account: beqa1994@gmail.com
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Admin Beqa")
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    assertTrue("Sole admin must be authenticated", AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+
+    val multilineVerificationText = """
+      Model: iPhone 15 Pro Max 256GB Natural Titanium
+      IMEI: 352099001761482
+      Serial: G6TX9...
+      Purchase Country: United States (A2849)
+      Warranty Status: Active (Expires: 2027-04-12)
+      AppleCare+ with Theft and Loss: Active
+      iCloud Status: CLEAN
+      Find My iPhone: OFF
+      MDM Corporate Profile: No
+      GSMA Blacklist Status: Clean / Not Blocked
+      Carrier SIM Lock: UNLOCKED
+      ვერიფიკაციის დასკვნა: მოწყობილობა სუფთაა, მზადაა უსაფრთხო გამოყენებისთვის.
+    """.trimIndent()
+
+    // 4. Admin saves as DRAFT without publishing (კლიენტისთვის გაგზავნის გარეშე)
+    val draftSaveRes = ImeiCheckManager.saveAdminVerificationDraft(
+      context = context,
+      request = originalReq!!,
+      draftText = multilineVerificationText,
+      newStatus = ImeiRequestStatus.IN_PROGRESS,
+      newPaymentStatus = ImeiPaymentStatus.PAID,
+      verifiedModel = "iPhone 15 Pro Max 256GB"
+    )
+    assertTrue("Draft save must succeed", draftSaveRes.isSuccess)
+    val draftedReq = draftSaveRes.getOrThrow()
+    assertEquals("Draft text must be preserved in request", multilineVerificationText, draftedReq.draftResultText)
+    assertFalse("Draft must NOT be marked as published", draftedReq.isPublished)
+    assertEquals(ImeiRequestStatus.IN_PROGRESS, draftedReq.statusEnum)
+
+    // 5. Customer MUST NOT see the unpublished draft text
+    val customerDraftReport = ImeiCheckManager.fetchReportForRequest(
+      context = context,
+      requestId = reqId,
+      currentUserId = customerUid,
+      isAdminCaller = false
+    )
+    assertTrue("Customer can still view order status", customerDraftReport.isSuccess)
+    val customerDraftData = customerDraftReport.getOrThrow()
+    assertFalse("Customer report must remain unpublished while in draft", customerDraftData.isPublished)
+    assertTrue("Customer must NOT see unpublished draft text", customerDraftData.resultText.isBlank())
+    assertFalse("Order must not be marked completed on draft save", customerDraftData.statusEnum == ImeiRequestStatus.COMPLETED)
+
+    // 6. Admin CAN access the drafted request and restores saved text on reopening
+    val adminReopenedReq = ImeiCheckManager.loadAllRequestsLocal(context).firstOrNull { it.id == reqId }
+    assertNotNull(adminReopenedReq)
+    assertEquals("Reopening order must restore saved draft text", multilineVerificationText, adminReopenedReq!!.draftResultText)
+
+    // 7. Admin publishes final verification result (შედეგის შენახვა და მომხმარებლისთვის გაგზავნა)
+    val publishRes = ImeiCheckManager.saveAdminVerificationProgress(
+      context = context,
+      request = adminReopenedReq,
+      newStatus = ImeiRequestStatus.COMPLETED,
+      newPaymentStatus = ImeiPaymentStatus.PAID,
+      verifiedModel = "iPhone 15 Pro Max 256GB",
+      resultText = multilineVerificationText,
+      draftResultText = "",
+      isPublished = true,
+      notifyCustomer = true
+    )
+    assertTrue("Publishing verification must succeed", publishRes.isSuccess)
+    val publishedReport = publishRes.getOrThrow()
+    assertTrue("Report must now be published", publishedReport.isPublished)
+    assertEquals("Published resultText must match exactly", multilineVerificationText, publishedReport.resultText)
+
+    // 8. Customer CAN NOW fetch and view the published report with full verification details
+    val customerPublishedReport = ImeiCheckManager.fetchReportForRequest(
+      context = context,
+      requestId = reqId,
+      currentUserId = customerUid,
+      isAdminCaller = false
+    )
+    assertTrue("Customer must be able to view published report", customerPublishedReport.isSuccess)
+    val customerReportData = customerPublishedReport.getOrThrow()
+    assertEquals(multilineVerificationText, customerReportData.resultText)
+    assertTrue(customerReportData.isPublished)
+    assertEquals(ImeiRequestStatus.COMPLETED, customerReportData.statusEnum)
+
+    // Cleanup
+    AuthAndOrderManager.logout(context)
+  }
+
+  @Test
+  fun testFcmDeliveryPipelineForegroundBackgroundClosedAndOemDiagnostics() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    org.robolectric.Shadows.shadowOf(context as android.app.Application)
+      .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+    BekaNotificationManager.ensureNotificationChannels(context)
+    BekaNotificationManager.clearAllNotifications(context)
+    AuthAndOrderManager.logout(context)
+
+    // 1. Verify Notification Channels & OEM Delivery Diagnostics (Scenario G)
+    val xiaomiDiag = BekaNotificationManager.getDeliveryDiagnostics(context, manufacturerOverride = "Xiaomi POCO")
+    assertTrue("General notification channel must be enabled by default", xiaomiDiag.generalChannelEnabled)
+    assertTrue("Admin orders notification channel must be enabled by default", xiaomiDiag.adminOrdersChannelEnabled)
+    assertTrue("Xiaomi/POCO diagnostics must mention Autostart", xiaomiDiag.manufacturerStepsKa.any { it.contains("Autostart", ignoreCase = true) })
+
+    val samsungDiag = BekaNotificationManager.getDeliveryDiagnostics(context, manufacturerOverride = "Samsung")
+    assertTrue("Samsung diagnostics must mention Unrestricted battery", samsungDiag.manufacturerStepsKa.any { it.contains("Unrestricted", ignoreCase = true) })
+
+    // 2. Scenario D & E: Sole Admin Multi-Device Token Registration, Token Refresh & Synthetic Token Rejection
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Admin Beqa")
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+
+    // Synthetic placeholder token must not overwrite saved real FCM token
+    BekaNotificationManager.saveLocalFcmToken(context, "fcm_real_token_initial_device_1_abcdef123456")
+    BekaNotificationManager.saveLocalFcmToken(context, "fcm_admin_dev_synthetic_should_be_ignored")
+    assertEquals("fcm_real_token_initial_device_1_abcdef123456", BekaNotificationManager.getLocalFcmToken(context))
+
+    val device1Id = BekaNotificationManager.getOrCreateDeviceId(context)
+    val device2Id = "dev_admin_second_phone_2"
+    assertTrue(BekaNotificationManager.registerAdminDeviceToken(context, "fcm_real_token_initial_device_1_abcdef123456", device1Id))
+    assertTrue(BekaNotificationManager.registerAdminDeviceToken(context, "fcm_real_token_second_device_2_xyz987654321", device2Id))
+    assertEquals(2, BekaNotificationManager.getRegisteredAdminDeviceTokens(context).size)
+
+    // Token Refresh on Device 1 replaces old token for Device 1 without duplicating Device 1 entry
+    assertTrue(BekaNotificationManager.registerAdminDeviceToken(context, "fcm_real_token_refreshed_device_1_new999999", device1Id))
+    val tokensAfterRefresh = BekaNotificationManager.getRegisteredAdminDeviceTokens(context)
+    assertEquals(2, tokensAfterRefresh.size)
+    assertEquals(
+      "fcm_real_token_refreshed_device_1_new999999",
+      tokensAfterRefresh.first { it.deviceId == device1Id }.token
+    )
+
+    // 3. Scenario A: Foreground FCM message handling & deduplication + PII stripping
+    val orderIdFg = "imei_fg_order_777"
+    val canonicalTag = "notif_order_imei_check_$orderIdFg"
+    val firstDelivery = BekaNotificationManager.handleIncomingFcmMessageData(
+      context = context,
+      data = mapOf(
+        "type" to "admin_order",
+        "notificationId" to canonicalTag,
+        "orderId" to orderIdFg,
+        "orderType" to "imei_check",
+        "title" to "ახალი IMEI შეკვეთა 353912101234566",
+        "body" to "შემოვიდა მოთხოვნა client@gmail.com 353912101234566",
+        "deepLink" to "bekaservice://admin/orders/imei/$orderIdFg"
+      )
+    )
+    assertTrue("First foreground admin order FCM push must be displayed", firstDelivery)
+    // Duplicate push with the same notificationId must be suppressed
+    val duplicateDelivery = BekaNotificationManager.handleIncomingFcmMessageData(
+      context = context,
+      data = mapOf(
+        "type" to "admin_order",
+        "notificationId" to canonicalTag,
+        "orderId" to orderIdFg,
+        "orderType" to "imei_check"
+      )
+    )
+    assertFalse("Duplicate foreground admin order push with same notificationId must be suppressed", duplicateDelivery)
+
+    // Verify stored admin notification record stripped the 15-digit IMEI and email
+    val storedFgNotif = BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
+      .first { it.orderId == orderIdFg }
+    assertFalse(BekaNotificationManager.containsSensitiveOrderData("${storedFgNotif.title} ${storedFgNotif.body}"))
+
+    // 4. Scenario B & C: Background / Closed App System-Tray Tap with Raw FCM Data Extras
+    val orderIdClosed = "imei_closed_order_888"
+    BekaNotificationManager.recordOrderCreatedForAdminOnly(context, orderIdClosed, "imei_check")
+    assertTrue(BekaNotificationManager.isOrderUnreadForAdmin(context, orderIdClosed))
+
+    // When the app is closed and Android OS displays the combined notification + data FCM payload,
+    // tapping the system-tray notification launches MainActivity with raw FCM `data` keys ("orderId", "orderType", "deepLink").
+    // Marking as read via the deep link handler must mark both `admin_order_<id>` and `notif_order_imei_check_<id>` as delivered and read.
+    assertTrue(BekaNotificationManager.markAdminOrderNotificationAsRead(context, orderIdClosed, "imei_check"))
+    assertFalse("Order must be marked read after background/closed notification tap", BekaNotificationManager.isOrderUnreadForAdmin(context, orderIdClosed))
+    assertTrue(
+      "Canonical FCM tag must be marked delivered so snapshot listener does not duplicate on app open",
+      BekaNotificationManager.hasDeliveredNotification(context, "notif_order_imei_check_$orderIdClosed")
+    )
+
+    // 5. Scenario F: Account switch from Admin to Regular Customer isolates tokens and blocks admin pushes
+    AuthAndOrderManager.loginWithGoogle(context, "regular.buyer@gmail.com", "Regular Buyer")
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(
+      "Admin order push must be blocked after switching to a non-admin customer account",
+      BekaNotificationManager.handleIncomingFcmMessageData(
+        context = context,
+        data = mapOf(
+          "type" to "admin_order",
+          "orderId" to "imei_blocked_999",
+          "orderType" to "imei_check"
+        )
+      )
+    )
+
+    AuthAndOrderManager.logout(context)
+  }
 }
+
 

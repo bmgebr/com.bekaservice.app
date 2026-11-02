@@ -1026,12 +1026,12 @@ fun SoftwareBrandVisualHeader(
     Box(
         modifier = modifier
             .background(bgBrush)
-            .padding(if (compact) 10.dp else 16.dp)
+            .padding(if (compact) 6.dp else 16.dp)
     ) {
         // დეკორატიული ნათება
         Box(
             modifier = Modifier
-                .size(if (compact) 68.dp else 110.dp)
+                .size(if (compact) 60.dp else 110.dp)
                 .align(Alignment.Center)
                 .clip(CircleShape)
                 .background(accentColor.copy(alpha = 0.16f))
@@ -1039,18 +1039,18 @@ fun SoftwareBrandVisualHeader(
 
         // ცენტრალური ოფიციალური ბრენდ-ემბლემა
         Surface(
-            shape = RoundedCornerShape(if (compact) 14.dp else 20.dp),
+            shape = RoundedCornerShape(if (compact) 12.dp else 20.dp),
             color = Color(0xFF0D1017).copy(alpha = 0.88f),
-            border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.75f)),
+            border = BorderStroke(1.2.dp, accentColor.copy(alpha = 0.75f)),
             modifier = Modifier
                 .align(Alignment.Center)
                 .defaultMinSize(
-                    minWidth = if (compact) 54.dp else 76.dp,
-                    minHeight = if (compact) 54.dp else 76.dp
+                    minWidth = if (compact) 48.dp else 76.dp,
+                    minHeight = if (compact) 42.dp else 76.dp
                 )
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = if (compact) 12.dp else 18.dp, vertical = if (compact) 8.dp else 12.dp),
+                modifier = Modifier.padding(horizontal = if (compact) 10.dp else 18.dp, vertical = if (compact) 5.dp else 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
@@ -1060,11 +1060,11 @@ fun SoftwareBrandVisualHeader(
                     accentColor = accentColor,
                     compact = compact
                 )
-                Spacer(modifier = Modifier.height(if (compact) 3.dp else 6.dp))
+                Spacer(modifier = Modifier.height(if (compact) 2.dp else 6.dp))
                 Text(
                     text = brandTitle,
                     color = Color.White,
-                    fontSize = if (compact) 10.sp else 12.sp,
+                    fontSize = if (compact) 9.5.sp else 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1074,18 +1074,28 @@ fun SoftwareBrandVisualHeader(
 
         // თუ სპეციალური ხანგრძლივობა ან ტიპია მითითებული, ვაჩვენებთ ზედა მარცხენა კუთხეში
         if (product.duration.isNotBlank()) {
+            val badgeText = remember(product.duration, compact) {
+                if (compact) {
+                    product.duration.substringBefore("(").trim().ifBlank { product.duration }.take(15)
+                } else {
+                    product.duration.take(22)
+                }
+            }
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = Color.Black.copy(alpha = 0.72f),
                 border = BorderStroke(0.8.dp, accentColor.copy(alpha = 0.6f)),
-                modifier = Modifier.align(Alignment.TopStart)
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(end = if (compact) 38.dp else 44.dp)
             ) {
                 Text(
-                    text = product.duration.take(22),
+                    text = badgeText,
                     color = accentColor,
-                    fontSize = 9.sp,
+                    fontSize = if (compact) 8.5.sp else 9.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
@@ -1100,7 +1110,7 @@ private fun BrandMarkIcon(
     accentColor: Color,
     compact: Boolean
 ) {
-    val textSize = if (compact) 18.sp else 24.sp
+    val textSize = if (compact) 15.sp else 24.sp
     when {
         titleLower.contains("chatgpt") -> {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

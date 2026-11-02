@@ -339,13 +339,48 @@ fun ChangePinDialog(
 fun AdminPanelScreen(
     products: List<ProductItem>,
     onProductsUpdated: (List<ProductItem>) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    initialTab: Int = 0,
+    initialTargetOrderId: String? = null,
+    initialTargetImeiRequestId: String? = null,
+    onInitialTargetConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    var adminTab by remember { mutableIntStateOf(0) } // 0=პროდუქტები, 1=მასიური ფასები/მარჟა, 2=სტატისტიკა
+    var adminTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 10)) } // 0=პროდუქტები, 2=შეკვეთები, 10=IMEI შემოწმება
     var showChangePinDialog by remember { mutableStateOf(false) }
+    var showAdminNotificationsHistory by remember { mutableStateOf(false) }
+    var activeTargetOrderId by remember { mutableStateOf(initialTargetOrderId) }
+    var activeTargetImeiRequestId by remember { mutableStateOf(initialTargetImeiRequestId) }
+
+    LaunchedEffect(initialTab, initialTargetOrderId, initialTargetImeiRequestId) {
+        if (initialTargetImeiRequestId != null) {
+            adminTab = 10
+            activeTargetImeiRequestId = initialTargetImeiRequestId
+            onInitialTargetConsumed()
+        } else if (initialTargetOrderId != null) {
+            adminTab = 2
+            activeTargetOrderId = initialTargetOrderId
+            onInitialTargetConsumed()
+        } else if (initialTab in 0..10 && initialTab != 0) {
+            adminTab = initialTab
+        }
+    }
+
+    val notifVersion = BekaNotificationManager.stateVersion.intValue
+    val adminOrderNotifications = remember(notifVersion) {
+        BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
+    }
+    val unreadAdminOrdersCount = remember(adminOrderNotifications, notifVersion) {
+        BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    }
+    val unreadImeiOrdersCount = remember(adminOrderNotifications, notifVersion) {
+        adminOrderNotifications.count { !it.read && it.orderType == "imei_check" }
+    }
+    val unreadServiceOrdersCount = remember(adminOrderNotifications, notifVersion) {
+        adminOrderNotifications.count { !it.read && it.orderType == "service_order" }
+    }
 
     // რედაქტირება / დამატება
     var editingProduct by remember { mutableStateOf<ProductItem?>(null) }
@@ -359,6 +394,7 @@ fun AdminPanelScreen(
             isAddingNewProduct -> isAddingNewProduct = false
             productToDelete != null -> productToDelete = null
             showChangePinDialog -> showChangePinDialog = false
+            showAdminNotificationsHistory -> showAdminNotificationsHistory = false
             else -> onClose()
         }
     }
@@ -468,50 +504,93 @@ fun AdminPanelScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.widthIn(max = 165.dp)
+                    ) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = Color(0xFFFF6A00),
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(
-                                "ADMIN მართვის პანელი",
+                                "ADMIN პანელი",
                                 color = if (isDark) Color.White else Color(0xFF0F172A),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Text("BEKASERVICE • სრული კონტროლი", color = Color(0xFFFF7A00), fontSize = 10.sp)
+                            Text(
+                                "BEKASERVICE",
+                                color = Color(0xFFFF7A00),
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 },
                 actions = {
+                    // წაუკითხავი შეკვეთების ღილაკი და მრიცხველი (მხოლოდ ავტორიზებული ადმინისთვის)
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (unreadAdminOrdersCount > 0) Color(0xFFFF6A00).copy(alpha = 0.18f) else Color.Transparent,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (unreadAdminOrdersCount > 0) Color(0xFFFF6A00) else Color(0xFF2E3440)
+                        ),
+                        modifier = Modifier
+                            .testTag("admin_notifications_toggle_button")
+                            .clickable { showAdminNotificationsHistory = !showAdminNotificationsHistory }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsActive,
+                                contentDescription = "Admin Order Notifications",
+                                tint = if (unreadAdminOrdersCount > 0) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = unreadAdminOrdersCount.toString(),
+                                color = if (unreadAdminOrdersCount > 0) Color(0xFFFF6A00) else Color(0xFFA0A5B0),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.testTag("admin_unread_orders_badge")
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = {
                             AdminStorage.clearAdminSession(context)
                             Toast.makeText(context, "🔒 ადმინ სესია დაიხურა (დაბლოკილია)", Toast.LENGTH_SHORT).show()
                             onClose()
                         },
-                        modifier = Modifier.testTag("admin_lock_button")
+                        modifier = Modifier.size(36.dp).testTag("admin_lock_button")
                     ) {
-                        Icon(Icons.Default.Lock, contentDescription = "Lock Session", tint = Color(0xFFFF4D4F))
+                        Icon(Icons.Default.Lock, contentDescription = "Lock Session", tint = Color(0xFFFF4D4F), modifier = Modifier.size(18.dp))
                     }
                     IconButton(
                         onClick = { showChangePinDialog = true },
-                        modifier = Modifier.testTag("admin_change_pin_button")
+                        modifier = Modifier.size(36.dp).testTag("admin_change_pin_button")
                     ) {
-                        Icon(Icons.Default.VpnKey, contentDescription = "Change PIN", tint = Color(0xFFFF6A00))
+                        Icon(Icons.Default.VpnKey, contentDescription = "Change PIN", tint = Color(0xFFFF6A00), modifier = Modifier.size(18.dp))
                     }
                     IconButton(
                         onClick = onClose,
-                        modifier = Modifier.testTag("admin_close_button")
+                        modifier = Modifier.size(36.dp).testTag("admin_close_button")
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = if (isDark) Color.White else Color(0xFF1E293B))
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = if (isDark) Color.White else Color(0xFF1E293B), modifier = Modifier.size(18.dp))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -548,29 +627,81 @@ fun AdminPanelScreen(
                         "სტატისტიკა",
                         "ბანკის რეკვიზიტები",
                         "Push შეტყობინება",
-                        "აპლიკაციის განახლების მართვა"
+                        "აპლიკაციის განახლების მართვა",
+                        "IMEI შემოწმება"
                     )
                     tabs.forEachIndexed { index, title ->
                         val isSelected = adminTab == index
+                        val tabBadgeCount = when (index) {
+                            2 -> unreadServiceOrdersCount
+                            10 -> unreadImeiOrdersCount
+                            else -> 0
+                        }
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (isSelected) Color(0xFFFF6A00) else Color.Transparent,
                             modifier = Modifier
+                                .testTag("admin_tab_$index")
                                 .clickable { adminTab = index }
                                 .padding(horizontal = 2.dp)
                         ) {
                             CompositionLocalProvider(LocalPreserveWhiteText provides isSelected) {
-                                Text(
-                                    text = title,
-                                    color = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text(
+                                        text = title,
+                                        color = if (isSelected) Color.White else if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                    if (tabBadgeCount > 0) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isSelected) Color.Black.copy(alpha = 0.35f) else Color(0xFFFF6A00)
+                                        ) {
+                                            Text(
+                                                text = tabBadgeCount.toString(),
+                                                color = Color.White,
+                                                fontSize = 9.5.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
+            }
+
+            if (showAdminNotificationsHistory) {
+                AdminOrderNotificationsHistoryPanel(
+                    notifications = adminOrderNotifications,
+                    unreadCount = unreadAdminOrdersCount,
+                    onOpenOrderNotification = { notif ->
+                        BekaNotificationManager.markAdminOrderNotificationAsRead(
+                            context = context,
+                            orderIdOrNotificationId = notif.orderId,
+                            orderType = notif.orderType
+                        )
+                        showAdminNotificationsHistory = false
+                        if (notif.orderType == "imei_check") {
+                            activeTargetImeiRequestId = notif.orderId
+                            adminTab = 10
+                        } else {
+                            activeTargetOrderId = notif.orderId
+                            adminTab = 2
+                        }
+                    },
+                    onMarkAllRead = {
+                        BekaNotificationManager.markAllAdminOrderNotificationsAsRead(context)
+                    },
+                    onClosePanel = { showAdminNotificationsHistory = false }
+                )
             }
 
             // ტაბის შიგთავსი Smooth Slide გადასვლით
@@ -1052,7 +1183,14 @@ fun AdminPanelScreen(
                     // =========================================================================
                     // ტაბი 3: შეკვეთების მართვა (Orders Management - Cloud Firestore)
                     // =========================================================================
-                    AdminOrdersManagementView()
+                    AdminOrdersManagementView(
+                        initialTargetOrderId = activeTargetOrderId,
+                        onTargetOrderConsumed = { activeTargetOrderId = null },
+                        onNavigateToImeiRequest = { reqId ->
+                            activeTargetImeiRequestId = reqId
+                            adminTab = 10
+                        }
+                    )
                 }
 
                 3 -> {
@@ -1141,6 +1279,16 @@ fun AdminPanelScreen(
                     // ტაბი 10: აპლიკაციის განახლების მართვა (app_config/updates)
                     // =========================================================================
                     AdminAppUpdateManagementView()
+                }
+
+                10 -> {
+                    // =========================================================================
+                    // ტაბი 11: IMEI შემოწმების მართვის ცენტრი (IMEI Check Control Center)
+                    // =========================================================================
+                    AdminImeiCheckControlCenter(
+                        initialTargetRequestId = activeTargetImeiRequestId,
+                        onTargetRequestConsumed = { activeTargetImeiRequestId = null }
+                    )
                 }
             }
             }
@@ -1947,6 +2095,53 @@ fun ProductEditDialog(
                                         } else {
                                             isAiError = false
                                             aiReviewFields = generated
+                                            val merged = AdminProductAiGenerator.mergeGeneratedWithManualFields(
+                                                generated = generated,
+                                                manual = ExistingProductFormState(
+                                                    price = price,
+                                                    brand = brand,
+                                                    category = category,
+                                                    subcategory = subcategory,
+                                                    shortDescription = shortDescription,
+                                                    description = description,
+                                                    featuresText = featuresText,
+                                                    targetAudience = targetAudience,
+                                                    offerType = offerType,
+                                                    duration = duration,
+                                                    accountType = accountType,
+                                                    activationTerms = activationTerms,
+                                                    compatibleModels = compatibleModels,
+                                                    warranty = warranty,
+                                                    searchKeywords = searchKeywords,
+                                                    exactModel = exactModel,
+                                                    condition = condition,
+                                                    specifications = specificationsMap
+                                                )
+                                            )
+                                            selectedCategoryType = generated.categoryType
+                                            productType = generated.categoryType.id
+                                            if (merged.price.isNotBlank()) price = merged.price
+                                            shortDescription = merged.shortDescription
+                                            description = merged.description
+                                            category = merged.category
+                                            brand = merged.brand
+                                            if (generated.categoryType == ProductCategoryType.DIGITAL_SERVICE) {
+                                                subcategory = merged.subcategory
+                                                offerType = merged.offerType
+                                                duration = merged.duration
+                                                accountType = merged.accountType
+                                                activationTerms = merged.activationTerms
+                                            }
+                                            if (merged.features.isNotEmpty()) {
+                                                featuresText = merged.features.joinToString("\n")
+                                            }
+                                            targetAudience = merged.targetAudience
+                                            compatibleModels = merged.compatibleModels
+                                            if (merged.warranty.isNotBlank()) warranty = merged.warranty
+                                            searchKeywords = merged.searchKeywords
+                                            if (merged.exactModel.isNotBlank()) exactModel = merged.exactModel
+                                            if (merged.condition.isNotBlank()) condition = merged.condition
+                                            specificationsMap = merged.specifications.toMutableMap()
                                             aiStatusMessage = "✅ AI კვლევა დასრულდა (${generated.categoryType.labelGeo}). გადახედეთ შედეგებს ქვემოთ."
                                         }
                                     }
@@ -2609,7 +2804,7 @@ fun ProductEditDialog(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = "მრავალფოტო",
+                                                text = "გალერეა",
                                                 color = if (isGallerySelected) Color.White else unselectedBtnText,
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -3327,7 +3522,16 @@ fun ProductEditDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("ხელმისაწვდომია / მარაგშია (In Stock)", color = Color.White, fontSize = 13.sp)
+                                Text(
+                                    "ხელმისაწვდომია / მარაგშია (In Stock)",
+                                    color = Color.White,
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
+                                )
                                 Switch(
                                     checked = inStock,
                                     onCheckedChange = { inStock = it },
@@ -3343,7 +3547,16 @@ fun ProductEditDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("მთავარ ეკრანზე გამოტანა (Featured)", color = Color(0xFFFF9E40), fontSize = 13.sp)
+                                Text(
+                                    "მთავარ ეკრანზე გამოტანა (Featured)",
+                                    color = Color(0xFFFF9E40),
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
+                                )
                                 Switch(
                                     checked = isFeatured,
                                     onCheckedChange = { isFeatured = it },
@@ -3590,18 +3803,32 @@ fun BulkPriceAndMarginScreen(
                             onClick = { mode = "PERCENT"; customInput = "10"; adjustmentValue = 10.0 },
                             colors = ButtonDefaults.buttonColors(containerColor = if (mode == "PERCENT") Color(0xFFFF6A00) else Color(0xFF222630)),
                             shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("პროცენტული მარჟა (%)", fontSize = 11.sp)
+                            Text(
+                                "პროცენტული მარჟა (%)",
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         Button(
                             onClick = { mode = "FIXED"; customInput = "20"; adjustmentValue = 20.0 },
                             colors = ButtonDefaults.buttonColors(containerColor = if (mode == "FIXED") Color(0xFFFF6A00) else Color(0xFF222630)),
                             shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("ფიქსირებული თანხა (₾)", fontSize = 11.sp)
+                            Text(
+                                "ფიქსირებული თანხა (₾)",
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
 
@@ -3800,10 +4027,27 @@ fun AdminStatisticsView(products: List<ProductItem>) {
                     brandCounts.forEach { (brand, count) ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(brand, color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                            Text("$count ერთეული", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                brand,
+                                color = Color(0xFFA0A5B0),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            )
+                            Text(
+                                "$count ერთეული",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -3822,10 +4066,27 @@ fun AdminStatisticsView(products: List<ProductItem>) {
                     catCounts.forEach { (cat, count) ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(cat, color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                            Text("$count ერთეული", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                cat,
+                                color = Color(0xFFA0A5B0),
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            )
+                            Text(
+                                "$count ერთეული",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
                         }
                     }
                 }
@@ -4845,18 +5106,28 @@ fun AdminCategoriesManagementView(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
                 Text(
                     text = "📁 კატეგორიების მართვა",
                     color = if (isDark) Color.White else Color(0xFF0F172A),
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "სულ: ${categories.size} კატეგორია • ${categories.count { it.isPopular }} პოპულარული",
                     color = Color(0xFFFF7A00),
                     fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -4868,7 +5139,14 @@ fun AdminCategoriesManagementView(
             ) {
                 Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("დამატება", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "დამატება",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
 
@@ -4947,13 +5225,24 @@ fun AdminCategoriesManagementView(
 
                                 Spacer(modifier = Modifier.width(10.dp))
 
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
                                             text = cat.localizedName.ifBlank { cat.name },
                                             color = if (isDark) Color.White else Color(0xFF0F172A),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (cat.isPopular) {
                                             Spacer(modifier = Modifier.width(6.dp))
@@ -4966,22 +5255,29 @@ fun AdminCategoriesManagementView(
                                                     color = Color(0xFFFF6A00),
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    softWrap = false,
                                                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                                 )
                                             }
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Spacer(modifier = Modifier.height(3.dp))
 
                                     Row(
+                                        modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             text = "ID: ${cat.name}",
                                             color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
-                                            fontSize = 11.sp
+                                            fontSize = 10.5.sp,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
@@ -4992,6 +5288,8 @@ fun AdminCategoriesManagementView(
                                                 color = Color(0xFFFF7A00),
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
                                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                             )
                                         }
@@ -5573,7 +5871,16 @@ fun CategoryEditModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("აქტიურია კატალოგში", color = if (isDark) Color.White else Color(0xFF0F172A), fontSize = 13.sp)
+                    Text(
+                        "აქტიურია კატალოგში",
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
                     Switch(
                         checked = isActive,
                         onCheckedChange = { isActive = it },
@@ -5586,7 +5893,16 @@ fun CategoryEditModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("პოპულარული კატეგორია (Home/Grid)", color = Color(0xFFFF9E40), fontSize = 13.sp)
+                    Text(
+                        "პოპულარული კატეგორია (Home/Grid)",
+                        color = Color(0xFFFF9E40),
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
                     Switch(
                         checked = isPopular,
                         onCheckedChange = { isPopular = it },
@@ -5637,29 +5953,234 @@ fun CategoryEditModal(
 }
 
 // ==============================================================================
+// 6.5 ადმინისტრატორის შეკვეთების შეტყობინებების ისტორია (Admin Order Notifications History)
+// ==============================================================================
+@Composable
+fun AdminOrderNotificationsHistoryPanel(
+    notifications: List<AdminOrderNotificationRecord>,
+    unreadCount: Int,
+    onOpenOrderNotification: (AdminOrderNotificationRecord) -> Unit,
+    onMarkAllRead: () -> Unit,
+    onClosePanel: (() -> Unit)? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFF141821),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.55f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .testTag("admin_order_notifications_history_section")
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        tint = Color(0xFFFF6A00),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "შემოსული შეკვეთების შეტყობინებები",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "წაუკითხავი: $unreadCount • სულ: ${notifications.size}",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (unreadCount > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFFF6A00).copy(alpha = 0.2f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00)),
+                            modifier = Modifier
+                                .testTag("admin_mark_all_notifications_read_button")
+                                .clickable { onMarkAllRead() }
+                        ) {
+                            Text(
+                                text = "ყველას წაკითხულად მონიშვნა",
+                                color = Color(0xFFFF6A00),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                    if (onClosePanel != null) {
+                        IconButton(
+                            onClick = onClosePanel,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Close notifications history",
+                                tint = Color(0xFFA0A5B0),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (notifications.isEmpty()) {
+                Text(
+                    text = "ახალი შეკვეთების შეტყობინებები ჯერ არ არის.",
+                    color = Color(0xFF6E7582),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.heightIn(max = 240.dp)
+                ) {
+                    notifications.take(8).forEach { notif ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (!notif.read) Color(0xFF1F2633) else Color(0xFF161A23),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (!notif.read) Color(0xFFFF6A00).copy(alpha = 0.65f) else Color(0xFF282D37)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("admin_order_notif_item_${notif.orderId}")
+                                .clickable { onOpenOrderNotification(notif) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (!notif.read) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color(0xFFFF6A00),
+                                                modifier = Modifier.size(8.dp)
+                                            ) {}
+                                        }
+                                        Text(
+                                            text = notif.title,
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (!notif.read) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = "${notif.body} • #${notif.orderId.takeLast(8)}",
+                                        color = Color(0xFFA0A5B0),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Text(
+                                    text = if (!notif.read) "გახსნა →" else "ნანახია",
+                                    color = if (!notif.read) Color(0xFFFF6A00) else Color(0xFF64748B),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==============================================================================
 // 7. შეკვეთების მართვის ეკრანი (Orders Management - Cloud Firestore & Local)
 // ==============================================================================
 @Composable
-fun AdminOrdersManagementView() {
+fun AdminOrdersManagementView(
+    initialTargetOrderId: String? = null,
+    onTargetOrderConsumed: () -> Unit = {},
+    onNavigateToImeiRequest: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var ordersList by remember { mutableStateOf<List<OrderRecord>>(emptyList()) }
+    var ordersList by remember {
+        mutableStateOf<List<OrderRecord>>(
+            if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+                AuthAndOrderManager.getOrders(context)
+            } else {
+                emptyList()
+            }
+        )
+    }
     var selectedStatusFilter by remember { mutableStateOf("ყველა") }
     var selectedOrderForDetail by remember { mutableStateOf<OrderRecord?>(null) }
+
+    val notifVersion = BekaNotificationManager.stateVersion.intValue
+    val adminNotifications = remember(notifVersion) {
+        BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
+    }
+    val unreadAdminNotificationsCount = remember(adminNotifications, notifVersion) {
+        BekaNotificationManager.getUnreadAdminOrdersCount(context)
+    }
 
     // რეალურ დროში ყველა შეკვეთის მოსმენა Firestore-დან
     DisposableEffect(Unit) {
         var registration: com.google.firebase.firestore.ListenerRegistration? = null
         try {
-            val repo = FirestoreRepository(context)
-            registration = repo.listenToAllOrdersForAdmin(
-                onOrdersUpdated = { cloudFirestoreOrders ->
-                    ordersList = cloudFirestoreOrders.map { it.toOrderRecord() }
-                }
-            )
+            if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+                val repo = FirestoreRepository(context)
+                registration = repo.listenToAllOrdersForAdmin(
+                    onOrdersUpdated = { cloudFirestoreOrders ->
+                        val mapped = cloudFirestoreOrders.map { it.toOrderRecord() }
+                        if (mapped.isNotEmpty()) {
+                            ordersList = mapped
+                        }
+                    }
+                )
+            }
         } catch (_: Exception) {}
         onDispose {
             registration?.remove()
+        }
+    }
+
+    // Deep-link-ით კონკრეტული შეკვეთის პირდაპირ გახსნა და წაკითხულად მონიშვნა
+    LaunchedEffect(initialTargetOrderId, ordersList) {
+        val targetId = initialTargetOrderId?.trim().orEmpty()
+        if (targetId.isNotBlank()) {
+            BekaNotificationManager.markAdminOrderNotificationAsRead(context, targetId, "service_order")
+            val found = ordersList.find { it.id == targetId || it.orderNumber == targetId }
+            if (found != null) {
+                selectedOrderForDetail = found
+                onTargetOrderConsumed()
+            }
         }
     }
 
@@ -5681,6 +6202,31 @@ fun AdminOrdersManagementView() {
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        item(key = "orders_notifications_history_banner") {
+            AdminOrderNotificationsHistoryPanel(
+                notifications = adminNotifications,
+                unreadCount = unreadAdminNotificationsCount,
+                onOpenOrderNotification = { notif ->
+                    BekaNotificationManager.markAdminOrderNotificationAsRead(
+                        context = context,
+                        orderIdOrNotificationId = notif.orderId,
+                        orderType = notif.orderType
+                    )
+                    if (notif.orderType == "imei_check") {
+                        onNavigateToImeiRequest(notif.orderId)
+                    } else {
+                        val found = ordersList.find { it.id == notif.orderId || it.orderNumber == notif.orderId }
+                        if (found != null) {
+                            selectedOrderForDetail = found
+                        }
+                    }
+                },
+                onMarkAllRead = {
+                    BekaNotificationManager.markAllAdminOrderNotificationsAsRead(context)
+                }
+            )
+        }
+
         item(key = "orders_header") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 val isDark = AppPreferencesManager.isDarkMode
@@ -5704,7 +6250,7 @@ fun AdminOrdersManagementView() {
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "სულ შეკვეთები: ${ordersList.size} | ნაჩვენებია: ${filteredOrders.size}",
+                                text = "სულ შეკვეთები: ${ordersList.size} | წაუკითხავი: $unreadAdminNotificationsCount",
                                 color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                 fontSize = 11.5.sp
                             )
@@ -5771,7 +6317,11 @@ fun AdminOrdersManagementView() {
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF282D37)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selectedOrderForDetail = order }
+                            .testTag("admin_order_card_${order.id}")
+                            .clickable {
+                                BekaNotificationManager.markAdminOrderNotificationAsRead(context, order.id, "service_order")
+                                selectedOrderForDetail = order
+                            }
                     ) {
                         Column(
                             modifier = Modifier.padding(12.dp),

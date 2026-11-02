@@ -98,6 +98,8 @@ data class FirestoreOrder(
     val currency: String = "GEL",
     val paymentMethod: String = "WhatsApp & ნაღდი / საბანკო გადარიცხვა",
     val trackingCode: String = "",
+    val adminRead: Boolean = false,
+    @ServerTimestamp val adminReadAt: Timestamp? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -183,6 +185,36 @@ data class FirestoreDiagnostic(
     @ServerTimestamp val createdAt: Timestamp? = null
 )
 
+@IgnoreExtraProperties
+data class AdminOrderNotificationRecord(
+    val notificationId: String = "",
+    val orderId: String = "",
+    val orderType: String = "imei_check", // "imei_check" | "service_order"
+    val title: String = "",
+    val body: String = "",
+    val deepLink: String = "",
+    val targetAdminEmail: String = AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+    val read: Boolean = false,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val readAtMillis: Long = 0L,
+    val readByUid: String = ""
+) {
+    val id: String get() = notificationId
+}
+
+@IgnoreExtraProperties
+data class AdminFcmTokenRecord(
+    val tokenId: String = "",
+    val token: String = "",
+    val userId: String = "",
+    val email: String = AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+    val deviceId: String = "",
+    val deviceModel: String = "",
+    val platform: String = "android",
+    val active: Boolean = true,
+    val updatedAtMillis: Long = System.currentTimeMillis()
+)
+
 class FirestoreRepository(
     val db: FirebaseFirestore,
     private val appContext: Context? = null
@@ -198,17 +230,22 @@ class FirestoreRepository(
     // ADMIN ROLE VERIFICATION (Server-Side / Token Claims / Admins Collection / Sole Admin beqa1994@gmail.com)
     // ==========================================================================
     suspend fun checkIsCurrentUserAdmin(): Boolean {
-        val ctx = appContext
         val firebaseAuth = runCatching { auth }.getOrNull() ?: return false
-        if (firebaseAuth.currentUser == null && ctx != null) {
-            runCatching {
-                AuthAndOrderManager.ensureAdminFirebaseSession(ctx)
-            }
-        }
         val currentUser = firebaseAuth.currentUser ?: return false
         return try {
             val tokenResult = runCatching { currentUser.getIdToken(false).await() }.getOrNull()
             val claims = tokenResult?.claims.orEmpty()
+
+            val email = (claims["email"] as? String)
+                ?.takeIf { it.isNotBlank() }
+                ?: currentUser.email?.takeIf { it.isNotBlank() }
+                ?: currentUser.providerData.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotBlank() } }
+                ?: ""
+
+            // Strictly enforce single authorized administrator: "beqa1994@gmail.com"
+            if (!AuthAndOrderManager.isSoleAdminEmail(email)) {
+                return false
+            }
 
             if (claims["admin"] == true) {
                 return true
@@ -219,16 +256,6 @@ class FirestoreRepository(
             }.getOrNull()
             if (adminDoc != null && adminDoc.exists()) {
                 return adminDoc.getBoolean("enabled") == true
-            }
-
-            val email = (claims["email"] as? String)
-                ?.takeIf { it.isNotBlank() }
-                ?: currentUser.email?.takeIf { it.isNotBlank() }
-                ?: currentUser.providerData.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotBlank() } }
-                ?: ""
-
-            if (!AuthAndOrderManager.isSoleAdminEmail(email)) {
-                return false
             }
 
             val explicitEmailVerifiedClaim = claims["email_verified"] as? Boolean
@@ -242,6 +269,20 @@ class FirestoreRepository(
                 signInProvider != "google.com"
             ) {
                 return false
+            }
+
+            // Ensure /admins/{uid} document exists in Firestore for the verified sole admin
+            runCatching {
+                db.collection("admins").document(currentUser.uid).set(
+                    mapOf(
+                        "uid" to currentUser.uid,
+                        "email" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                        "enabled" to true,
+                        "role" to "sole_admin",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    ),
+                    SetOptions.merge()
+                ).await()
             }
 
             true
@@ -502,6 +543,16 @@ class FirestoreRepository(
         try {
             docRef.set(payload).await()
             Log.d("FirestoreRepo", "Order created in Firestore: $orderId")
+            runCatching {
+                createAdminOrderNotification(orderId = orderId, orderType = "service_order")
+            }
+            appContext?.let { ctx ->
+                BekaNotificationManager.recordOrderCreatedForAdminOnly(
+                    context = ctx,
+                    orderId = orderId,
+                    orderType = "service_order"
+                )
+            }
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
         }
@@ -557,6 +608,7 @@ class FirestoreRepository(
             "currency" to "GEL",
             "paymentMethod" to orderRecord.paymentMethod.take(120),
             "trackingCode" to orderRecord.trackingCode.take(60),
+            "adminRead" to false,
             "createdAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp()
         )
@@ -564,6 +616,16 @@ class FirestoreRepository(
         return try {
             docRef.set(payload).await()
             Log.d("FirestoreRepo", "Cart order saved to Firestore: $safeOrderId")
+            runCatching {
+                createAdminOrderNotification(orderId = safeOrderId, orderType = "service_order")
+            }
+            appContext?.let { ctx ->
+                BekaNotificationManager.recordOrderCreatedForAdminOnly(
+                    context = ctx,
+                    orderId = safeOrderId,
+                    orderType = "service_order"
+                )
+            }
             Result.success(safeOrderId)
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.CREATE, docRef.path)
@@ -620,7 +682,14 @@ class FirestoreRepository(
         onOrdersUpdated: (List<FirestoreOrder>) -> Unit,
         onError: (String) -> Unit = {}
     ): ListenerRegistration? {
-        if (auth.currentUser == null) return null
+        val currentUser = auth.currentUser ?: return null
+        val userEmail = currentUser.email?.trim().orEmpty().ifBlank {
+            currentUser.providerData.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }.orEmpty()
+        }
+        if (!AuthAndOrderManager.isSoleAdminEmail(userEmail)) {
+            onOrdersUpdated(emptyList())
+            return null
+        }
         return db.collection("orders")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -1394,20 +1463,29 @@ class FirestoreRepository(
     suspend fun saveCurrentUserFcmToken(
         token: String,
         notificationsEnabled: Boolean = true,
-        deviceModel: String = android.os.Build.MODEL ?: "Android"
+        deviceModel: String = android.os.Build.MODEL ?: "Android",
+        deviceId: String = ""
     ): Result<Unit> {
         val currentUser = auth.currentUser ?: return Result.failure(
             IllegalStateException("User must be signed in to save FCM token")
         )
         val cleanToken = token.trim()
-        if (cleanToken.length < 10) {
-            return Result.failure(IllegalArgumentException("Invalid FCM token"))
+        if (cleanToken.length < 10 || cleanToken.startsWith("fcm_admin_dev_")) {
+            return Result.failure(IllegalArgumentException("Invalid or synthetic FCM token"))
         }
         val uid = currentUser.uid
-        val docRef = db.collection("fcm_tokens").document(uid)
+        val tokenHash = kotlin.math.abs(cleanToken.hashCode()).toString(16)
+        val safeDeviceId = deviceId.trim()
+            .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            .ifBlank { "dev_$tokenHash" }
+            .take(64)
+        val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+        val primaryDocRef = db.collection("fcm_tokens").document(multiDeviceDocId)
+        val legacyUserDocRef = db.collection("fcm_tokens").document(uid)
         val payload = hashMapOf<String, Any>(
             "userId" to uid,
             "token" to cleanToken.take(4096),
+            "deviceId" to safeDeviceId,
             "email" to (currentUser.email ?: "").take(150),
             "deviceModel" to deviceModel.take(120),
             "platform" to "android",
@@ -1415,10 +1493,11 @@ class FirestoreRepository(
             "updatedAt" to FieldValue.serverTimestamp()
         )
         return try {
-            docRef.set(payload).await()
+            primaryDocRef.set(payload).await()
+            runCatching { legacyUserDocRef.set(payload).await() }
             Result.success(Unit)
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            handleFirestoreError(e, OperationType.WRITE, primaryDocRef.path)
             Result.failure(e)
         }
     }
@@ -1729,6 +1808,425 @@ class FirestoreRepository(
             Result.success(Unit)
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, "categories/$categoryId")
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================================================
+    // SECURE ADMIN-ONLY ORDER NOTIFICATIONS & MULTI-DEVICE ADMIN FCM TOKENS
+    // ==========================================================================
+
+    /**
+     * Registers an FCM device token in `/admin_fcm_tokens/{tokenId}` exclusively when the
+     * currently authenticated Firebase user is the sole authorized administrator ("beqa1994@gmail.com").
+     * Supports multiple devices simultaneously logged in as the authorized administrator.
+     */
+    suspend fun registerAdminDeviceFcmToken(
+        token: String,
+        deviceId: String,
+        deviceModel: String = android.os.Build.MODEL ?: "Android"
+    ): Result<String> {
+        val cleanToken = token.trim()
+        if (cleanToken.length < 10 || cleanToken.startsWith("fcm_admin_dev_")) {
+            return Result.failure(IllegalArgumentException("Invalid or synthetic FCM token"))
+        }
+        val currentUser = auth.currentUser
+            ?: return Result.failure(IllegalStateException("PERMISSION_DENIED: Admin authentication required"))
+        if (!checkIsCurrentUserAdmin()) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: Only beqa1994@gmail.com may register admin FCM tokens"))
+        }
+
+        val tokenHash = kotlin.math.abs(cleanToken.hashCode()).toString(16)
+        val safeDeviceId = deviceId.trim().replace(Regex("[^a-zA-Z0-9_\\-]"), "_").ifBlank { "dev_$tokenHash" }.take(64)
+        val tokenId = "adm_tok_${safeDeviceId}_$tokenHash"
+        val docRef = db.collection("admin_fcm_tokens").document(tokenId)
+
+        val payload = hashMapOf<String, Any>(
+            "id" to tokenId,
+            "tokenId" to tokenId,
+            "token" to cleanToken.take(4096),
+            "userId" to currentUser.uid,
+            "email" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+            "deviceId" to safeDeviceId,
+            "deviceModel" to deviceModel.trim().ifBlank { "Android" }.take(120),
+            "platform" to "android",
+            "active" to true,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        return try {
+            docRef.set(payload, SetOptions.merge()).await()
+            // Remove any older rotated token documents for the same physical deviceId
+            runCatching {
+                val existingDeviceDocs = db.collection("admin_fcm_tokens")
+                    .whereEqualTo("deviceId", safeDeviceId)
+                    .get()
+                    .await()
+                for (doc in existingDeviceDocs.documents) {
+                    if (doc.id != tokenId) {
+                        runCatching { doc.reference.delete().await() }
+                    }
+                }
+            }
+            Result.success(tokenId)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Immediately queues Firestore deletion of the current device's FCM tokens while the
+     * Firebase Auth session is still active (before `auth.signOut()`).
+     */
+    fun enqueueUnregisterDeviceFcmTokensBeforeSignOut(
+        token: String,
+        deviceId: String = "",
+        explicitUid: String = ""
+    ) {
+        val cleanToken = token.trim()
+        val uid = explicitUid.trim().ifBlank { auth.currentUser?.uid.orEmpty() }
+        val tokenHash = if (cleanToken.isNotBlank()) {
+            kotlin.math.abs(cleanToken.hashCode()).toString(16)
+        } else {
+            ""
+        }
+        val safeDeviceId = deviceId.trim()
+            .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            .ifBlank { if (tokenHash.isNotBlank()) "dev_$tokenHash" else "" }
+            .take(64)
+
+        runCatching {
+            if (safeDeviceId.isNotBlank() && tokenHash.isNotBlank()) {
+                val adminTokenId = "adm_tok_${safeDeviceId}_$tokenHash"
+                db.collection("admin_fcm_tokens").document(adminTokenId).delete()
+            }
+            if (uid.isNotBlank()) {
+                if (safeDeviceId.isNotBlank()) {
+                    val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+                    db.collection("fcm_tokens").document(multiDeviceDocId).delete()
+                }
+                db.collection("fcm_tokens").document(uid).delete()
+            }
+        }
+    }
+
+    /**
+     * Removes the current device's FCM token from `/admin_fcm_tokens` and `/fcm_tokens`
+     * on logout or when switching to a non-admin account.
+     */
+    suspend fun unregisterDeviceFcmTokens(
+        token: String,
+        deviceId: String = "",
+        explicitUid: String = ""
+    ): Result<Unit> {
+        val cleanToken = token.trim()
+        val uid = explicitUid.trim().ifBlank { auth.currentUser?.uid.orEmpty() }
+        if (cleanToken.isBlank() && uid.isBlank()) return Result.success(Unit)
+        val tokenHash = if (cleanToken.isNotBlank()) {
+            kotlin.math.abs(cleanToken.hashCode()).toString(16)
+        } else {
+            ""
+        }
+        val safeDeviceId = deviceId.trim()
+            .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            .ifBlank { if (tokenHash.isNotBlank()) "dev_$tokenHash" else "" }
+            .take(64)
+
+        return try {
+            if (safeDeviceId.isNotBlank() && tokenHash.isNotBlank()) {
+                val adminTokenId = "adm_tok_${safeDeviceId}_$tokenHash"
+                runCatching { db.collection("admin_fcm_tokens").document(adminTokenId).delete().await() }
+            }
+            if (uid.isNotBlank()) {
+                if (safeDeviceId.isNotBlank()) {
+                    val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+                    runCatching { db.collection("fcm_tokens").document(multiDeviceDocId).delete().await() }
+                }
+                runCatching { db.collection("fcm_tokens").document(uid).delete().await() }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Cleans up an expired or invalid admin FCM token by querying `/admin_fcm_tokens` for matching token value.
+     */
+    suspend fun removeInvalidAdminFcmToken(token: String, deviceId: String = ""): Result<Unit> {
+        val cleanToken = token.trim()
+        if (cleanToken.isBlank()) return Result.success(Unit)
+        return try {
+            unregisterDeviceFcmTokens(cleanToken, deviceId)
+            if (checkIsCurrentUserAdmin()) {
+                val snap = db.collection("admin_fcm_tokens")
+                    .whereEqualTo("token", cleanToken)
+                    .get()
+                    .await()
+                for (doc in snap.documents) {
+                    runCatching { doc.reference.delete().await() }
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Creates a sanitized, non-PII administrator order notification record in
+     * `/admin_notifications/admin_order_{orderId}` when an order (`imei_check` or `service_order`)
+     * is created. Never includes the full IMEI, customer private information, or report data.
+     */
+    suspend fun createAdminOrderNotification(
+        orderId: String,
+        orderType: String,
+        createdByUid: String = ""
+    ): Result<AdminOrderNotificationRecord> {
+        val cleanOrderId = orderId.trim()
+        if (cleanOrderId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Order ID cannot be blank"))
+        }
+        val normalizedType = if (orderType == "service_order") "service_order" else "imei_check"
+        val notificationId = "admin_order_$cleanOrderId"
+        val sanitizedTitle = if (normalizedType == "imei_check") {
+            "ახალი IMEI შეკვეთა"
+        } else {
+            "ახალი შეკვეთა"
+        }
+        val sanitizedBody = if (normalizedType == "imei_check") {
+            "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა."
+        } else {
+            "შემოვიდა ახალი სერვისის შეკვეთა."
+        }
+        val deepLink = if (normalizedType == "imei_check") {
+            "bekaservice://admin/orders/imei/$cleanOrderId"
+        } else {
+            "bekaservice://admin/orders/service/$cleanOrderId"
+        }
+
+        val record = AdminOrderNotificationRecord(
+            notificationId = notificationId,
+            orderId = cleanOrderId,
+            orderType = normalizedType,
+            title = sanitizedTitle,
+            body = sanitizedBody,
+            deepLink = deepLink,
+            targetAdminEmail = AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+            read = false,
+            createdAtMillis = System.currentTimeMillis()
+        )
+
+        val currentUser = auth.currentUser ?: return Result.success(record)
+        val docRef = db.collection("admin_notifications").document(notificationId)
+        val resolvedActorUid = createdByUid.trim().ifBlank { currentUser.uid }
+        val payload = hashMapOf<String, Any>(
+            "id" to notificationId,
+            "notificationId" to notificationId,
+            "orderId" to cleanOrderId,
+            "orderType" to normalizedType,
+            "title" to sanitizedTitle,
+            "body" to sanitizedBody,
+            "deepLink" to deepLink,
+            "actorUid" to resolvedActorUid,
+            "targetAdminEmail" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+            "read" to false,
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        return try {
+            docRef.set(payload).await()
+            Result.success(record)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    private fun parseAdminNotificationDoc(doc: DocumentSnapshot): AdminOrderNotificationRecord? {
+        return try {
+            val notifId = doc.getString("notificationId")?.takeIf { it.isNotBlank() } ?: doc.id
+            val orderId = doc.getString("orderId") ?: return null
+            val orderType = doc.getString("orderType") ?: "imei_check"
+            val rawTitle = doc.getString("title") ?: "ახალი შეკვეთა"
+            val rawBody = doc.getString("body") ?: "შემოვიდა ახალი შეკვეთა."
+            val deepLink = doc.getString("deepLink") ?: if (orderType == "service_order") {
+                "bekaservice://admin/orders/service/$orderId"
+            } else {
+                "bekaservice://admin/orders/imei/$orderId"
+            }
+            AdminOrderNotificationRecord(
+                notificationId = notifId,
+                orderId = orderId,
+                orderType = orderType,
+                title = BekaNotificationManager.stripSensitiveDataFromPayload(rawTitle),
+                body = BekaNotificationManager.stripSensitiveDataFromPayload(rawBody),
+                deepLink = deepLink,
+                targetAdminEmail = doc.getString("targetAdminEmail") ?: AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                read = doc.getBoolean("read") == true,
+                createdAtMillis = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis(),
+                readAtMillis = doc.getTimestamp("readAt")?.toDate()?.time ?: 0L,
+                readByUid = doc.getString("readByUid") ?: ""
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun fetchAdminOrderNotifications(): Result<List<AdminOrderNotificationRecord>> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: მხოლოდ ავტორიზებულ ადმინისტრატორს (beqa1994@gmail.com) აქვს წვდომა შეკვეთების შეტყობინებებზე.")
+            )
+        }
+        return try {
+            val snap = db.collection("admin_notifications").get().await()
+            val list = snap.documents.mapNotNull { parseAdminNotificationDoc(it) }
+                .sortedByDescending { it.createdAtMillis }
+            Result.success(list)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "admin_notifications")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Real-time listener on `/admin_notifications` strictly gated to the sole authorized
+     * administrator ("beqa1994@gmail.com"). Keeps unread counts and notification history
+     * synchronized across multiple admin devices.
+     */
+    fun listenToAdminOrderNotifications(
+        onNotificationsUpdated: (List<AdminOrderNotificationRecord>) -> Unit = {},
+        onUpdated: (List<AdminOrderNotificationRecord>) -> Unit = onNotificationsUpdated,
+        onError: (String) -> Unit = {}
+    ): ListenerRegistration? {
+        val currentUser = auth.currentUser ?: return null
+        val userEmail = currentUser.email?.trim().orEmpty().ifBlank {
+            currentUser.providerData.firstNotNullOfOrNull { it.email?.trim()?.takeIf { e -> e.isNotBlank() } }.orEmpty()
+        }
+        if (!AuthAndOrderManager.isSoleAdminEmail(userEmail)) {
+            onUpdated(emptyList())
+            return null
+        }
+
+        return db.collection("admin_notifications")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    if (auth.currentUser == null) return@addSnapshotListener
+                    val errJson = handleFirestoreError(error, OperationType.LIST, "admin_notifications")
+                    onError(error.localizedMessage ?: errJson)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val items = snapshot.documents
+                        .mapNotNull { parseAdminNotificationDoc(it) }
+                        .sortedByDescending { it.createdAtMillis }
+                    onUpdated(items)
+                }
+            }
+    }
+
+    /**
+     * Marks an admin order notification (and its corresponding order/IMEI request `adminRead` flag)
+     * as read ONLY when invoked by the verified sole administrator ("beqa1994@gmail.com").
+     */
+    suspend fun markAdminOrderNotificationRead(
+        orderIdOrNotificationId: String,
+        orderIdOrType: String = "",
+        explicitOrderType: String = ""
+    ): Result<Unit> {
+        val currentUser = auth.currentUser
+        if (currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: მხოლოდ ავტორიზებულ ადმინისტრატორს (beqa1994@gmail.com) შეუძლია შეტყობინების წაკითხულად მონიშვნა.")
+            )
+        }
+        val cleanId = orderIdOrNotificationId.trim()
+        if (cleanId.isBlank()) return Result.failure(IllegalArgumentException("Empty notification/order ID"))
+
+        val orderType = when {
+            explicitOrderType.isNotBlank() -> explicitOrderType
+            orderIdOrType in listOf("imei_check", "service_order") -> orderIdOrType
+            else -> ""
+        }
+        val notificationId = if (cleanId.startsWith("admin_order_")) cleanId else "admin_order_$cleanId"
+        val rawOrderId = if (orderIdOrType.isNotBlank() && orderIdOrType !in listOf("imei_check", "service_order")) {
+            orderIdOrType.trim()
+        } else {
+            cleanId.removePrefix("admin_order_")
+        }
+        val docRef = db.collection("admin_notifications").document(notificationId)
+
+        return try {
+            docRef.update(
+                mapOf(
+                    "read" to true,
+                    "readAt" to FieldValue.serverTimestamp(),
+                    "readByUid" to currentUser.uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+
+            if (orderType == "service_order" || rawOrderId.startsWith("ord_") || rawOrderId.startsWith("order_")) {
+                runCatching {
+                    db.collection("orders").document(rawOrderId).update(
+                        mapOf(
+                            "adminRead" to true,
+                            "adminReadAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            } else if (orderType == "imei_check" || rawOrderId.startsWith("imei_req_")) {
+                runCatching {
+                    db.collection("imei_requests").document(rawOrderId).update(
+                        mapOf(
+                            "adminRead" to true,
+                            "adminReadAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun markAllAdminOrderNotificationsRead(): Result<Unit> {
+        val currentUser = auth.currentUser
+        if (currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: მხოლოდ ავტორიზებულ ადმინისტრატორს (beqa1994@gmail.com) შეუძლია შეტყობინებების წაკითხულად მონიშვნა.")
+            )
+        }
+        return try {
+            val snap = db.collection("admin_notifications")
+                .whereEqualTo("read", false)
+                .get()
+                .await()
+            if (!snap.isEmpty) {
+                val batch = db.batch()
+                for (doc in snap.documents) {
+                    batch.update(
+                        doc.reference,
+                        mapOf(
+                            "read" to true,
+                            "readAt" to FieldValue.serverTimestamp(),
+                            "readByUid" to currentUser.uid,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+                batch.commit().await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, "admin_notifications")
             Result.failure(e)
         }
     }

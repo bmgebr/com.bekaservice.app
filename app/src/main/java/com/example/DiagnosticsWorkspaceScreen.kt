@@ -489,6 +489,73 @@ fun DiagnosticsWorkspaceScreen(
         }
     }
 
+    val imeiStateVersion = ImeiCheckManager.stateVersion.intValue
+    val currentUser = remember(imeiStateVersion) { AuthAndOrderManager.getCurrentUser(context) }
+    val resolvedUid = remember(currentUser, imeiStateVersion) {
+        ImeiCheckManager.resolveCurrentUserId(context, currentUser)
+    }
+    val imeiConfig = remember(imeiStateVersion) { ImeiCheckManager.loadConfig(context) }
+    val imeiHistoryCount = remember(resolvedUid, imeiStateVersion) {
+        if (resolvedUid.isNotBlank()) ImeiCheckManager.loadUserHistoryLocal(context, resolvedUid).size else 0
+    }
+
+    var activeImeiSubScreen by remember { mutableStateOf("NONE") }
+    var activeImeiReportId by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        ImeiCheckManager.syncPublicCatalogAndConfigFromCloud(context)
+    }
+
+    DisposableEffect(resolvedUid) {
+        val reg = if (resolvedUid.isNotBlank()) {
+            ImeiCheckManager.listenToUserImeiHistory(context, resolvedUid) { _ -> }
+        } else null
+        onDispose { reg?.remove() }
+    }
+
+    if (activeImeiSubScreen != "NONE") {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.pageBg)
+                .padding(top = topPadding, bottom = effectiveBottomInset)
+        ) {
+            when (activeImeiSubScreen) {
+                "IMEI_CHECK" -> ImeiCheckFullScreen(
+                    currentUser = currentUser,
+                    onBack = { activeImeiSubScreen = "NONE" },
+                    onOpenHistory = { activeImeiSubScreen = "IMEI_HISTORY" },
+                    onOpenReport = { repId ->
+                        activeImeiReportId = repId
+                        activeImeiSubScreen = "IMEI_REPORT"
+                    },
+                    onRequireAuth = {
+                        Toast.makeText(
+                            context,
+                            "გთხოვთ გაიაროთ ავტორიზაცია პროფილის გვერდიდან",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
+                "IMEI_HISTORY" -> ImeiCustomerHistoryScreen(
+                    currentUser = currentUser,
+                    onBack = { activeImeiSubScreen = "IMEI_CHECK" },
+                    onOpenReport = { repId ->
+                        activeImeiReportId = repId
+                        activeImeiSubScreen = "IMEI_REPORT"
+                    },
+                    onStartNewCheck = { activeImeiSubScreen = "IMEI_CHECK" }
+                )
+                "IMEI_REPORT" -> ImeiCustomerReportScreen(
+                    requestId = activeImeiReportId,
+                    currentUser = currentUser,
+                    onBack = { activeImeiSubScreen = "IMEI_HISTORY" }
+                )
+            }
+        }
+        return
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -521,6 +588,10 @@ fun DiagnosticsWorkspaceScreen(
                     palette = palette,
                     selectedMode = stateHolder.selectedMode,
                     startersDismissed = stateHolder.startersDismissed,
+                    imeiConfig = imeiConfig,
+                    imeiHistoryCount = imeiHistoryCount,
+                    onOpenImeiCheck = { activeImeiSubScreen = "IMEI_CHECK" },
+                    onOpenImeiHistory = { activeImeiSubScreen = "IMEI_HISTORY" },
                     onDismissStarters = { stateHolder.startersDismissed = true },
                     onPickGallery = {
                         galleryLauncher.launch(
@@ -874,6 +945,10 @@ private fun DiagnosticsEmptyStateContent(
     palette: DiagnosticsThemePalette,
     selectedMode: DiagnosticUserMode,
     startersDismissed: Boolean,
+    imeiConfig: ImeiServiceConfig,
+    imeiHistoryCount: Int,
+    onOpenImeiCheck: () -> Unit,
+    onOpenImeiHistory: () -> Unit,
     onDismissStarters: () -> Unit,
     onPickGallery: () -> Unit,
     onTakePhoto: () -> Unit,
@@ -904,6 +979,17 @@ private fun DiagnosticsEmptyStateContent(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (imeiConfig.entryCardVisible) {
+            item(key = "imei_diagnostics_entry_card_item") {
+                ImeiCheckDiagnosticsEntryCard(
+                    config = imeiConfig,
+                    historyCount = imeiHistoryCount,
+                    onOpenImeiCheck = onOpenImeiCheck,
+                    onOpenHistory = onOpenImeiHistory
+                )
+            }
+        }
+
         item {
             Surface(
                 shape = RoundedCornerShape(18.dp),

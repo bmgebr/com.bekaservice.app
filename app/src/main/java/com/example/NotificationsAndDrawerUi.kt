@@ -848,6 +848,100 @@ fun UserNotificationsScreen(
             }
         }
 
+        // სისტემური არხის სტატუსი და მწარმოებლის (Xiaomi/POCO, Samsung, Motorola) ფონური მიწოდების გზამკვლევი
+        item(key = "notif_oem_delivery_guide") {
+            val diagnostics = remember(version) { BekaNotificationManager.getDeliveryDiagnostics(context) }
+            var showOemGuide by remember { mutableStateOf(!diagnostics.isFullyOperational) }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (diagnostics.isFullyOperational) Color(0xFF141820) else Color(0xFF281912),
+                border = BorderStroke(
+                    1.dp,
+                    if (diagnostics.isFullyOperational) Color(0xFF262C3A) else Color(0xFFFF7A00).copy(alpha = 0.65f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("oem_notification_delivery_guide_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showOemGuide = !showOemGuide }
+                            .testTag("toggle_oem_delivery_guide_button"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (diagnostics.isFullyOperational) {
+                                    "🔔 ფონური შეტყობინებები აქტიურია • გზამკვლევი (${diagnostics.manufacturerName})"
+                                } else {
+                                    "⚠️ შეტყობინებების არხი ან ნებართვა გამორთულია"
+                                },
+                                color = if (diagnostics.isFullyOperational) Color(0xFFE2E8F0) else Color(0xFFFFB067),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (showOemGuide) "დააჭირეთ დასაკეცად ▲" else "როგორ მივიღოთ შეტყობინებები დახურულ აპზე ▼",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 10.5.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFFF7A00).copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .clickable {
+                                    BekaNotificationManager.openSystemNotificationSettings(
+                                        context,
+                                        BekaNotificationManager.CHANNEL_ID
+                                    )
+                                }
+                                .testTag("open_notification_channel_settings_button")
+                        ) {
+                            Text(
+                                text = "არხის პარამეტრები",
+                                color = Color(0xFFFF9E40),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    if (showOemGuide) {
+                        HorizontalDivider(color = Color(0xFF262C3A))
+                        Text(
+                            text = diagnostics.manufacturerTitleKa,
+                            color = Color(0xFFFF9E40),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        diagnostics.manufacturerStepsKa.forEachIndexed { idx, step ->
+                            Text(
+                                text = "${idx + 1}. $step",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // შეცდომის ბანერი (თუ ქსელის/Firestore-ის შეცდომა მოხდა)
         if (!errorMessage.isNullOrBlank()) {
             item(key = "notif_error_banner") {

@@ -17,14 +17,25 @@ class BekaFirebaseMessagingService : FirebaseMessagingService() {
         super.onNewToken(token)
         Log.d("BekaPush", "FCM registration token refreshed")
         BekaNotificationManager.saveLocalFcmToken(applicationContext, token)
-        if (FirebaseAuth.getInstance().currentUser != null) {
+        val deviceId = BekaNotificationManager.getOrCreateDeviceId(applicationContext)
+        if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(applicationContext)) {
+            BekaNotificationManager.registerAdminDeviceToken(applicationContext, token, deviceId)
+        }
+        if (runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull() != null) {
             serviceScope.launch {
                 try {
                     val repo = FirestoreRepository(applicationContext)
                     repo.saveCurrentUserFcmToken(
                         token = token,
-                        notificationsEnabled = BekaNotificationManager.hasNotificationPermission(applicationContext)
+                        notificationsEnabled = BekaNotificationManager.hasNotificationPermission(applicationContext),
+                        deviceId = deviceId
                     )
+                    if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(applicationContext)) {
+                        repo.registerAdminDeviceFcmToken(
+                            token = token,
+                            deviceId = deviceId
+                        )
+                    }
                 } catch (e: Exception) {
                     Log.w("BekaPush", "Failed to sync refreshed FCM token to Firestore: ${e.message}")
                 }
@@ -37,36 +48,12 @@ class BekaFirebaseMessagingService : FirebaseMessagingService() {
         val data = remoteMessage.data
         val notificationPayload = remoteMessage.notification
 
-        val notificationId = data["notificationId"]
-            ?: data["id"]
-            ?: remoteMessage.messageId
-            ?: "fcm_${System.currentTimeMillis()}"
-
-        val title = data["title"]
-            ?: notificationPayload?.title
-            ?: "BEKASERVICE"
-
-        val body = data["body"]
-            ?: data["message"]
-            ?: notificationPayload?.body
-            ?: ""
-
-        val targetProductId = (data["targetProductId"] ?: data["productId"])?.toIntOrNull() ?: 0
-        val targetTab = data["targetTab"]?.toIntOrNull() ?: 0
-        val type = data["type"]?.takeIf { it.isNotBlank() } ?: "announcement"
-
-        if (body.isNotBlank()) {
-            BekaNotificationManager.showNotification(
-                context = applicationContext,
-                notificationId = notificationId,
-                title = title,
-                body = body,
-                targetProductId = targetProductId,
-                targetTab = targetTab,
-                type = type,
-                persistToHistory = true
-            )
-        }
+        BekaNotificationManager.handleIncomingFcmMessageData(
+            context = applicationContext,
+            data = data,
+            notificationTitle = notificationPayload?.title,
+            notificationBody = notificationPayload?.body,
+            messageId = remoteMessage.messageId
+        )
     }
 }
-

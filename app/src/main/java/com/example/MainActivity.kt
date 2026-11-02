@@ -1258,6 +1258,9 @@ fun BekaServiceApp(
     var showAdminPinDialog by remember { mutableStateOf(false) }
     var showAdminPanelScreen by remember { mutableStateOf(false) }
     var isAdminOpen by remember { mutableStateOf(false) }
+    var adminInitialTab by remember { mutableIntStateOf(0) }
+    var adminInitialOrderId by remember { mutableStateOf<String?>(null) }
+    var adminInitialImeiRequestId by remember { mutableStateOf<String?>(null) }
 
     val homeListState = rememberLazyListState()
     var lastHomeBackPressTime by remember { mutableLongStateOf(0L) }
@@ -1374,9 +1377,16 @@ fun BekaServiceApp(
                 )
             }
         }
-        val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener {
+        val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
             attachFavoritesListener()
             AuthAndOrderManager.favoritesStateVersion.intValue++
+            if (firebaseAuth.currentUser != null) {
+                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        BekaNotificationManager.syncFcmTokenAndSubscribeTopic(context, firestoreRepo)
+                    }
+                }
+            }
         }
         auth?.addAuthStateListener(authListener)
         attachFavoritesListener()
@@ -1436,13 +1446,98 @@ fun BekaServiceApp(
         }
     }
 
-    // შეტყობინებაზე დაჭერისას კონკრეტულ პროდუქტზე ან ტაბზე გადასვლა (Foreground / Background / Closed state)
+    // შეტყობინებაზე დაჭერისას კონკრეტულ პროდუქტზე, ტაბზე ან ადმინის შეკვეთაზე გადასვლა (Foreground / Background / Closed state)
     LaunchedEffect(deepLinkIntent, productsList.size) {
         val intent = deepLinkIntent ?: return@LaunchedEffect
-        val clickedNotifId = intent.getStringExtra(BekaNotificationManager.EXTRA_NOTIFICATION_ID).orEmpty()
-        if (clickedNotifId.isNotBlank()) {
-            BekaNotificationManager.markNotificationRead(context, clickedNotifId)
+
+        // 1. ადმინისტრატორის შეკვეთის Deep Link-ის უსაფრთხო დამუშავება (მხოლოდ beqa1994@gmail.com-ისთვის)
+        val deepLinkUri = intent.data?.toString().orEmpty()
+        val extraAdminOrderId = intent.getStringExtra(BekaNotificationManager.EXTRA_ADMIN_ORDER_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("orderId").orEmpty()
+        val cleanAdminOrderId = extraAdminOrderId.trim()
+        val extraAdminOrderType = (intent.getStringExtra(BekaNotificationManager.EXTRA_ADMIN_ORDER_TYPE)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("orderType").orEmpty()).trim()
+        val extraAdminDeepLink = (intent.getStringExtra(BekaNotificationManager.EXTRA_ADMIN_DEEP_LINK)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("deepLink").orEmpty()).trim()
+        val effectiveDeepLink = extraAdminDeepLink.ifBlank { deepLinkUri }
+
+        val parsedAdminTarget: Pair<String, String>? = when {
+            cleanAdminOrderId.isNotBlank() -> {
+                val resolvedType = if (extraAdminOrderType.equals("service_order", ignoreCase = true) ||
+                    effectiveDeepLink.contains("/orders/service/")
+                ) {
+                    "service_order"
+                } else {
+                    "imei_check"
+                }
+                resolvedType to cleanAdminOrderId
+            }
+            effectiveDeepLink.startsWith("bekaservice://admin/orders/imei/") -> {
+                val id = effectiveDeepLink.substringAfter("bekaservice://admin/orders/imei/").substringBefore("?").trim()
+                if (id.isNotBlank()) "imei_check" to id else null
+            }
+            effectiveDeepLink.startsWith("bekaservice://admin/orders/service/") -> {
+                val id = effectiveDeepLink.substringAfter("bekaservice://admin/orders/service/").substringBefore("?").trim()
+                if (id.isNotBlank()) "service_order" to id else null
+            }
+            else -> null
         }
+
+        if (parsedAdminTarget != null) {
+            val (orderType, targetOrderId) = parsedAdminTarget
+            intent.removeExtra(BekaNotificationManager.EXTRA_ADMIN_NOTIFICATION_ID)
+            intent.removeExtra(BekaNotificationManager.EXTRA_ADMIN_ORDER_ID)
+            intent.removeExtra(BekaNotificationManager.EXTRA_ADMIN_ORDER_TYPE)
+            intent.removeExtra(BekaNotificationManager.EXTRA_ADMIN_DEEP_LINK)
+            intent.removeExtra("orderId")
+            intent.removeExtra("orderType")
+            intent.removeExtra("deepLink")
+            intent.removeExtra("adminNotificationDocId")
+            intent.data = null
+
+            if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+                hasCompletedInitialLaunch = true
+                showSplash = false
+                AppPreferencesManager.setOnboardingCompleted(context, true)
+                AdminStorage.setAdminSessionActive(context, true)
+                BekaNotificationManager.markAdminOrderNotificationAsRead(context, targetOrderId, orderType)
+                if (orderType == "imei_check") {
+                    adminInitialTab = 10
+                    adminInitialImeiRequestId = targetOrderId
+                    adminInitialOrderId = null
+                } else {
+                    adminInitialTab = 2
+                    adminInitialOrderId = targetOrderId
+                    adminInitialImeiRequestId = null
+                }
+                showAdminPinDialog = false
+                showAdminPanelScreen = true
+            } else {
+                showAdminPanelScreen = false
+                Toast.makeText(
+                    context,
+                    "❌ წვდომა უარყოფილია: მხოლოდ ავტორიზებულ ადმინისტრატორს აქვს წვდომა შეკვეთებზე",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            onDeepLinkConsumed()
+            return@LaunchedEffect
+        }
+
+        val clickedNotifId = (intent.getStringExtra(BekaNotificationManager.EXTRA_NOTIFICATION_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("notificationId")
+            ?: intent.getStringExtra("id")).orEmpty().trim()
+        val fcmDataTitle = (intent.getStringExtra(BekaNotificationManager.EXTRA_NOTIFICATION_TITLE)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("title")).orEmpty().trim()
+        val fcmDataBody = (intent.getStringExtra(BekaNotificationManager.EXTRA_NOTIFICATION_BODY)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent.getStringExtra("body")).orEmpty().trim()
+        val fcmDataType = intent.getStringExtra("type").orEmpty().trim().ifBlank { "announcement" }
 
         val targetProdId = intent.getIntExtra(BekaNotificationManager.EXTRA_TARGET_PRODUCT_ID, 0)
             .takeIf { it > 0 }
@@ -1455,12 +1550,34 @@ fun BekaServiceApp(
             ?: intent.getStringExtra("targetTab")?.toIntOrNull()?.takeIf { it in 0..7 }
             ?: -1
 
-        if (targetProdId > 0 || targetTab in 0..7) {
+        if (clickedNotifId.isNotBlank()) {
+            if (fcmDataTitle.isNotBlank() && fcmDataBody.isNotBlank()) {
+                BekaNotificationManager.upsertLocalNotificationRecord(
+                    context,
+                    PushNotificationRecord(
+                        id = clickedNotifId,
+                        title = BekaNotificationManager.stripSensitiveDataFromPayload(fcmDataTitle),
+                        body = BekaNotificationManager.stripSensitiveDataFromPayload(fcmDataBody),
+                        type = fcmDataType,
+                        targetProductId = targetProdId,
+                        targetTab = if (targetTab in 0..7) targetTab else 0,
+                        senderEmail = AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                        createdAtMillis = System.currentTimeMillis()
+                    )
+                )
+            }
+            BekaNotificationManager.markNotificationDelivered(context, clickedNotifId)
+            BekaNotificationManager.markNotificationRead(context, clickedNotifId)
+        }
+
+        if (targetProdId > 0 || targetTab in 0..7 || clickedNotifId.isNotBlank()) {
             hasCompletedInitialLaunch = true
             showSplash = false
             AppPreferencesManager.setOnboardingCompleted(context, true)
             if (targetTab in 0..7) {
                 selectedTab = targetTab
+            } else if (clickedNotifId.isNotBlank() && targetProdId <= 0) {
+                selectedTab = 6
             }
             if (targetProdId > 0) {
                 val found = productsList.find { it.id == targetProdId }
@@ -1469,12 +1586,68 @@ fun BekaServiceApp(
                 }
             }
             intent.removeExtra(BekaNotificationManager.EXTRA_NOTIFICATION_ID)
+            intent.removeExtra(BekaNotificationManager.EXTRA_NOTIFICATION_TITLE)
+            intent.removeExtra(BekaNotificationManager.EXTRA_NOTIFICATION_BODY)
             intent.removeExtra(BekaNotificationManager.EXTRA_TARGET_PRODUCT_ID)
             intent.removeExtra(BekaNotificationManager.EXTRA_TARGET_TAB)
+            intent.removeExtra("notificationId")
+            intent.removeExtra("id")
+            intent.removeExtra("title")
+            intent.removeExtra("body")
+            intent.removeExtra("type")
             intent.removeExtra("targetProductId")
             intent.removeExtra("productId")
             intent.removeExtra("targetTab")
             onDeepLinkConsumed()
+        }
+    }
+
+    // რეალურ დროში მხოლოდ ავტორიზებული ადმინისტრატორის (beqa1994@gmail.com) შეკვეთების შეტყობინებების მოსმენა
+    DisposableEffect(firestoreRepo, favoritesVersion) {
+        var adminOrderNotifRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+        var initialAdminSnapshotHandled = false
+        val baselineAdminTs = System.currentTimeMillis()
+        try {
+            if (firestoreRepo != null && AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+                adminOrderNotifRegistration = firestoreRepo.listenToAdminOrderNotifications(
+                    onNotificationsUpdated = { cloudAdminNotifs ->
+                        val merged = BekaNotificationManager.syncCloudAdminOrderNotificationsToLocal(context, cloudAdminNotifs)
+                        val now = System.currentTimeMillis()
+                        if (!initialAdminSnapshotHandled) {
+                            initialAdminSnapshotHandled = true
+                            merged.forEach { n ->
+                                if (n.read) {
+                                    BekaNotificationManager.markNotificationDelivered(context, n.id)
+                                }
+                            }
+                        } else {
+                            merged
+                                .filter { n ->
+                                    !n.read &&
+                                        !BekaNotificationManager.hasDeliveredNotification(context, n.id) &&
+                                        n.createdAtMillis >= baselineAdminTs - 120_000L &&
+                                        n.createdAtMillis >= now - 300_000L
+                                }
+                                .sortedBy { it.createdAtMillis }
+                                .forEach { newAdminNotif ->
+                                    BekaNotificationManager.showAdminOrderSystemNotification(
+                                        context = context,
+                                        notificationId = newAdminNotif.id,
+                                        orderId = newAdminNotif.orderId,
+                                        orderType = newAdminNotif.orderType,
+                                        title = newAdminNotif.title,
+                                        body = newAdminNotif.body
+                                    )
+                                }
+                        }
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("BekaPush", "Admin order notifications listener error", e)
+        }
+        onDispose {
+            adminOrderNotifRegistration?.remove()
         }
     }
 
@@ -2086,6 +2259,13 @@ fun BekaServiceApp(
                     onClose = {
                         showAdminPinDialog = false
                         showAdminPanelScreen = false
+                    },
+                    initialTab = adminInitialTab,
+                    initialTargetOrderId = adminInitialOrderId,
+                    initialTargetImeiRequestId = adminInitialImeiRequestId,
+                    onInitialTargetConsumed = {
+                        adminInitialOrderId = null
+                        adminInitialImeiRequestId = null
                     }
                 )
             }
@@ -3672,18 +3852,30 @@ fun HomeScreen(
                             )
                         }
 
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp)
-                        ) {
-                            items(featuredSoftwareProducts, key = { "feat_sw_${it.id}" }) { swProd ->
-                                Box(modifier = Modifier.width(172.dp)) {
-                                    ProductPhotoCard(
-                                        product = swProd,
-                                        onClick = { onProductClick(swProd) },
-                                        onAddToCart = { onAddToCart(swProd) },
-                                        onToggleFavorite = { onToggleFavorite(swProd) }
-                                    )
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val itemSpacing = 10.dp
+                            val symmetricCardWidth = ((maxWidth - itemSpacing) / 2f).coerceAtLeast(148.dp)
+                            val softwareRowState = rememberLazyListState()
+                            val snapFlingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(
+                                lazyListState = softwareRowState
+                            )
+
+                            LazyRow(
+                                state = softwareRowState,
+                                flingBehavior = snapFlingBehavior,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(itemSpacing),
+                                contentPadding = PaddingValues(horizontal = 0.dp)
+                            ) {
+                                items(featuredSoftwareProducts, key = { "feat_sw_${it.id}" }) { swProd ->
+                                    Box(modifier = Modifier.width(symmetricCardWidth)) {
+                                        ProductPhotoCard(
+                                            product = swProd,
+                                            onClick = { onProductClick(swProd) },
+                                            onAddToCart = { onAddToCart(swProd) },
+                                            onToggleFavorite = { onToggleFavorite(swProd) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -4841,7 +5033,7 @@ fun ProductPhotoCard(
                     color = Color(0xFF1E232D),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3545)),
                     modifier = Modifier
-                        .weight(0.95f)
+                        .weight(1f)
                         .height(34.dp)
                         .clickable { onClick() }
                 ) {
@@ -4866,15 +5058,15 @@ fun ProductPhotoCard(
                         containerColor = Color(0xFFFF7A00),
                         disabledContainerColor = Color(0xFF262A34)
                     ),
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                     modifier = Modifier
-                        .weight(1.05f)
+                        .weight(1f)
                         .height(34.dp)
                 ) {
                     Text(
                         if (isDigitalSoftware) "შეკვეთა" else "🛒 კალათაში",
                         color = if (product.inStock) Color.White else Color(0xFF6E7582),
-                        fontSize = 10.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
