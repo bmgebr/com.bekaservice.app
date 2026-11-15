@@ -15,8 +15,18 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAnonymousAuth() {
+      return isSignedIn() &&
+        request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'anonymous';
+    }
+
+    function isRegisteredUser() {
+      return request.auth != null &&
+        request.auth.token.get('firebase', {}).get('sign_in_provider', '') != 'anonymous';
+    }
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isRegisteredUser() && request.auth.uid == userId;
     }
 
     // Strictly server-verified Administrator check for sole admin (beqa1994@gmail.com):
@@ -25,32 +35,25 @@ service cloud.firestore {
     // 3. Firebase Auth verified token for sole admin 'beqa1994@gmail.com',
     //    unless /admins/{uid} exists with enabled != true.
     function isVerifiedPrimaryAdmin() {
-      return isSignedIn() &&
-        'email' in request.auth.token &&
-        request.auth.token.email is string &&
-        request.auth.token.email.lower() == 'beqa1994@gmail.com' &&
+      return request.auth.token.get('email', '').lower() == 'beqa1994@gmail.com' &&
         (
           !('email_verified' in request.auth.token) ||
           request.auth.token.email_verified == true ||
-          ('firebase' in request.auth.token &&
-           request.auth.token.firebase is map &&
-           'sign_in_provider' in request.auth.token.firebase &&
-           request.auth.token.firebase.sign_in_provider == 'password')
+          request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'password'
         );
     }
 
     function hasActiveAdminDoc() {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+      return exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('enabled', false) == true;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
+      return isRegisteredUser() && (
+        request.auth.token.get('admin', false) == true ||
         hasActiveAdminDoc() ||
-        (request.auth.token.keys().hasAll(['admin']) && request.auth.token.admin == true) ||
         (isVerifiedPrimaryAdmin() &&
-          (!exists(/databases/$(database)/documents/admins/$(request.auth.uid)) || hasActiveAdminDoc()))
+          !exists(/databases/$(database)/documents/admins/$(request.auth.uid)))
       );
     }
 
@@ -76,26 +79,35 @@ service cloud.firestore {
     }
 
     function isValidServiceOrder(data) {
-      return data.id is string && data.id.size() >= 1 && data.id.size() <= 100 &&
+      return data.size() <= 45 &&
+             data.id is string && data.id.size() >= 1 && data.id.size() <= 100 &&
              data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
              data.userPhone is string && data.userPhone.size() >= 4 && data.userPhone.size() <= 30 &&
-             (!('orderNumber' in data) || data.orderNumber == null || (data.orderNumber is string && data.orderNumber.size() <= 40)) &&
-             (!('userName' in data) || data.userName == null || (data.userName is string && data.userName.size() <= 100)) &&
-             (!('userEmail' in data) || data.userEmail == null || (data.userEmail is string && data.userEmail.size() <= 150)) &&
-             (!('deliveryAddress' in data) || data.deliveryAddress == null || (data.deliveryAddress is string && data.deliveryAddress.size() <= 300)) &&
+             data.get('orderNumber', '') is string && data.get('orderNumber', '').size() <= 40 &&
+             data.get('userName', '') is string && data.get('userName', '').size() <= 100 &&
+             data.get('userEmail', '') is string && data.get('userEmail', '').size() <= 150 &&
+             data.get('deliveryAddress', '') is string && data.get('deliveryAddress', '').size() <= 300 &&
              data.deviceModel is string && data.deviceModel.size() >= 1 && data.deviceModel.size() <= 100 &&
              data.serviceType is string && data.serviceType.size() >= 1 && data.serviceType.size() <= 300 &&
-             (!('issueDescription' in data) || data.issueDescription == null || (data.issueDescription is string && data.issueDescription.size() <= 4000)) &&
+             data.get('issueDescription', '') is string && data.get('issueDescription', '').size() <= 4000 &&
              (!('items' in data) || data.items == null || (data.items is list && data.items.size() <= 50)) &&
              data.status in ['pending', 'in_progress', 'completed', 'cancelled'] &&
              (!('price' in data) || data.price == null || (data.price is string && data.price.size() <= 50) || (data.price is number && data.price >= 0)) &&
              (!('totalAmount' in data) || data.totalAmount == null || (data.totalAmount is number && data.totalAmount >= 0)) &&
-             (!('priceVerified' in data) || data.priceVerified is bool) &&
-             (!('currency' in data) || data.currency == null || (data.currency is string && data.currency.size() <= 10)) &&
-             (!('paymentMethod' in data) || data.paymentMethod == null || (data.paymentMethod is string && data.paymentMethod.size() <= 120)) &&
-             (!('trackingCode' in data) || data.trackingCode == null || (data.trackingCode is string && data.trackingCode.size() <= 60)) &&
-             (!('adminRead' in data) || data.adminRead is bool) &&
-             (!('adminReadAt' in data) || data.adminReadAt == null || (data.adminReadAt is timestamp && data.adminReadAt <= request.time)) &&
+             data.get('priceVerified', false) is bool &&
+             data.get('currency', 'GEL') is string && data.get('currency', 'GEL').size() <= 10 &&
+             data.get('paymentMethod', '') is string && data.get('paymentMethod', '').size() <= 120 &&
+             data.get('paymentMethodCode', 'bank_transfer') in ['bank_transfer', 'cod', 'legacy_unspecified', ''] &&
+             data.get('paymentStatus', 'pending') in ['pending', 'verification_pending', 'awaiting_collection', 'paid', 'failed', 'cancelled', 'expired', 'refunded'] &&
+             data.get('deliveryMethodCode', 'pickup') in ['pickup', 'courier', ''] &&
+             data.get('bankCode', '') is string && data.get('bankCode', '').size() <= 60 &&
+             data.get('bankName', '') is string && data.get('bankName', '').size() <= 120 &&
+             data.get('ibanSnapshot', '') is string && data.get('ibanSnapshot', '').size() <= 60 &&
+             data.get('paymentReference', '') is string && data.get('paymentReference', '').size() <= 80 &&
+             data.get('userConfirmedPaymentAtMillis', 0) is number && data.get('userConfirmedPaymentAtMillis', 0) >= 0 &&
+             data.get('paymentConfirmedAtMillis', 0) is number && data.get('paymentConfirmedAtMillis', 0) >= 0 &&
+             data.get('paymentConfirmedBy', '') is string && data.get('paymentConfirmedBy', '').size() <= 150 &&
+             data.get('adminRead', false) is bool &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
              (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
     }
@@ -125,25 +137,98 @@ service cloud.firestore {
       return data.userId is string && data.userId == request.auth.uid &&
              data.token is string && data.token.size() >= 10 && data.token.size() <= 4096 &&
              (!('deviceId' in data) || data.deviceId == null || (data.deviceId is string && data.deviceId.size() <= 120)) &&
+             (!('tokenHash' in data) || data.tokenHash == null || (data.tokenHash is string && data.tokenHash.size() <= 128)) &&
              (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 150)) &&
              (!('deviceModel' in data) || data.deviceModel == null || (data.deviceModel is string && data.deviceModel.size() <= 120)) &&
              (!('platform' in data) || data.platform == null || (data.platform is string && data.platform.size() <= 30)) &&
              (!('notificationsEnabled' in data) || data.notificationsEnabled == null || data.notificationsEnabled is bool) &&
+             (!('active' in data) || data.active is bool) &&
+             (!('createdAt' in data) || data.createdAt == null || (data.createdAt is timestamp && data.createdAt <= request.time)) &&
              data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isPublicNotificationType(notifType) {
+      return notifType in [
+        'announcement',
+        'product',
+        'product_offer',
+        'promotion',
+        'system_info',
+        'maintenance',
+        'product_restock',
+        'service_update'
+      ];
     }
 
     function isValidNotification(data) {
       return data.id is string && data.id.size() >= 1 && data.id.size() <= 128 &&
              data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
              data.body is string && data.body.size() >= 1 && data.body.size() <= 1500 &&
-             (!('type' in data) || data.type == null || data.type in ['announcement', 'product_offer', 'service_update', 'imei_update']) &&
+             data.get('visibility', '') in ['PUBLIC', 'PRIVATE_USER', 'ADMIN_ONLY'] &&
+             (!('type' in data) || data.type == null || data.type in [
+               'announcement', 'product', 'product_offer', 'promotion', 'system_info',
+               'maintenance', 'product_restock', 'service_update',
+               'order_update', 'payment_update', 'payment_confirmed', 'payment_instructions', 'account_update', 'admin_message',
+               'admin_order', 'imei_update'
+             ]) &&
              (!('targetProductId' in data) || data.targetProductId == null || (data.targetProductId is number && data.targetProductId >= 0)) &&
+             (!('targetProductDocId' in data) || data.targetProductDocId == null || (data.targetProductDocId is string && data.targetProductDocId.size() <= 128)) &&
              (!('targetTab' in data) || data.targetTab == null || (data.targetTab is number && data.targetTab >= 0 && data.targetTab <= 7)) &&
+             (!('orderId' in data) || data.orderId == null || (data.orderId is string && data.orderId.size() <= 128)) &&
+             (!('orderNumber' in data) || data.orderNumber == null || (data.orderNumber is string && data.orderNumber.size() <= 60)) &&
+             (!('relatedEntityId' in data) || data.relatedEntityId == null || (data.relatedEntityId is string && data.relatedEntityId.size() <= 128)) &&
+             (!('recipientUid' in data) || data.recipientUid == null || (data.recipientUid is string && data.recipientUid.size() <= 128)) &&
              (!('senderEmail' in data) || data.senderEmail == null || (data.senderEmail is string && data.senderEmail.size() <= 150)) &&
-             (!('audience' in data) || data.audience == null || (data.audience is string && data.audience.size() <= 80)) &&
+             (!('audience' in data) || data.audience == null || (data.audience is string && data.audience.size() <= 140)) &&
              (!('status' in data) || data.status == null || (data.status is string && data.status.size() <= 40)) &&
+             (!('isRead' in data) || data.isRead == null || data.isRead is bool) &&
+             (!('readAt' in data) || data.readAt == null || (data.readAt is timestamp && data.readAt <= request.time)) &&
              data.createdAt is timestamp && data.createdAt <= request.time &&
-             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+             (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is timestamp && data.updatedAt <= request.time)) &&
+             (
+               (
+                 data.visibility == 'PUBLIC' &&
+                 data.get('audience', '') in ['all', 'all_users'] &&
+                 data.get('recipientUid', '') == '' &&
+                 data.get('orderId', '') == '' &&
+                 data.get('orderNumber', '') == '' &&
+                 isPublicNotificationType(data.get('type', 'announcement'))
+               ) ||
+               (
+                 data.visibility == 'PRIVATE_USER' &&
+                 data.get('recipientUid', '') is string &&
+                 data.get('recipientUid', '').size() >= 1 &&
+                 data.get('audience', '') == ('user:' + data.get('recipientUid', ''))
+               ) ||
+               (
+                 data.visibility == 'ADMIN_ONLY' &&
+                 data.get('recipientUid', '') == '' &&
+                 data.get('audience', '') == 'admin_only'
+               )
+             );
+    }
+
+    function isPublicNotificationResource(data) {
+      return data.get('visibility', '') == 'PUBLIC' &&
+             data.get('audience', '') in ['all', 'all_users'] &&
+             data.get('recipientUid', '') == '' &&
+             data.get('orderId', '') == '' &&
+             data.get('orderNumber', '') == '' &&
+             isPublicNotificationType(data.get('type', ''));
+    }
+
+    function isOwnPrivateNotificationResource(data) {
+      return isRegisteredUser() && (
+        (
+          data.get('visibility', '') == 'PRIVATE_USER' &&
+          data.get('recipientUid', '') == request.auth.uid &&
+          data.get('audience', '') == ('user:' + request.auth.uid)
+        ) ||
+        (
+          !('visibility' in data) &&
+          data.get('audience', '') == ('user:' + request.auth.uid)
+        )
+      );
     }
 
     function isValidAdminFcmToken(data, tokenId) {
@@ -179,13 +264,12 @@ service cloud.firestore {
                ('id' in data && data.id is string && data.id == notificationId) ||
                ('notificationId' in data && data.notificationId is string && data.notificationId == notificationId)
              ) &&
-             data.title is string && data.title in ['ახალი IMEI შეკვეთა', 'ახალი შეკვეთა'] &&
-             data.body is string && data.body in [
-               'შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.',
-               'შემოვიდა ახალი სერვისის შეკვეთა.'
-             ] &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 160 &&
+             data.body is string && data.body.size() >= 5 && data.body.size() <= 400 &&
              !data.title.matches('.*[0-9]{15}.*') &&
              !data.body.matches('.*[0-9]{15}.*') &&
+             !data.title.matches('.*@.*\\..*') &&
+             !data.body.matches('.*@.*\\..*') &&
              data.orderId is string && data.orderId.size() >= 1 && data.orderId.size() <= 100 &&
              data.orderType in ['imei_check', 'service_order'] &&
              data.deepLink is string && data.deepLink.size() >= 10 && data.deepLink.size() <= 300 &&
@@ -364,11 +448,31 @@ service cloud.firestore {
              data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
-    // Server-managed Admins lookup collection (never writable from client)
+    function isValidSoleAdminSelfSync(data, adminId) {
+      return isVerifiedPrimaryAdmin() &&
+             isOwner(adminId) &&
+             isValidId(adminId) &&
+             data.keys().hasAll(['uid', 'email', 'enabled', 'role', 'updatedAt']) &&
+             data.keys().hasOnly(['uid', 'email', 'enabled', 'role', 'customClaimAdmin', 'updatedAt']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && data.email.lower() == 'beqa1994@gmail.com' &&
+             data.enabled is bool && data.enabled == true &&
+             data.role is string && data.role in ['sole_admin', 'super_admin'] &&
+             (!('customClaimAdmin' in data) || data.customClaimAdmin is bool) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time &&
+             (!exists(/databases/$(database)/documents/admins/$(adminId)) ||
+              get(/databases/$(database)/documents/admins/$(adminId)).data.get('enabled', false) == true);
+    }
+
+    // Server-verified Admins lookup collection:
+    // Only the cryptographically verified sole administrator (beqa1994@gmail.com)
+    // can synchronize their own active /admins/{uid} record (and cannot re-enable if disabled).
+    // Ordinary users can never read, list, create, update, or delete /admins documents.
     match /admins/{adminId} {
       allow get: if (isOwner(adminId) || isAdmin()) && isValidId(adminId);
       allow list: if isAdmin();
-      allow create, update, delete: if false;
+      allow create, update: if isValidSoleAdminSelfSync(incoming(), adminId);
+      allow delete: if false;
     }
 
     // Users collection:
@@ -390,31 +494,11 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['userId', 'displayName', 'email', 'phoneNumber', 'photoUrl', 'address', 'deviceModel', 'favoriteProductIds', 'createdAt', 'updatedAt']);
       allow delete: if (isOwner(userId) || isAdmin()) && isValidId(userId);
 
-      // Customer IMEI Check History subcollection:
-      // - User can read and delete only their own history entries
-      // - User can create their own pending history entry when submitting an IMEI check
-      // - User CANNOT update status, price, or verification results (only Admin can update)
+      // Customer IMEI Check History subcollection (Retired):
+      // Client writes disabled. Existing history readable and deletable by the owner or Admin.
       match /imei_history/{historyId} {
         allow get, list: if (isOwner(userId) || isAdmin()) && isValidId(userId);
-        allow create: if isValidId(userId) &&
-                         isValidId(historyId) &&
-                         incoming().id == historyId &&
-                         isValidImeiHistoryEntry(incoming(), userId) &&
-                         (
-                           isAdmin() ||
-                           (
-                             isOwner(userId) &&
-                             incoming().status == 'pending' &&
-                             (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['unpaid', 'pending'])
-                           )
-                         );
-        allow update: if isAdmin() &&
-                         isValidId(userId) &&
-                         isValidId(historyId) &&
-                         isValidImeiHistoryEntry(incoming(), userId) &&
-                         incoming().id == existing().id &&
-                         incoming().userId == existing().userId &&
-                         incoming().createdAt == existing().createdAt;
+        allow create, update: if false;
         allow delete: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidId(historyId);
       }
     }
@@ -424,55 +508,99 @@ service cloud.firestore {
     //   client CANNOT mark 'priceVerified == true' or set server-only payment flags.
     // - Order owner ('userId') is strictly bound to request.auth.uid on creation and immutable on update.
     match /orders/{orderId} {
-      allow get: if isSignedIn() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() &&
+      allow get: if isRegisteredUser() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isRegisteredUser() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isRegisteredUser() &&
                        isValidId(orderId) &&
                        incoming().userId == request.auth.uid &&
                        incoming().status == 'pending' &&
+                       (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['pending', 'awaiting_collection']) &&
+                       (!('userConfirmedPaymentAtMillis' in incoming()) || incoming().userConfirmedPaymentAtMillis == 0) &&
+                       (!('paymentConfirmedAtMillis' in incoming()) || incoming().paymentConfirmedAtMillis == 0) &&
+                       (!('paymentConfirmedBy' in incoming()) || incoming().paymentConfirmedBy == '') &&
                        (!('priceVerified' in incoming()) || incoming().priceVerified == false) &&
                        (!('adminRead' in incoming()) || incoming().adminRead == false) &&
                        incoming().keys().hasAll(['id', 'userId', 'userPhone', 'deviceModel', 'serviceType', 'status', 'createdAt']) &&
-                       incoming().keys().hasOnly(['id', 'orderNumber', 'userId', 'userName', 'userPhone', 'userEmail', 'deliveryAddress', 'deviceModel', 'serviceType', 'issueDescription', 'items', 'status', 'price', 'totalAmount', 'priceVerified', 'currency', 'paymentMethod', 'trackingCode', 'adminRead', 'adminReadAt', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'id', 'orderNumber', 'userId', 'userName', 'userPhone', 'userEmail',
+                         'deliveryAddress', 'deliveryMethodCode', 'deliveryCity', 'deliveryFeeText',
+                         'deviceModel', 'serviceType', 'issueDescription', 'items', 'status',
+                         'price', 'totalAmount', 'priceVerified', 'currency',
+                         'paymentMethod', 'paymentMethodCode', 'paymentStatus',
+                         'bankAccountId', 'bankCode', 'bankName', 'recipientNameSnapshot', 'ibanSnapshot',
+                         'paymentReference', 'paymentInstructionsSnapshot',
+                         'userConfirmedPaymentAtMillis',
+                         'paymentConfirmedAtMillis', 'paymentConfirmedBy', 'paymentInternalNote',
+                         'acceptedTermsVersion', 'acceptedTermsAtMillis',
+                         'trackingCode', 'adminRead', 'adminReadAt', 'createdAt', 'updatedAt'
+                       ]) &&
                        isValidServiceOrder(incoming());
-      allow update: if isSignedIn() &&
+      allow update: if isRegisteredUser() &&
                        isValidId(orderId) &&
-                       isValidServiceOrder(incoming()) &&
                        incoming().id == existing().id &&
                        incoming().userId == existing().userId &&
                        incoming().createdAt == existing().createdAt &&
+                       isValidServiceOrder(incoming()) &&
                        (
-                         // Admin can update order status, trackingCode, priceVerified, or adminRead, but CANNOT change order owner (userId)
-                         (
-                           isAdmin() &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'trackingCode', 'price', 'totalAmount', 'priceVerified', 'adminRead', 'adminReadAt', 'updatedAt'])
-                         ) ||
-                         // Regular user can only cancel their own active order and CANNOT modify price, totalAmount, items, or owner
+                         // Regular user: immutable pricing/verification; can cancel active unpaid order, switch bank while pending, or mark bank transfer verification_pending (NEVER paid)
                          (
                            existing().userId == request.auth.uid &&
                            !(existing().status in ['completed', 'cancelled']) &&
-                           incoming().status == 'cancelled' &&
                            (!('price' in existing()) || incoming().price == existing().price) &&
                            (!('totalAmount' in existing()) || incoming().totalAmount == existing().totalAmount) &&
                            (!('priceVerified' in existing()) || incoming().priceVerified == existing().priceVerified) &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                           (
+                             (
+                               (!('paymentStatus' in existing()) || existing().paymentStatus != 'paid') &&
+                               incoming().status == 'cancelled' &&
+                               (!('paymentStatus' in incoming()) || incoming().paymentStatus == existing().get('paymentStatus', 'pending') || incoming().paymentStatus == 'cancelled') &&
+                               incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt'])
+                             ) ||
+                             (
+                               existing().get('paymentMethodCode', '') == 'bank_transfer' &&
+                               existing().get('paymentStatus', 'pending') == 'pending' &&
+                               incoming().status == existing().status &&
+                               (
+                                 incoming().get('paymentStatus', 'pending') == 'pending' ||
+                                 (
+                                   incoming().paymentStatus == 'verification_pending' &&
+                                   incoming().get('userConfirmedPaymentAtMillis', 0) > 0
+                                 )
+                               ) &&
+                               incoming().diff(existing()).affectedKeys().hasOnly([
+                                 'paymentStatus', 'userConfirmedPaymentAtMillis',
+                                 'bankAccountId', 'bankCode', 'bankName', 'recipientNameSnapshot',
+                                 'ibanSnapshot', 'paymentMethod', 'paymentInstructionsSnapshot', 'updatedAt'
+                               ])
+                             )
+                           )
+                         ) ||
+                         // Admin can update order status, paymentStatus, trackingCode, priceVerified, or adminRead, but CANNOT change order owner (userId)
+                         (
+                           isAdmin() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'status', 'trackingCode', 'price', 'totalAmount', 'priceVerified',
+                             'paymentStatus', 'userConfirmedPaymentAtMillis',
+                             'paymentConfirmedAtMillis', 'paymentConfirmedBy', 'paymentInternalNote',
+                             'adminRead', 'adminReadAt', 'updatedAt'
+                           ])
                          )
                        );
-      allow delete: if isSignedIn() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isRegisteredUser() && isValidId(orderId) && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Diagnostic Reports collection
     match /diagnostics/{diagnosticId} {
-      allow get: if isSignedIn() && isValidId(diagnosticId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() &&
+      allow get: if isRegisteredUser() && isValidId(diagnosticId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isRegisteredUser() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isRegisteredUser() &&
                        isValidId(diagnosticId) &&
                        incoming().userId == request.auth.uid &&
                        incoming().keys().hasAll(['id', 'userId', 'deviceModel', 'issueCategory', 'aiAnalysis', 'createdAt']) &&
                        incoming().keys().hasOnly(['id', 'userId', 'deviceModel', 'issueCategory', 'symptoms', 'aiAnalysis', 'estimatedCost', 'confidence', 'createdAt']) &&
                        isValidDiagnosticReport(incoming());
       allow update: if false;
-      allow delete: if isSignedIn() && isValidId(diagnosticId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isRegisteredUser() && isValidId(diagnosticId) && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Products & Software Services catalog (Public read, verified Admin-only unrestricted write)
@@ -483,6 +611,12 @@ service cloud.firestore {
 
     // Dynamic Categories Catalog (Public read, verified Admin-only unrestricted write)
     match /categories/{categoryId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Dynamic Brands Catalog (Public read, verified Admin-only unrestricted write)
+    match /brands/{brandId} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
     }
@@ -503,38 +637,81 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(configId);
     }
 
-    // FCM Registration Tokens (Strictly isolated per user and device; readable/listable by Admin only; never cross-user writable)
+    // FCM Registration Tokens (Strictly isolated per registered user and device; anonymous sessions forbidden)
     match /fcm_tokens/{userId} {
       allow get: if isValidId(userId) && (
                    isOwner(userId) ||
                    isAdmin() ||
-                   (isSignedIn() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
+                   (isRegisteredUser() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
                  );
-      allow list: if isAdmin();
-      allow create, update: if isSignedIn() &&
+      allow list: if isAdmin() || (isRegisteredUser() && resource.data.userId == request.auth.uid);
+      allow create, update: if isRegisteredUser() &&
                                isValidId(userId) &&
                                (userId == request.auth.uid || userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$')) &&
                                (resource == null || resource.data.userId == request.auth.uid) &&
                                incoming().userId == request.auth.uid &&
                                incoming().keys().hasAll(['userId', 'token', 'updatedAt']) &&
-                               incoming().keys().hasOnly(['userId', 'token', 'deviceId', 'email', 'deviceModel', 'platform', 'notificationsEnabled', 'updatedAt']) &&
+                               incoming().keys().hasOnly(['userId', 'token', 'tokenHash', 'deviceId', 'email', 'deviceModel', 'platform', 'notificationsEnabled', 'active', 'createdAt', 'updatedAt']) &&
                                isValidFcmToken(incoming());
       allow delete: if isValidId(userId) && (
                       isOwner(userId) ||
                       isAdmin() ||
-                      (isSignedIn() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
+                      (isRegisteredUser() && userId.matches('^' + request.auth.uid + '_[A-Za-z0-9_\\-]+$') && (resource == null || resource.data.userId == request.auth.uid))
                     );
     }
 
-    // Official Push Notifications Broadcasts (Public read for device delivery; strictly verified Admin-only write)
+    // Notifications (Strict visibility classification: PUBLIC, PRIVATE_USER, ADMIN_ONLY)
+    // - Never becomes public if recipientUid is blank or visibility is omitted.
+    // - Unauthenticated & anonymous callers can ONLY query/read explicit PUBLIC announcements.
+    // - Registered users can read ONLY their own PRIVATE_USER docs (+ mark read) and PUBLIC announcements.
     match /notifications/{notificationId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() &&
-                               isValidId(notificationId) &&
-                               incoming().id == notificationId &&
-                               incoming().keys().hasAll(['id', 'title', 'body', 'createdAt']) &&
-                               incoming().keys().hasOnly(['id', 'title', 'body', 'type', 'targetProductId', 'targetTab', 'senderEmail', 'audience', 'status', 'createdAt', 'updatedAt']) &&
-                               isValidNotification(incoming());
+      allow get: if isValidId(notificationId) && (
+                   isAdmin() ||
+                   isPublicNotificationResource(resource.data) ||
+                   isOwnPrivateNotificationResource(resource.data)
+                 );
+      allow list: if isAdmin() ||
+                    resource.data.visibility == 'PUBLIC' ||
+                    (
+                      isRegisteredUser() &&
+                      (
+                        resource.data.recipientUid == request.auth.uid ||
+                        resource.data.audience == ('user:' + request.auth.uid)
+                      )
+                    );
+      allow create: if isAdmin() &&
+                       isValidId(notificationId) &&
+                       incoming().id == notificationId &&
+                       incoming().keys().hasAll(['id', 'title', 'body', 'visibility', 'createdAt']) &&
+                       incoming().keys().hasOnly([
+                         'id', 'title', 'body', 'type', 'visibility', 'recipientUid',
+                         'relatedEntityId', 'targetProductId', 'targetTab', 'orderId',
+                         'orderNumber', 'senderEmail', 'audience', 'status',
+                         'isRead', 'readAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidNotification(incoming());
+      allow update: if isValidId(notificationId) &&
+                       incoming().id == existing().id &&
+                       (
+                         (
+                           isAdmin() &&
+                           incoming().keys().hasAll(['id', 'title', 'body', 'visibility', 'createdAt']) &&
+                           incoming().keys().hasOnly([
+                             'id', 'title', 'body', 'type', 'visibility', 'recipientUid',
+                             'relatedEntityId', 'targetProductId', 'targetTab', 'orderId',
+                             'orderNumber', 'senderEmail', 'audience', 'status',
+                             'isRead', 'readAt', 'createdAt', 'updatedAt'
+                           ]) &&
+                           isValidNotification(incoming())
+                         ) ||
+                         (
+                           isRegisteredUser() &&
+                           existing().get('visibility', '') == 'PRIVATE_USER' &&
+                           existing().get('recipientUid', '') == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'readAt', 'updatedAt']) &&
+                           incoming().get('isRead', false) is bool
+                         )
+                       );
       allow delete: if isAdmin() && isValidId(notificationId);
     }
 
@@ -555,7 +732,7 @@ service cloud.firestore {
     // Administrator-Only Order Notifications (Exclusively readable & mark-as-read by beqa1994@gmail.com)
     match /admin_notifications/{notificationId} {
       allow get, list: if isAdmin();
-      allow create: if isSignedIn() &&
+      allow create: if isRegisteredUser() &&
                        isValidId(notificationId) &&
                        notificationId == ('admin_order_' + incoming().orderId) &&
                        (
@@ -568,131 +745,94 @@ service cloud.firestore {
                          isAdmin() ||
                          isCorrespondingOrderOwnedByCaller(incoming().orderType, incoming().orderId)
                        );
-      allow update: if isAdmin() &&
-                       isValidId(notificationId) &&
+      allow update: if isValidId(notificationId) &&
                        incoming().orderId == existing().orderId &&
                        incoming().orderType == existing().orderType &&
                        incoming().deepLink == existing().deepLink &&
                        incoming().createdAt == existing().createdAt &&
-                       isValidAdminOrderNotification(incoming(), notificationId);
+                       isValidAdminOrderNotification(incoming(), notificationId) &&
+                       (
+                         isAdmin() ||
+                         (
+                           isRegisteredUser() &&
+                           incoming().read == false &&
+                           isCorrespondingOrderOwnedByCaller(existing().orderType, existing().orderId)
+                         )
+                       );
       allow delete: if isAdmin() && isValidId(notificationId);
     }
 
     // =========================================================================
-    // IMEI CHECK PLATFORM COLLECTIONS
+    // RETIRED IMEI SERVICE COLLECTIONS (Zero-Trust Lockdown for Google Play)
+    // All client write paths disabled. Existing historical records preserved
+    // for audit compliance, readable only by verified administrator.
     // =========================================================================
-
-    // 1. IMEI Manufacturer / Brand Configurations (Public read, Admin-only write)
     match /imei_brands/{brandId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(brandId) && isValidImeiBrand(incoming());
-      allow delete: if isAdmin() && isValidId(brandId);
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 2. IMEI Dynamic Result Field Definitions (Public read, Admin-only write)
     match /imei_result_fields/{fieldId} {
-      allow get, list: if true;
-      allow create, update: if isAdmin() && isValidId(fieldId) && isValidImeiResultField(incoming());
-      allow delete: if isAdmin() && isValidId(fieldId);
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 3. IMEI Verification Sources (Admin-only read & write — internal instructions never exposed to public)
     match /imei_sources/{sourceId} {
-      allow get, list: if isAdmin();
-      allow create, update: if isAdmin() && isValidId(sourceId) && isValidImeiSource(incoming());
-      allow delete: if isAdmin() && isValidId(sourceId);
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 4. IMEI Verification Requests
-    // - Users can create their own pending request with a 15-digit IMEI, and read only their own requests.
-    // - Users CANNOT change status, quotedPrice, paymentStatus, or verification fields.
-    // - Users CAN anonymize/flag their own request upon history deletion (imei = 'DELETED', userDeletedHistory = true).
-    // - Admins have full processing & status management access.
     match /imei_requests/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() &&
-                       isValidId(requestId) &&
-                       incoming().id == requestId &&
-                       incoming().userId == request.auth.uid &&
-                       incoming().imei.matches('^[0-9]{15}$') &&
-                       incoming().status == 'pending' &&
-                       incoming().paymentStatus in ['unpaid', 'pending'] &&
-                       (!('internalNotes' in incoming()) || incoming().internalNotes == '') &&
-                       (!('adminRead' in incoming()) || incoming().adminRead == false) &&
-                       isValidImeiRequest(incoming());
-      allow update: if isSignedIn() &&
-                       isValidId(requestId) &&
-                       isValidImeiRequest(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt &&
-                       (
-                         isAdmin() ||
-                         (
-                           existing().userId == request.auth.uid &&
-                           incoming().status == existing().status &&
-                           incoming().paymentStatus == existing().paymentStatus &&
-                           incoming().quotedPrice == existing().quotedPrice &&
-                           incoming().imei == 'DELETED' &&
-                           incoming().userDeletedHistory == true &&
-                           incoming().diff(existing()).affectedKeys().hasOnly(['imei', 'userDeletedHistory', 'updatedAt'])
-                         )
-                       );
-      allow delete: if isAdmin() && isValidId(requestId);
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 5. Customer-Facing IMEI Verification Reports
-    // - Readable by the request owner or Admin.
-    // - Created/updated exclusively by Admin.
-    // - Deletable by the request owner (when deleting their IMEI history) or Admin.
     match /imei_reports/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create, update: if isAdmin() &&
-                               isValidId(requestId) &&
-                               incoming().requestId == requestId &&
-                               isValidImeiReport(incoming());
-      allow delete: if isSignedIn() && isValidId(requestId) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 6. Minimal Anonymized Transaction / Accounting Records (no full IMEI stored)
     match /imei_accounting/{recordId} {
-      allow get, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() &&
-                       isValidId(recordId) &&
-                       incoming().id == recordId &&
-                       isValidImeiAccounting(incoming()) &&
-                       (
-                         isAdmin() ||
-                         (
-                           incoming().userId == request.auth.uid &&
-                           incoming().paymentStatus in ['unpaid', 'pending']
-                         )
-                       );
-      allow update: if isAdmin() &&
-                       isValidId(recordId) &&
-                       isValidImeiAccounting(incoming()) &&
-                       incoming().id == existing().id &&
-                       incoming().userId == existing().userId &&
-                       incoming().createdAt == existing().createdAt;
-      allow delete: if isAdmin() && isValidId(recordId);
+      allow read: if isAdmin();
+      allow write: if false;
     }
-
-    // 7. Aggregated IMEI Analytics Summary Documents (Admin-only)
     match /imei_analytics/{periodId} {
-      allow get, list: if isAdmin();
-      allow create, update, delete: if isAdmin() && isValidId(periodId);
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    match /imei_audit_logs/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
-    // 8. IMEI Audit Logs (Append-only for authenticated actor on own UID, readable by Admin)
-    match /imei_audit_logs/{eventId} {
+    // =========================================================================
+    // BSTORE PAYMENT SYSTEM COLLECTIONS
+    // 1. /payment_bank_accounts/{bankAccountId}:
+    //    - Read allowed only for authenticated users (never publicly exposed to unauthenticated callers)
+    //    - Write allowed strictly for verified Sole Administrator (beqa1994@gmail.com)
+    // 2. /payment_audit_logs/{auditId}:
+    //    - Immutable financial audit log: only Admin can read or append; nobody can update or delete.
+    // =========================================================================
+    match /payment_bank_accounts/{bankAccountId} {
+      allow get, list: if isRegisteredUser();
+      allow create, update: if isAdmin() &&
+                               isValidId(bankAccountId) &&
+                               incoming().id == bankAccountId &&
+                               incoming().bankCode is string && incoming().bankCode.size() >= 1 && incoming().bankCode.size() <= 40 &&
+                               incoming().bankName is string && incoming().bankName.size() >= 1 && incoming().bankName.size() <= 120 &&
+                               incoming().recipientName is string && incoming().recipientName.size() >= 1 && incoming().recipientName.size() <= 150 &&
+                               incoming().iban is string && incoming().iban.matches('^GE[0-9]{2}[A-Z0-9]{2}[0-9]{16}$') &&
+                               incoming().currency is string && incoming().currency == 'GEL' &&
+                               incoming().enabled is bool &&
+                               incoming().sortOrder is number;
+      allow delete: if isAdmin() && isValidId(bankAccountId);
+    }
+
+    match /payment_audit_logs/{auditId} {
       allow get, list: if isAdmin();
-      allow create: if isSignedIn() &&
-                       isValidId(eventId) &&
-                       incoming().id == eventId &&
-                       isValidImeiAuditLog(incoming());
-      allow update, delete: if isAdmin() && isValidId(eventId);
+      allow create: if isAdmin() &&
+                       isValidId(auditId) &&
+                       incoming().id == auditId &&
+                       incoming().orderId is string && incoming().orderId.size() >= 1 &&
+                       incoming().eventType is string && incoming().eventType.size() >= 1 &&
+                       incoming().newStatus is string && incoming().newStatus in ['pending', 'verification_pending', 'awaiting_collection', 'paid', 'failed', 'cancelled', 'expired', 'refunded'] &&
+                       incoming().actorEmail is string && incoming().actorEmail.lower() == 'beqa1994@gmail.com';
+      allow update, delete: if false;
     }
   }
 }

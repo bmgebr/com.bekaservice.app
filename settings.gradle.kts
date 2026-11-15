@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "BekaService"
+rootProject.name = "BSTORE"
 
 include(":app")

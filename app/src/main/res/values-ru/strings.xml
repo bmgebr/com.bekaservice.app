@@ -12,7 +12,7 @@
     <string name="onboarding_email_sign_in">По эл. почте</string>
     <string name="onboarding_skip_auth">Пропустить авторизацию</string>
     <string name="onboarding_ready_title">Всё готово!</string>
-    <string name="onboarding_ready_subtitle">Откройте цифровые сервисы в BEKASERVICE.</string>
+    <string name="onboarding_ready_subtitle">Откройте товары и сервисы в BSTORE.</string>
     <string name="onboarding_benefit_nav_title">Простая навигация</string>
     <string name="onboarding_benefit_nav_desc">Быстрый поиск и категории в одном месте</string>
     <string name="onboarding_benefit_trust_title">Надёжность</string>

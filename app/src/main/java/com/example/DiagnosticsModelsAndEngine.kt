@@ -416,7 +416,7 @@ object BekaMultimodalDiagnosticsEngine {
         }
 
         return """
-შენ ხარ BEKASERVICE-ის უფროსი მულტიმოდალური AI ინჟინერი და ფრთხილი, მტკიცებულებებზე დაფუძნებული მობილური ტექნიკოსი.
+შენ ხარ BSTORE-ის უფროსი მულტიმოდალური AI ინჟინერი და ფრთხილი, მტკიცებულებებზე დაფუძნებული მობილური ტექნიკოსი.
 შენი მუშაობის 10 უმკაცრესი წესი:
 1. პირველ რიგში უპასუხე მომხმარებლის კონკრეტულ კითხვას ან აღწერილ სიმპტომს ზუსტად და არსებითად.
 2. მკაფიოდ გაყავი ერთმანეთისგან:
@@ -467,7 +467,7 @@ $modeSpecificRules
   "recommendedProductIds": []
 }
 
-BEKASERVICE-ის LIVE კატალოგი:
+BSTORE-ის LIVE კატალოგი:
 $catalogSummary
 """.trimIndent()
     }
@@ -1032,12 +1032,12 @@ $catalogSummary
             }
             isServiceCenterRequest -> {
                 "📍 **სახლში შემოწმება vs სერვის-ცენტრის ჩარევა ($activeDeviceLabel):**\n\n" +
-                    "პირველ ეტაპზე შეგიძლიათ უსაფრთხოდ ჩაატაროთ ქვემოთ მითითებული პირველადი ტესტი. თუ ხარვეზი შენარჩუნდა, საჭიროა პროფესიონალური აპარატურული დიაგნოსტიკა **BEKASERVICE**-ში (ქ. ახალციხე, კოსტავას N10)."
+                    "პირველ ეტაპზე შეგიძლიათ უსაფრთხოდ ჩაატაროთ ქვემოთ მითითებული პირველადი ტესტი. თუ ხარვეზი შენარჩუნდა, საჭიროა პროფესიონალური აპარატურული დიაგნოსტიკა **BSTORE**-ში (ქ. ახალციხე, კოსტავას N10)."
             }
             isDataLossRequest -> {
                 "🔒 **პირადი მონაცემების (ფოტოები, კონტაქტები, ფაილები) უსაფრთხოება ($activeDeviceLabel):**\n\n" +
                     (if (domainTuple.domainTitle.contains("Bootloop") || domainTuple.domainTitle.contains("ჩატვირთვ"))
-                        "სისტემური ჩატვირთვის შეფერხების დროს მთავარი წესია არ აირჩიოთ 'Factory Reset / Wipe Data'. BEKASERVICE-ში ვიყენებთ Retain User Data რეჟიმს მონაცემების შესანარჩუნებლად."
+                        "სისტემური ჩატვირთვის შეფერხების დროს მთავარი წესია არ აირჩიოთ 'Factory Reset / Wipe Data'. BSTORE-ში ვიყენებთ Retain User Data რეჟიმს მონაცემების შესანარჩუნებლად."
                     else
                         "პერიფერიული კვანძების (ეკრანი, ელემენტი, დამტენის პორტი, კამერა) შემოწმებისა და შეკეთებისას მეხსიერების ჩიპი ხელუხლებელი რჩება და მონაცემები არ იშლება.")
             }
@@ -1051,7 +1051,7 @@ $catalogSummary
             }
             isPriceRequest -> {
                 "💰 **დიაგნოსტიკისა და შეკეთების პირობები ($activeDeviceLabel):**\n\n" +
-                    "• **პირველადი დიაგნოსტიკა:** BEKASERVICE-ში შემოწმება უფასოა.\n" +
+                    "• **პირველადი დიაგნოსტიკა:** BSTORE-ში შემოწმება უფასოა.\n" +
                     "• ზუსტი ღირებულება დამოკიდებულია იმაზე, მხოლოდ წმენდა/კონტაქტის აღდგენაა საჭირო თუ დეტალის შეცვლა (WhatsApp: +995 598 23 33 32)."
             }
             else -> {
@@ -1123,43 +1123,7 @@ $catalogSummary
 
         if (isHardwareSymptom) return null
 
-        // 1. Check software subscriptions & digital catalog items
-        val softwareKeywords = listOf(
-            "chatgpt", "ჩატჯიპიტი", "gpt", "openai",
-            "google ai", "gemini", "ჯემინი", "18 თვ", "google one", "2tb", "5tb", "gmail", "ჯიმეილ",
-            "canva", "კანვა", "capcut", "კაპკატ", "adobe", "ადობ", "photoshop", "ფოტოშოპ", "premiere", "acrobat",
-            "youtube", "იუთუბ", "spotify", "სპოტიფაი", "claude", "კლოდ", "grok", "გროკ",
-            "perplexity", "პერპლექს", "cursor", "კურსორ", "lovable", "ლავაბლ",
-            "windows", "ვინდოუს", "office", "ოფის", "microsoft 365", "word", "excel", "ltsc"
-        )
-        if (softwareKeywords.any { lowerLatest.contains(it) }) {
-            val matched = GeminiDiagnosticService.findRelevantProducts(latestQuery, catalogProducts)
-            if (matched.isNotEmpty()) {
-                val p = matched.first()
-                val detailsText = buildString {
-                    appendLine("✨ **${p.title}** ხელმისაწვდომია **BEKASERVICE**-ის კატალოგში:")
-                    appendLine()
-                    appendLine("• **ფასი:** ${p.price} ${if (p.duration.isNotBlank()) "(${p.duration})" else ""}")
-                    if (p.offerType.isNotBlank()) appendLine("• **პაკეტის ტიპი:** ${p.offerType} ${if (p.accountType.isNotBlank()) "• ${p.accountType}" else ""}")
-                    if (p.shortDescription.isNotBlank()) appendLine("• **აღწერა:** ${p.shortDescription}")
-                    if (p.features.isNotEmpty()) {
-                        appendLine("• **მთავარი უპირატესობები:**")
-                        p.features.take(4).forEach { f -> appendLine("  ✓ $f") }
-                    }
-                    if (p.activationTerms.isNotBlank()) appendLine("• **აქტივაცია:** ${p.activationTerms}")
-                    appendLine()
-                    append("ქვემოთ მოცემულ ბარათზე დაჭერით შეგიძლიათ ნახოთ სრული პარამეტრები და შეუკვეთოთ პირდაპირ აპლიკაციიდან!")
-                }
-                return DiagnosticMessage(
-                    role = "assistant",
-                    text = detailsText,
-                    structuredSection = null,
-                    recommendedProductIds = matched.take(2).map { it.id }.distinct()
-                )
-            }
-        }
-
-        // 2. Check if user is explicitly asking for the price/availability of a specific part or service in catalog
+        // Check if user is explicitly asking for the price/availability of a specific part or service in catalog
         val asksPriceOrAvailability = lowerLatest.contains("რა ღირს") || lowerLatest.contains("ფასი") ||
             lowerLatest.contains("გაქვთ") || lowerLatest.contains("ყიდვა") ||
             lowerLatest.contains("შეცვლა რა ჯდება")
@@ -1168,12 +1132,12 @@ $catalogSummary
             if (matched.isNotEmpty()) {
                 val topItems = matched.take(2)
                 val reply = buildString {
-                    appendLine("🔎 თქვენი მოთხოვნის შესაბამისად **BEKASERVICE**-ის კატალოგში მოიძებნა:")
+                    appendLine("🔎 თქვენი მოთხოვნის შესაბამისად **BSTORE**-ის კატალოგში მოიძებნა:")
                     appendLine()
                     topItems.forEach { item ->
                         appendLine("🔹 **${item.title}**")
-                        appendLine("• **ფასი:** ${item.price} | **გარანტია/ვადა:** ${item.duration.ifBlank { item.warranty }}")
-                        if (item.compatibleModels.isNotBlank() && !SoftwareCatalogData.isDigitalSoftwareService(item)) {
+                        appendLine("• **ფასი:** ${item.effectiveDisplayPrice} | **გარანტია/ვადა:** ${item.duration.ifBlank { item.warranty }}")
+                        if (item.compatibleModels.isNotBlank()) {
                             appendLine("• **თავსებადობა:** ${item.compatibleModels}")
                         }
                         if (item.shortDescription.isNotBlank()) {
@@ -1201,9 +1165,9 @@ $catalogSummary
             (lowerLatest.startsWith("привет") && lowerLatest.length < 18)
         if (isGreeting) {
             val greetingText = when (AppPreferencesManager.selectedLanguage.lowercase()) {
-                "en" -> "Hello! I am the BEKASERVICE AI Diagnostics Assistant. Describe your phone's issue or upload a photo, and I'll help identify possible causes and diagnostic steps."
-                "ru" -> "Здравствуйте! Я AI-ассистент диагностики BEKASERVICE. Опишите проблему с телефоном или загрузите фото, и я помогу определить возможные причины и шаги проверки."
-                else -> "გამარჯობა! მე ვარ BEKASERVICE-ის AI დიაგნოსტიკური ასისტენტი. აღწერე ტელეფონის პრობლემა ან ატვირთე ფოტო და დაგეხმარები შესაძლო მიზეზებისა და შემოწმების ნაბიჯების განსაზღვრაში."
+                "en" -> "Hello! I am the BSTORE AI Diagnostics Assistant. Describe your phone's issue or upload a photo, and I'll help identify possible causes and diagnostic steps."
+                "ru" -> "Здравствуйте! Я AI-ассистент диагностики BSTORE. Опишите проблему с телефоном или загрузите фото, и я помогу определить возможные причины и шаги проверки."
+                else -> "გამარჯობა! მე ვარ BSTORE-ის AI დიაგნოსტიკური ასისტენტი. აღწერე ტელეფონის პრობლემა ან ატვირთე ფოტო და დაგეხმარები შესაძლო მიზეზებისა და შემოწმების ნაბიჯების განსაზღვრაში."
             }
             return DiagnosticMessage(
                 role = "assistant",
@@ -1218,12 +1182,11 @@ $catalogSummary
         ) {
             return DiagnosticMessage(
                 role = "assistant",
-                text = "📍 **BEKASERVICE-ის მისამართი და კონტაქტი:**\n\n" +
+                text = "📍 **BSTORE-ის მისამართი და კონტაქტი:**\n\n" +
                     "• **მისამართი:** ქ. ახალციხე, მერაბ კოსტავას ქუჩა N10\n" +
                     "• **სამუშაო საათები:** ყოველდღე 10:00 – 20:00\n" +
-                    "• **WhatsApp / ტელეფონი:** +995 598 23 33 32\n" +
-                    "• **Telegram:** t.me/geounlock\n\n" +
-                    "ციფრული პროგრამული სერვისები და დისტანციური USB განბლოკვა ხელმისაწვდომია მთელი საქართველოს მასშტაბით 15–30 წუთში!",
+                    "• **WhatsApp / ტელეფონი:** +995 598 23 33 32\n\n" +
+                    "ყველა შესრულებულ აპარატურულ სამუშაოსა და სათადარიგო ნაწილზე მოქმედებს BSTORE-ის ოფიციალური გარანტია!",
                 structuredSection = null
             )
         }
@@ -1236,7 +1199,7 @@ $catalogSummary
                     "1. **Original / Soft OLED:** ქარხნული სტანდარტის დრეკადი პოლიმერული მატრიცა. აქვს იდეალური ფერები, მაქსიმალური სიკაშკაშე, 120Hz ProMotion მხარდაჭერა (შესაბამის მოდელებზე), თხელი ჩარჩოები და მინიმალური ენერგომოხმარება.\n" +
                     "2. **Hard OLED:** მყარი მინის სუბსტრატზე დამზადებული OLED. ფერები კარგია, თუმცა დავარდნისას უფრო მგრძნობიარეა ვიდრე Soft OLED.\n" +
                     "3. **Incell / IPS LCD:** ბიუჯეტური ვარიანტი უკანა განათებით (Backlight). არის ოდნავ უფრო სქელი, მოიხმარს მეტ ელემენტს და შავი ფერი არ არის აბსოლუტურად ღრმა.\n\n" +
-                    "**BEKASERVICE**-ში ვიყენებთ მაღალი კლასის OLED მატრიცებს True Tone-ის გადაპროგრამებითა და 6-თვიანი გარანტიით.",
+                    "**BSTORE**-ში ვიყენებთ მაღალი კლასის OLED მატრიცებს True Tone-ის გადაპროგრამებითა და 6-თვიანი გარანტიით.",
                 structuredSection = null,
                 recommendedProductIds = emptyList()
             )
@@ -1246,12 +1209,12 @@ $catalogSummary
             return DiagnosticMessage(
                 role = "assistant",
                 text = "🔍 **მეორადი სმარტფონის (iPhone / Android) ყიდვის წინ შესამოწმებელი მთავარი პუნქტები:**\n\n" +
-                    "1. **iCloud / Google FRP ბლოკი:** დარწმუნდით, რომ წინა მფლობელის ანგარიში სრულად გამოსულია და ტელეფონი არ არის MDM (კორპორატიულ) პროფილზე.\n" +
-                    "2. **IMEI და ქსელი (*#06#):** შეამოწმეთ მუშაობს თუ არა ქართული SIM ბარათი (Magti/Silknet/Cellfie) და ხომ არ აქვს R-SIM ჩიპი.\n" +
-                    "3. **ეკრანი და True Tone:** გახსენით თეთრი და შავი ფონი — არ უნდა ჰქონდეს ვარდისფერი/მწვანე ფონი (Burn-in) ან მკვდარი ზონები სენსორზე.\n" +
-                    "4. **Face ID / Touch ID და კამერები:** შეამოწმეთ ყველა ლინზა (0.5x, 1x, 2x/3x/5x) და ფოკუსირება.\n" +
-                    "5. **ელემენტის რესურსი:** დააკვირდით ხომ არ იკლებს პროცენტი ნახტომისებურად 2–3 წუთიანი ვიდეოს გადაღებისას.\n\n" +
-                    "სურვილის შემთხვევაში შეგიძლიათ მოიტანოთ ტელეფონი **BEKASERVICE**-ში სრულ კომპიუტერულ და აპარატურულ შემოწმებაზე!",
+                    "1. **ანგარიში და ქარხნული მდგომარეობა:** დარწმუნდით, რომ წინა მფლობელის პირადი პროფილი გამოსულია და მოწყობილობა განულებულია.\n" +
+                    "2. **ქსელი და კავშირი:** ჩადეთ SIM ბარათი, გამოსცადეთ ზარის ხარისხი და მობილური ინტერნეტი (4G/5G).\n" +
+                    "3. **ეკრანი და True Tone:** გახსენით თეთრი და შავი ფონი — არ უნდა ჰქონდეს ლაქები, ზოლები ან მკვდარი ზონები სენსორზე.\n" +
+                    "4. **კამერები და მიკროფონები:** შეამოწმეთ ყველა ლინზა (ძირითადი, ულტრაფართო, ზუმი) და ხმის ჩაწერა.\n" +
+                    "5. **ელემენტის რესურსი:** დააკვირდით ხომ არ იკლებს პროცენტი ნახტომისებურად მოკლე ვიდეოს გადაღებისას.\n\n" +
+                    "სურვილის შემთხვევაში შეგიძლიათ მოიტანოთ ტელეფონი **BSTORE**-ში სრულ ტექნიკურ და აპარატურულ შემოწმებაზე!",
                 structuredSection = null
             )
         }
@@ -1274,7 +1237,7 @@ $catalogSummary
 
     /**
      * Classifies the symptom accurately (prioritizing specific component symptoms and preventing
-     * false positives like "Google Pixel" matching FRP lock or camera issues matching battery).
+     * false positives like "Google Pixel" matching software or camera issues matching battery).
      */
     private fun classifyAndBuildTechnicalDiagnosis(
         queryText: String,
@@ -1326,13 +1289,10 @@ $catalogSummary
             (queryText.contains("ცხელდება") && !queryText.contains("პორტ") && !queryText.contains("დატენ")) ||
             queryText.contains("პროცენტ") || queryText.contains("ითიშება 20") || queryText.contains("ითიშება 15")
 
-        // 8. ACCOUNT LOCKS (FRP / iCloud) & NETWORK / SIM / BASEBAND (Never match bare "google" from "Google Pixel")
-        val isLockOrNetwork = queryText.contains("frp") || queryText.contains("icloud") ||
-            queryText.contains("apple id") || queryText.contains("google account") ||
-            queryText.contains("გუგლ აქაუნთ") ||
-            (queryText.contains("google") && (queryText.contains("ბლოკ") || queryText.contains("ანგარიშ") || queryText.contains("პაროლ"))) ||
-            queryText.contains("ბლოკ") || queryText.contains("sim") || queryText.contains("ქსელ") ||
-            queryText.contains("no service") || queryText.contains("imei") || queryText.contains("baseband") || queryText.contains("კოდ")
+        // 8. MOBILE NETWORK / SIM CARD & ANTENNA CONNECTIVITY
+        val isNetworkOrSim = queryText.contains("sim") || queryText.contains("სიმი") ||
+            queryText.contains("ქსელ") || queryText.contains("no service") ||
+            queryText.contains("სიგნალ") || queryText.contains("ანტენ") || queryText.contains("ინტერნეტ")
 
         // 9. WIFI / BLUETOOTH
         val isWirelessSensor = queryText.contains("wifi") || queryText.contains("ვაიფაი") || queryText.contains("bluetooth")
@@ -1349,7 +1309,7 @@ $catalogSummary
             isDisplayIssue -> buildDisplayDiagnosis(mode, queryText, deviceName, hasPhoto)
             isChargingOrPower -> buildPowerChargingDiagnosis(mode, queryText, deviceName, isTestResultUpdate)
             isBatteryOrThermal -> buildBatteryThermalDiagnosis(mode, queryText, deviceName)
-            isLockOrNetwork -> buildLockNetworkDiagnosis(mode, queryText, deviceName)
+            isNetworkOrSim -> buildNetworkSimDiagnosis(mode, queryText, deviceName)
             isWirelessSensor -> buildAudioCameraDiagnosis(mode, queryText, deviceName)
             isSlowOrStorage -> buildPerformanceStorageDiagnosis(mode, deviceName)
             else -> buildSmartGeneralDiagnosis(mode, queryText, fullHistoryText, deviceName, hasPhoto)
@@ -1429,7 +1389,7 @@ $catalogSummary
             nextTest = "შეაერთეთ ტელეფონი კომპიუტერზე USB კაბელით და შეამოწმეთ ჩანს თუ არა პორტი სტაბილურად გათიშვის გარეშე.",
             expectedFindings = "სტაბილური 9008 პორტის შემთხვევაში სისტემა აღდგება სერვერული ავტორიზაციით სერვის-ცენტრში.",
             tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB, Auth Server Tool, Testpoint პინცეტი" else "კომპიუტერი და USB კაბელი",
-            safety = "არ სცადოთ არათავსებადი ფაილების ჩაწერა, რათა არ დაზიანდეს IMEI/NVRAM კალიბრაციის სექტორი.",
+            safety = "არ სცადოთ არათავსებადი ფაილების ჩაწერა, რათა არ დაზიანდეს შიდა მეხსიერების კალიბრაციის სექტორი.",
             followUpQuestion = "ჩანს თუ არა ტელეფონი კომპიუტერის Device Manager-ში შეერთებისას?"
         )
     }
@@ -1680,35 +1640,33 @@ $catalogSummary
         )
     }
 
-    private fun buildLockNetworkDiagnosis(
+    private fun buildNetworkSimDiagnosis(
         mode: DiagnosticUserMode,
         queryText: String,
         deviceName: String
     ): DomainDiagnosisTuple {
-        val isNoService = queryText.contains("no service") || queryText.contains("searching") || queryText.contains("imei") || queryText.contains("baseband")
-        val simpleExp = if (isNoService) {
-            "📶 **ქსელის დაკარგვა / 'No Service' ($deviceName):**\n\nეს შეიძლება უკავშირდებოდეს SIM ბარათს, ოპერატორის შეზღუდვას (SIM Lock) ან მოდემის (Baseband) კვანძის ხარვეზს."
-        } else {
-            "🔓 **ანგარიშის ან ოპერატორის ბლოკი ($deviceName):**\n\nGoogle FRP, iCloud Activation Lock ან უცხოური ოპერატორის SIM ბლოკი საჭიროებს მოდელისა და ბლოკირების სტატუსის ზუსტ იდენტიფიკაციას."
-        }
+        val simpleExp = "📶 **ქსელის მიღების / SIM ბარათის ხარვეზი ($deviceName):**\n\n" +
+            "თუ ტელეფონი ვერ იჭერს ქსელს ('No Service', 'Searching') ან ვერ კითხულობს SIM ბარათს, შეამოწმეთ SIM ბარათის კონტაქტები, სცადეთ სხვა ოპერატორის SIM ბარათი და გადატვირთეთ ქსელის პარამეტრები (Settings → Reset Network Settings)."
+        val techExp = "ფიჭური ქსელისა და SIM ინტერფეისის დიაგნოსტიკა ($deviceName): მოწმდება SIM კონექტორის VCC/CLK/DATA ხაზები, RF ანტენის კოაქსიალური კაბელი და გადამცემი მოდულის კვება."
+
         return DomainDiagnosisTuple(
-            domainTitle = if (isNoService) "ქსელური რეგისტრაციის ან მოდემის (Baseband) ხარვეზი" else "ანგარიშის / ოპერატორის პროგრამული ბლოკი (FRP / iCloud / SIM Lock)",
-            directExplanation = simpleExp,
+            domainTitle = "ფიჭური ქსელისა და SIM ბარათის დიაგნოსტიკა",
+            directExplanation = if (mode == DiagnosticUserMode.TECHNICIAN) techExp else simpleExp,
             simpleExplanation = simpleExp,
-            deepTechnicalExplanation = simpleExp + " მოწმდება Baseband ვერსია, *#06# IMEI სტატუსი და Security Patch დონე.",
+            deepTechnicalExplanation = techExp,
             hypotheses = listOf(
                 DiagnosticHypothesis(
-                    title = if (isNoService) "SIM ბარათის, ოპერატორის ბლოკის ან Baseband მოდემის ხარვეზი" else "Google FRP / iCloud / Carrier SIM ბლოკი",
+                    title = "SIM სლოტის კონტაქტების, ანტენის კაბელის ან ქსელის პარამეტრების შეფერხება",
                     confidence = EvidenceConfidenceLevel.STRONGLY_SUSPECTED,
-                    supportingEvidence = "დაფიქსირებულია ბლოკირების ან ქსელის შეზღუდვის სიმპტომი ($queryText)",
-                    verificationOrDisproof = "მოდელის, IMEI-ს (*#06#) და ეკრანზე გამოტანილი შეტყობინების გადამოწმება"
+                    supportingEvidence = "დაფიქსირებულია ქსელის მიღების ან SIM ბარათის სიმპტომი ($queryText)",
+                    verificationOrDisproof = "სხვა SIM ბარათის მოსინჯვა და ქსელის პარამეტრების განულება"
                 )
             ),
-            nextTest = "აკრიფეთ *#06# (ან შეამოწმეთ Settings → About) და დააკვირდით, ჩანს თუ არა ეკრანზე IMEI კოდი.",
-            expectedFindings = "თუ IMEI ჩანს — მოდემი მუშაობს და საკითხი პროგრამულად/სერვერულად მოწმდება; თუ IMEI ცარიელია — საჭიროა Baseband კვანძის აპარატურული დიაგნოსტიკა.",
-            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "PC USB, სერვერული ავტორიზაცია, NVRAM/Baseband დიაგნოსტიკა" else "ტელეფონის ზუსტი მოდელის და ეკრანის შეტყობინების გადამოწმება",
-            safety = "მოერიდეთ არაოფიციალური პროგრამებით დაფლეშვას, რათა არ წაიშალოს ქარხნული ქსელური კალიბრაცია.",
-            followUpQuestion = "რა წარწერა ჩანს ეკრანზე და რომელი მოდელია ტელეფონი?"
+            nextTest = "ჩადეთ სხვა სამუშაო SIM ბარათი ან შეამოწმეთ იგივე SIM ბარათი სხვა ტელეფონში.",
+            expectedFindings = "თუ სხვა ბარათზეც არ მუშაობს — საჭიროა ანტენის შლეიფის ან SIM სლოტის აპარატურული შემოწმება.",
+            tools = if (mode == DiagnosticUserMode.TECHNICIAN) "მულტიმეტრი (SIM ხაზების დიოდური გაზომვა), RF კაბელის ტესტერი" else "სხვა SIM ბარათი და ქსელის პარამეტრების გადატვირთვა",
+            safety = "არ დააზიანოთ SIM სლოტის კონტაქტები უხეში ამოღებით.",
+            followUpQuestion = "სხვა SIM ბარათის ჩადებისას იჭერს თუ არა ქსელს?"
         )
     }
 
@@ -1874,18 +1832,10 @@ $catalogSummary
             !device.contains("დასაზუსტებელია") &&
             device !in listOf("Apple iPhone", "Samsung Galaxy", "Xiaomi / Redmi / Poco", "Google Pixel")
 
-        val isExplicitSoftwareQuery = listOf(
-            "canva", "კანვა", "capcut", "კაპკატ", "adobe", "ადობ", "windows", "ვინდოუს",
-            "office", "ოფის", "chatgpt", "gpt", "google ai", "gemini", "claude", "spotify", "youtube"
-        ).any { q.contains(it) }
-
-        // Filter hardware spare parts only if they match a specific detected device model or explicit software
+        // Filter hardware spare parts only if they match a specific detected device model
         val rawMatched = GeminiDiagnosticService.findRelevantProducts(query, catalogProducts)
         val filtered = rawMatched.filter { prod ->
-            val isSoftware = SoftwareCatalogData.isDigitalSoftwareService(prod)
-            if (isSoftware) {
-                isExplicitSoftwareQuery
-            } else if (hasSpecificDevice) {
+            if (hasSpecificDevice) {
                 prod.title.contains(device, ignoreCase = true) ||
                     prod.compatibleModels.contains(device, ignoreCase = true)
             } else {
@@ -1901,8 +1851,7 @@ $catalogSummary
             val wantsScreen = q.contains("ეკრან") || q.contains("დისპლე") || q.contains("ზოლ")
             val wantsBattery = q.contains("ელემენტ") || q.contains("ბატარე")
             val matchedByDevice = catalogProducts.filter { prod ->
-                !SoftwareCatalogData.isDigitalSoftwareService(prod) &&
-                    (prod.title.contains(device, ignoreCase = true) || prod.compatibleModels.contains(device, ignoreCase = true)) &&
+                (prod.title.contains(device, ignoreCase = true) || prod.compatibleModels.contains(device, ignoreCase = true)) &&
                     ((wantsScreen && prod.category.contains("ეკრან")) || (wantsBattery && prod.category.contains("ელემენტ")))
             }
             if (matchedByDevice.isNotEmpty()) {

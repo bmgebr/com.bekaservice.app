@@ -1,0 +1,789 @@
+BSTORE — Enterprise-Grade Payment System
+Complete Implementation Specification for Google AI Studio
+
+You are working on an existing production-oriented Android application named BSTORE, built with Kotlin, Jetpack Compose and Firebase.
+
+Your task is to inspect, architect, implement, secure, test and document a complete payment management system for BSTORE.
+
+This must be a real, functional implementation integrated into the existing application — not a mockup, prototype or isolated demonstration.
+
+The system must support:
+1. Bank transfer to a selected bank account:
+   - Bank of Georgia (საქართველოს ბანკი)
+   - TBC Bank (თიბისი ბანკი)
+2. Cash on Delivery (COD) / payment upon receiving the order.
+
+The architecture must also support adding additional banks in the future without redesigning the payment system.
+
+All customer-facing UI and text must be in natural Georgian.
+
+PART 1 — PROJECT INSPECTION AND PRESERVATION
+
+1.1 Inspect the complete existing project first
+
+Before modifying anything, inspect:
+- Application architecture and modules.
+- Kotlin and Jetpack Compose structure.
+- MainActivity and navigation.
+- Authentication and user roles.
+- Firebase Authentication.
+- Firestore collections and document models.
+- Firebase Storage.
+- Product catalog and product management.
+- Cart and checkout.
+- Existing order creation and order history.
+- Existing order statuses and delivery workflow.
+- Admin panel and authorization.
+- Notifications.
+- Existing Cloud Functions and deployment configuration.
+- Firestore security rules and indexes.
+- Existing build and release configuration.
+
+Understand how the existing application works before choosing where to integrate new functionality.
+
+Do not create duplicate repositories, models, collections, screens or services if equivalent components already exist.
+
+1.2 Absolute preservation requirements
+
+This is an existing application. Do not rebuild it from scratch.
+
+Preserve:
+- Application package ID.
+- Firebase project and configuration.
+- Existing Firebase Authentication users.
+- Existing administrator accounts and permissions.
+- Existing products and catalog.
+- Existing customer accounts.
+- Existing orders and order history.
+- Existing images and Firebase Storage files.
+- Existing application navigation.
+- Existing working functionality.
+- Existing signing configuration and keystore.
+- Existing release build configuration.
+
+Do not delete, reset, replace or migrate existing data destructively.
+Do not modify unrelated functionality.
+Do not replace Firebase with Supabase.
+Do not embed Firebase service account credentials, private keys, bank credentials or other secrets in the Android application.
+
+If a migration is required, make it backward-compatible, documented and safe.
+
+PART 2 — PAYMENT SYSTEM ARCHITECTURE
+
+2.1 Core payment methods
+
+Implement two payment methods.
+
+Method A: Bank Transfer
+
+The customer pays manually by transferring money to one of the BSTORE-configured bank accounts.
+
+Supported banks initially:
+- საქართველოს ბანკი
+- თიბისი ბანკი
+
+The architecture must support additional banks in the future.
+
+This is a manual bank transfer system. Do not describe it as an automatic bank integration.
+Do not pretend that the application can detect incoming bank transactions automatically.
+Do not implement fake transaction verification.
+
+Method B: Cash on Delivery
+
+The customer pays when receiving the ordered goods.
+
+Do not assume that courier card payments are available.
+Do not promise courier cash collection unless the existing delivery arrangement supports it.
+The admin must record COD collection only after the money has actually been received.
+
+2.2 Keep payment and order fulfillment separate
+
+Payment status and order status must be separate concepts.
+
+For example:
+- An order can be confirmed but still unpaid.
+- An order can be paid but not yet shipped.
+- An order can be delivered but COD collection still needs to be recorded, if that is the actual business situation.
+
+Preserve the existing order lifecycle and integrate payment state without replacing existing order statuses.
+
+Never infer that an order is paid merely because it was created, confirmed or delivered.
+
+2.3 Payment status model
+
+Use these recommended payment statuses, adapting existing compatible values if necessary:
+- `pending` — bank transfer awaiting manual confirmation.
+- `awaiting_collection` — COD payment not yet collected.
+- `paid` — payment received and confirmed.
+- `failed` — payment could not be completed, where applicable.
+- `cancelled` — payment cancelled.
+- `expired` — payment instructions expired, only if an explicit and tested expiration policy is implemented.
+- `refunded` — money has actually been refunded, if refund tracking is supported.
+
+Do not automatically expire orders without a defined business rule.
+Do not automatically mark a payment as refunded merely because an order was cancelled.
+Use consistent status transitions and validate every transition on the trusted backend.
+
+PART 3 — MULTI-BANK TRANSFER SYSTEM
+
+3.1 Bank account management
+
+Create a scalable, admin-managed bank account configuration.
+
+Initially support:
+1. Bank of Georgia.
+2. TBC Bank.
+
+Each bank account must be independently configurable.
+
+Required fields:
+- Unique bank account ID.
+- Bank identifier, such as `bog` or `tbc`.
+- Bank display name.
+- Bank logo or appropriate existing visual asset, if available.
+- Account recipient name.
+- IBAN.
+- Optional account description.
+- Optional payment instructions.
+- Enabled/disabled state.
+- Display order.
+- Creation timestamp.
+- Last updated timestamp.
+- Admin UID responsible for the latest change.
+
+Do not hardcode the actual IBANs or recipient details.
+Do not invent account numbers, recipient names or bank information.
+The administrator must enter the real bank information through the admin panel.
+
+The system must support multiple accounts if necessary, including multiple accounts belonging to the same bank in the future.
+
+Never assume the account holder and legal seller are the same person. Store the actual account recipient information supplied by the administrator.
+
+3.2 Customer bank selection flow
+
+Implement the following complete customer experience:
+
+1. Customer adds products to the cart.
+2. Customer proceeds to checkout.
+3. Customer selects bank transfer.
+4. Customer confirms the order.
+5. The order is securely created.
+6. The application displays available enabled bank accounts.
+7. Customer chooses:
+   - საქართველოს ბანკი
+   - თიბისი ბანკი
+8. The application securely retrieves the selected account instructions.
+9. The customer sees a dedicated payment instructions screen.
+
+The customer should choose the destination bank account, not necessarily the bank from which they are sending money. Make this distinction clear in the UI.
+
+If only one bank account is enabled, it is acceptable to display that account directly, while keeping the architecture ready for multiple accounts.
+
+If no bank account is enabled, do not allow the customer to proceed with bank transfer. Show an appropriate message and offer the other available payment method.
+
+3.3 Dedicated payment instructions screen
+
+Create a polished and trustworthy screen.
+
+Display:
+- Order number.
+- Exact order amount.
+- Currency: GEL.
+- Selected bank name.
+- Recipient name.
+- IBAN.
+- Payment reference or order number.
+- Payment instructions.
+- Payment status.
+- A clear explanation that the payment will be confirmed after the actual bank transfer is verified by BSTORE.
+
+Include:
+- Copy IBAN button.
+- Copy order/reference number button.
+- Clear visual feedback after copying.
+- Back-to-order-details navigation.
+- Loading and error states.
+
+Use the selected bank's logo only if a valid asset is available. Do not invent or use misleading bank branding.
+
+The bank details must not be permanently displayed in the public app or exposed before a valid order is created.
+
+The customer must only retrieve instructions for their own eligible order.
+
+3.4 Payment reference
+
+Generate a unique, human-readable payment reference based on the order identifier.
+
+The reference must be stable and associated with the order.
+
+Tell the customer to include it in the transfer description where supported.
+
+Never use a customer-supplied reference as proof of payment.
+
+The admin must verify the actual incoming bank transaction.
+
+3.5 Bank selection persistence
+
+Once the customer selects a destination bank:
+- Save the selected bank account ID and relevant non-sensitive snapshot to the order.
+- Preserve the exact recipient and IBAN details associated with that order.
+- Do not silently change an existing order's payment destination if the admin later edits bank configuration.
+- Existing orders must continue displaying the original payment instructions associated with them, subject to secure access rules.
+
+If an account is disabled after an order has already been created, do not corrupt the existing order.
+
+Define an appropriate policy for pending orders associated with disabled accounts and communicate it clearly to the admin.
+
+PART 4 — CASH ON DELIVERY
+
+Implement a complete COD flow.
+
+Customer:
+1. Selects cash on delivery.
+2. Reviews the order amount and delivery information.
+3. Confirms the order.
+4. Sees a clear explanation that payment is due upon receiving the goods.
+5. Can see COD as the selected payment method in order details.
+
+The payment status initially becomes `awaiting_collection`.
+
+Admin:
+- Sees COD orders awaiting collection.
+- Opens order details.
+- Confirms collection only after receiving the actual money.
+- Can enter an optional internal note.
+- Sees who recorded collection and when.
+
+After successful backend confirmation, payment status becomes `paid`.
+
+The customer must never be able to confirm their own COD payment.
+
+Do not assume the courier has received or transferred the money until that has actually been confirmed.
+
+PART 5 — ADMIN PANEL
+
+Integrate payment management into the existing BSTORE admin panel.
+
+Do not create a disconnected second admin application.
+The new section should match the existing visual system and navigation.
+
+5.1 Payment dashboard
+
+Display useful summary information:
+- Total pending bank transfers.
+- Total COD payments awaiting collection.
+- Total confirmed payments.
+- Total payment value for a selected period, if reliable data is available.
+
+Do not calculate totals using cancelled or failed payments.
+
+Provide filters:
+- All.
+- Bank transfer.
+- Bank of Georgia.
+- TBC Bank.
+- Cash on delivery.
+- Awaiting confirmation.
+- Paid.
+- Cancelled.
+- Refunded, if implemented.
+
+Provide date filtering and search by order number where appropriate.
+
+5.2 Bank transfer verification
+
+Admin must be able to:
+- Open an order.
+- See the selected bank account.
+- See the expected amount.
+- See the order number and payment reference.
+- Manually verify the actual bank credit outside the application.
+- Confirm payment in the admin panel.
+
+Require an explicit confirmation dialog.
+
+Suggested confirmation message in Georgian:
+"დარწმუნებული ხართ, რომ თანხა ნამდვილად ჩაირიცხა თქვენს საბანკო ანგარიშზე?"
+
+Only after successful server-side confirmation:
+- Payment status changes to `paid`.
+- Confirmation timestamp is recorded.
+- Confirming admin UID is recorded.
+- Audit event is created.
+- Relevant customer order/payment information is updated.
+- A customer notification is sent, if the existing notification infrastructure supports it.
+
+Do not mark payment as paid before the backend confirms the operation.
+
+5.3 COD collection management
+
+Provide an equivalent confirmation process for COD.
+
+Require explicit confirmation that the money has actually been received.
+
+Record:
+- Amount collected.
+- Admin UID.
+- Timestamp.
+- Optional internal note.
+
+5.4 Bank account administration
+
+Create an admin screen for managing bank accounts.
+
+Administrator can:
+- Add a new bank account.
+- Edit existing bank details.
+- Enable or disable an account.
+- Change display order.
+- Preview how the account will appear to customers.
+- Manage payment instructions.
+
+Do not expose sensitive configuration to ordinary customers through direct Firestore reads.
+
+Protect changes with server-side authorization.
+
+5.5 Audit history
+
+Provide an audit history for payment events.
+
+Display:
+- Order number.
+- Event.
+- Previous payment status.
+- New payment status.
+- Amount.
+- Actor.
+- Timestamp.
+- Optional note.
+
+Audit records must be immutable for customers and ordinary administrators unless a specifically authorized audit-management policy exists.
+
+Do not allow users to delete or rewrite payment history.
+
+PART 6 — FIREBASE BACKEND
+
+6.1 Inspect existing backend
+
+Determine whether the project already uses:
+- Firebase Cloud Functions.
+- Firebase Authentication.
+- Custom Claims.
+- Firestore security rules.
+- Existing callable functions.
+- Existing trusted backend services.
+
+Reuse the existing architecture where possible.
+Do not create duplicate backend infrastructure unnecessarily.
+
+If Cloud Functions are not deployed:
+- Prepare the required functions and source code.
+- Identify the necessary Firebase plan and billing prerequisites.
+- Explain the deployment steps.
+- Do not claim deployment success.
+- Do not bypass security by writing privileged operations directly from the Android client.
+
+6.2 Server-side operations
+
+Implement trusted backend operations for:
+- Creating a valid order with payment information.
+- Retrieving eligible bank instructions.
+- Retrieving enabled bank accounts for a valid customer order.
+- Admin confirmation of bank transfer.
+- Admin confirmation of COD collection.
+- Admin management of bank configuration.
+- Writing payment audit events.
+
+Use the existing order creation flow and avoid duplicating business logic.
+
+6.3 Security requirements
+
+Every operation must validate the relevant permissions and data.
+
+For customer requests:
+- Require Firebase Authentication.
+- Verify order ownership.
+- Verify that the order exists.
+- Verify payment method.
+- Verify order/payment state.
+- Return only the data required by the customer.
+
+For administrator requests:
+- Require Firebase Authentication.
+- Verify existing admin authorization or appropriate Custom Claims.
+- Do not trust a client-provided role.
+- Verify that the operation is permitted.
+- Record the actual authenticated admin UID.
+
+Customers must never be able to:
+- Change payment status to `paid`.
+- Confirm their own COD collection.
+- Change the order amount.
+- Change the payment method after an irreversible payment state transition.
+- Modify the bank configuration.
+- Access another customer's order or bank instructions.
+- Write or modify audit history.
+- Pretend to be an administrator.
+
+Never trust amounts, permissions or payment statuses supplied by the client without backend validation.
+
+Calculate or verify the payable amount using trusted order data.
+
+Use Firestore transactions where appropriate.
+Make privileged operations idempotent.
+Prevent duplicate confirmations, race conditions and invalid state transitions.
+
+6.4 Firestore security rules
+
+Review all existing rules before changing them.
+Do not replace the entire ruleset with broad permissive rules.
+Preserve access to existing working application features.
+
+Ensure:
+- Public users cannot read private bank configuration.
+- Customers can only read their own orders.
+- Customers cannot update privileged payment fields.
+- Customers cannot write audit events.
+- Only authorized administrators can manage bank configuration.
+- Payment confirmation is performed by trusted backend operations.
+- Existing valid catalog and application reads continue working.
+
+Test direct Firestore access attempts, not just UI restrictions.
+Hiding a button in the UI is not security.
+
+PART 7 — DATA MODEL AND BACKWARD COMPATIBILITY
+
+Use the existing Firestore structure wherever possible.
+
+7.1 Bank accounts
+
+Suggested logical structure:
+
+`payment_settings/bank_accounts/{bankAccountId}`
+
+Possible fields:
+- `bankCode`
+- `bankName`
+- `recipientName`
+- `iban`
+- `description`
+- `paymentInstructions`
+- `isEnabled`
+- `displayOrder`
+- `createdAt`
+- `updatedAt`
+- `updatedBy`
+
+Use a suitable existing or newly defined structure. Do not create a public collection for sensitive bank configuration.
+
+7.2 Order payment information
+
+Add a structured payment object to the existing order model.
+
+Possible fields:
+- `method`
+- `status`
+- `amount`
+- `currency`
+- `bankAccountId`
+- `bankCode`
+- `bankName`
+- `recipientNameSnapshot`
+- `ibanSnapshot`
+- `paymentReference`
+- `createdAt`
+- `confirmedAt`
+- `confirmedBy`
+- `updatedAt`
+
+Store only the data necessary for the order and its payment history.
+Protect the sensitive fields with server-side access controls.
+Do not expose these fields in public catalog data.
+
+7.3 Audit events
+
+Use an appropriate server-write-only collection or subcollection.
+
+Each event should contain:
+- `orderId`
+- `eventType`
+- `previousStatus`
+- `newStatus`
+- `amount`
+- `currency`
+- `actorUid`
+- `actorRole`
+- `timestamp`
+- Optional note
+
+7.4 Existing orders
+
+Some existing orders may not contain payment information.
+
+Ensure:
+- They continue to load.
+- They continue to appear in order history.
+- They continue to appear in the admin panel.
+- Missing payment fields do not crash the UI.
+- Existing order statuses are preserved.
+- Old orders are not silently marked as paid.
+- New payment fields are introduced safely.
+- No destructive migration occurs.
+
+If migration is needed, provide a safe migration strategy and report it.
+
+PART 8 — CUSTOMER EXPERIENCE AND DESIGN
+
+Follow the existing BSTORE visual identity:
+- Black.
+- White.
+- Carrot orange `#FF6B00`.
+
+Design must be clean, modern, premium and trustworthy.
+Avoid generic template-looking screens.
+Use the existing design system and components where possible.
+
+All user-facing text must be Georgian.
+
+Implement:
+- Payment method selection.
+- Bank account selection.
+- Dedicated bank transfer instructions.
+- COD instructions.
+- Payment status display.
+- Order payment details.
+- Loading states.
+- Error states.
+- Empty states.
+- Copy-to-clipboard feedback.
+- Confirmation feedback.
+- Responsive layouts.
+
+Suggested Georgian labels:
+- "საბანკო გადარიცხვა"
+- "ნაღდი ანგარიშსწორება"
+- "საქართველოს ბანკი"
+- "თიბისი ბანკი"
+- "აირჩიე ბანკი"
+- "მიმღები"
+- "ანგარიშის ნომერი"
+- "გადახდის დანიშნულება"
+- "შეკვეთის ნომერი"
+- "გადასახდელი თანხა"
+- "გადახდის მოლოდინში"
+- "თანხა დადასტურებულია"
+- "გადაიხადე ნივთის მიღებისას"
+
+Use natural Georgian wording and avoid exposing internal technical status identifiers.
+
+Do not show success states before backend confirmation.
+
+PART 9 — DELIVERY AND ORDER INTEGRATION
+
+Preserve the existing BSTORE delivery and checkout workflow.
+
+Known delivery conditions:
+- Free pickup at ახალციხე, კოსტავას N10.
+- Courier delivery across Georgia, subject to availability.
+- Nearby cities: estimated 1–3 days.
+- Other regions: estimated 2–5 days.
+- Delivery fee depends on city and distance.
+- Exact delivery fee must be communicated before order confirmation.
+- Delivery time starts after order confirmation.
+- Pickup becomes available after the customer receives a readiness notification.
+
+Do not invent delivery prices or courier capabilities.
+Payment selection must integrate naturally with existing delivery selection.
+Ensure that payment status does not overwrite or conflict with delivery status.
+
+PART 10 — POLICIES AND CUSTOMER INFORMATION
+
+Integrate an information section into the existing application.
+
+Required pages:
+1. მიწოდების პოლიტიკა
+2. დაბრუნება და თანხის ანაზღაურება
+3. კონფიდენციალურობის პოლიტიკა
+4. წესები და პირობები
+5. კონტაქტი
+
+Use concise and understandable Georgian content.
+
+Preserve the actual seller identity in customer-facing legal information.
+Do not invent legal details or refund periods.
+Do not expose unnecessary internal administrative arrangements.
+Do not falsely state that the payment account holder is the legal seller if the roles are different.
+
+Make terms acceptance clear at checkout.
+Record the accepted terms version and timestamp where appropriate.
+Privacy information must be accessible without unnecessary consent checkboxes.
+Do not combine optional marketing consent with mandatory terms acceptance.
+
+If policies are stored in Firestore, preserve the existing data architecture and restrict editing to authorized administrators.
+
+Do not create a separate website as part of this task.
+
+PART 11 — FUTURE EXPANSION
+
+Build the architecture so that future additions do not require rewriting the payment system.
+
+Possible future extensions:
+- Additional Georgian banks.
+- More than one account per bank.
+- Online payment provider integration.
+- Automated bank transaction reconciliation, if a supported and authorized API becomes available.
+- Refund tracking.
+- Advanced payment reports.
+- Accounting exports.
+- More advanced payment analytics.
+
+Do not implement speculative integrations now.
+Do not claim that a bank API or automatic transaction verification is available unless it has been verified and properly authorized.
+
+Keep the current implementation focused on manual bank transfer and COD.
+
+PART 12 — TESTING AND QUALITY ASSURANCE
+
+Do not finish after creating screens.
+Test the complete implementation.
+
+12.1 Bank of Georgia workflow
+- Admin adds a valid Bank of Georgia account.
+- Admin enables the account.
+- Customer creates a bank-transfer order.
+- Customer selects Bank of Georgia.
+- Correct bank details are retrieved securely.
+- Correct amount and order reference are displayed.
+- Customer can copy the IBAN and reference.
+- Another customer cannot retrieve the instructions.
+- Customer cannot mark payment as paid.
+- Admin manually verifies the incoming bank credit.
+- Admin confirms payment.
+- Backend updates payment status.
+- Audit event is created.
+- Duplicate confirmation is prevented.
+
+12.2 TBC workflow
+
+Repeat the same complete test using a TBC account.
+
+Verify that each bank has independent configuration and that changing one account does not affect the other.
+
+12.3 COD workflow
+- Customer selects COD.
+- Order is created.
+- Payment status becomes `awaiting_collection`.
+- Customer sees the correct instructions.
+- Customer cannot confirm collection.
+- Admin records actual collection.
+- Payment becomes `paid`.
+- Audit event is created.
+
+12.4 Security tests
+
+Test:
+- Unauthorized bank configuration access.
+- Unauthorized bank configuration modification.
+- Customer access to another customer's order.
+- Customer access to another customer's bank instructions.
+- Payment amount tampering.
+- Payment status tampering.
+- Fake admin role supplied by client.
+- Duplicate confirmation requests.
+- Invalid payment state transitions.
+- Direct Firestore write attempts.
+- Missing or invalid authentication.
+- Disabled bank account handling.
+
+12.5 Regression tests
+
+Verify that all existing functionality still works:
+- Login and registration.
+- Google authentication, if configured.
+- Admin login.
+- Admin authorization.
+- Product catalog.
+- Product details.
+- Cart.
+- Checkout.
+- Existing orders.
+- Order history.
+- Notifications.
+- Firebase Storage.
+- Existing admin management.
+- Release build.
+
+Do not remove existing features to simplify implementation.
+
+PART 13 — BUILD, DEPLOYMENT AND RELEASE SAFETY
+
+Before modifying release-related files, inspect the existing configuration.
+
+Preserve:
+- Package ID.
+- Signing keys.
+- Keystore.
+- Build variants.
+- Firebase configuration.
+- Existing release process.
+
+Do not expose secrets in source control or application code.
+
+If Cloud Functions need deployment:
+- Provide the exact deployment prerequisites.
+- Identify required Firebase plan or billing configuration.
+- Explain which commands or deployment actions are needed.
+- Do not claim deployment unless it has actually succeeded.
+
+If Firestore rules or indexes require deployment, provide the exact required changes and deployment steps.
+
+Do not generate a final release build until the implementation is internally consistent and tests pass.
+
+Do not claim the app is ready for real payments if security rules, backend functions, bank configuration or deployment remain incomplete.
+
+PART 14 — FINAL REPORT
+
+After implementation, provide a detailed report in Georgian.
+
+Include:
+1. Existing architecture inspected.
+2. Components reused.
+3. New files created.
+4. Existing files modified.
+5. Customer screens implemented.
+6. Admin screens implemented.
+7. Firestore structure added or modified.
+8. Security rules changed.
+9. Cloud Functions created.
+10. Whether Cloud Functions are deployed or only prepared.
+11. Firebase billing-plan prerequisites.
+12. Bank configuration steps.
+13. Tests executed and results.
+14. Known limitations.
+15. Manual actions still required.
+16. Whether the system is ready for production or requires further work.
+
+Clearly distinguish:
+- Implemented.
+- Tested.
+- Deployed.
+- Requires manual configuration.
+- Not yet completed.
+
+Never report success for an operation that was not actually completed.
+
+FINAL DEVELOPMENT PRINCIPLES
+
+The most important priorities are:
+1. Preserve the existing BSTORE application.
+2. Implement real working bank transfer and COD workflows.
+3. Support both Bank of Georgia and TBC independently.
+4. Allow the administrator to manage bank accounts without changing source code.
+5. Protect customer information and payment operations.
+6. Keep payment and order statuses separate.
+7. Require actual bank verification before confirming payment.
+8. Use Georgian customer-facing UI.
+9. Keep the system compatible with Google Play policies for physical goods.
+10. Build a maintainable architecture that can grow without requiring a complete rewrite.
+
+Do not sacrifice security, existing functionality or data integrity to make the implementation appear complete faster.

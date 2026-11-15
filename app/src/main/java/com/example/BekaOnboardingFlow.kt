@@ -1,6 +1,5 @@
 package com.example
 
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -33,10 +32,12 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,12 +57,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +78,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -96,8 +103,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -106,21 +117,83 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.provider.Settings
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.ui.theme.BstoreAmbientGlassBackground
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private const val TOTAL_ONBOARDING_STEPS = 4
+internal const val TOTAL_ONBOARDING_STEPS = 4
+
+internal enum class OnboardingIntroVisualStage(
+    val id: String,
+    val drawableRes: Int,
+    val contentDescription: String,
+    val isBrandLogo: Boolean,
+    val enterDurationMs: Int,
+    val holdDurationMs: Long
+) {
+    BRAND_INTRO(
+        id = "brand_intro",
+        drawableRes = R.drawable.ic_bstore_brand_icon,
+        contentDescription = "BSTORE ლოგო",
+        isBrandLogo = true,
+        enterDurationMs = 700,
+        holdDurationMs = 1350L
+    ),
+    SMARTPHONE(
+        id = "smartphone",
+        drawableRes = R.drawable.onboarding_intro_smartphone,
+        contentDescription = "BSTORE სმარტფონი",
+        isBrandLogo = false,
+        enterDurationMs = 600,
+        holdDurationMs = 1550L
+    ),
+    AIRPODS(
+        id = "airpods",
+        drawableRes = R.drawable.onboarding_intro_airpods,
+        contentDescription = "BSTORE უსადენო ყურსასმენები",
+        isBrandLogo = false,
+        enterDurationMs = 550,
+        holdDurationMs = 1550L
+    ),
+    HEADPHONES(
+        id = "headphones",
+        drawableRes = R.drawable.onboarding_intro_headphones,
+        contentDescription = "BSTORE ყურსასმენები",
+        isBrandLogo = false,
+        enterDurationMs = 550,
+        holdDurationMs = 1550L
+    ),
+    SMARTWATCH(
+        id = "smartwatch",
+        drawableRes = R.drawable.onboarding_intro_smartwatch,
+        contentDescription = "BSTORE სმარტ საათი",
+        isBrandLogo = false,
+        enterDurationMs = 550,
+        holdDurationMs = 1550L
+    ),
+    BRAND_RETURN(
+        id = "brand_return",
+        drawableRes = R.drawable.ic_bstore_brand_icon,
+        contentDescription = "BSTORE ლოგო",
+        isBrandLogo = true,
+        enterDurationMs = 700,
+        holdDurationMs = 2600L
+    )
+}
 
 /**
- * BEKASERVICE First-Launch Premium Dark Glassmorphism Onboarding Flow.
+ * BSTORE First-Launch Premium Onboarding Flow (4 Steps).
  *
  * Steps:
- *  0 (1/4) -> Welcome screen ("მოგესალმები!")
+ *  0 (1/4) -> Welcome screen ("მოგესალმები!") with animated BSTORE Brand/Product showcase
  *  1 (2/4) -> Language selection ("აირჩიეთ ენა" — ქართული, English, Русский)
  *  2 (3/4) -> Optional Authentication or Guest Access ("შესვლა ანგარიშით")
- *  3 (4/4) -> Introductory Benefits & Completion ("მზად ხარ!" / "დაიწყე →")
+ *  3 (4/4) -> Final Step: Theme Selection ("აირჩიე აპის თემა" / "მთავარ გვერდზე გადასვლა")
  */
 @Composable
 fun BekaOnboardingFlow(
@@ -130,6 +203,10 @@ fun BekaOnboardingFlow(
     val coroutineScope = rememberCoroutineScope()
 
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
+    val activeStep = currentStep.coerceIn(0, TOTAL_ONBOARDING_STEPS - 1)
+    if (currentStep != activeStep) {
+        currentStep = activeStep
+    }
     var showAppleAuthForm by rememberSaveable { mutableStateOf(false) }
     var appleEmailInput by rememberSaveable { mutableStateOf("") }
     var applePasswordInput by rememberSaveable { mutableStateOf("") }
@@ -149,29 +226,32 @@ fun BekaOnboardingFlow(
     }
 
     // Properly handle the Android system Back button across onboarding steps
-    BackHandler(enabled = currentStep > 0 || showEmailAuthForm || showAppleAuthForm) {
+    BackHandler(enabled = activeStep > 0 || showEmailAuthForm || showAppleAuthForm) {
         if (showAppleAuthForm) {
             showAppleAuthForm = false
             authStatusMessage = null
         } else if (showEmailAuthForm) {
             showEmailAuthForm = false
             authStatusMessage = null
-        } else if (currentStep > 0) {
+        } else if (activeStep > 0) {
             authStatusMessage = null
-            currentStep -= 1
+            currentStep = (activeStep - 1).coerceAtLeast(0)
         }
     }
 
-    CompositionLocalProvider(LocalPreserveWhiteText provides true) {
+    val isDark = AppPreferencesManager.isDarkMode
+
+    CompositionLocalProvider(LocalPreserveWhiteText provides isDark) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF07080B))
+                .background(if (isDark) Color(0xFF07080B) else Color(0xFFF0F1F4))
                 .testTag("onboarding_root_container")
         ) {
-            // Layer 0: Native lightweight ambient flowing dark-glass background
+            // Layer 0: Native lightweight ambient flowing glass background (Dark or Light variant)
             OnboardingAnimatedGlassBackground(
-                stepIndex = currentStep,
+                stepIndex = activeStep,
+                isDark = isDark,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -185,7 +265,7 @@ fun BekaOnboardingFlow(
                 contentAlignment = Alignment.Center
             ) {
                 AnimatedContent(
-                    targetState = currentStep,
+                    targetState = activeStep,
                     transitionSpec = {
                         val direction = if (targetState >= initialState) 1 else -1
                         (slideInHorizontally(
@@ -418,15 +498,23 @@ fun BekaOnboardingFlow(
                                 currentStep = 3
                             },
                             onSwitchAccount = {
-                                AuthAndOrderManager.logout(context)
-                                currentUser = null
-                                authStatusMessage = null
+                                coroutineScope.launch {
+                                    AuthAndOrderManager.logoutSafely(context)
+                                    currentUser = null
+                                    authStatusMessage = null
+                                }
                             }
                         )
 
-                        else -> ReadyAndBenefitsOnboardingStep(
+                        else -> ThemeSelectionOnboardingStep(
+                            isDark = isDark,
+                            onSelectDarkMode = { selectedDark ->
+                                AppPreferencesManager.setDarkMode(context, selectedDark)
+                            },
                             onBack = { currentStep = 2 },
                             onFinish = {
+                                // Validate and persist selected theme & Setup completion before entering Home screen
+                                AppPreferencesManager.setDarkMode(context, AppPreferencesManager.isDarkMode)
                                 AppPreferencesManager.setOnboardingCompleted(context, true)
                                 onFinishOnboarding()
                             }
@@ -444,163 +532,13 @@ fun BekaOnboardingFlow(
 @Composable
 fun OnboardingAnimatedGlassBackground(
     stepIndex: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDark: Boolean = AppPreferencesManager.isDarkMode
 ) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    val isReducedMotion = remember(context) {
-        runCatching {
-            Settings.Global.getFloat(
-                context.contentResolver,
-                Settings.Global.ANIMATOR_DURATION_SCALE,
-                1f
-            ) == 0f
-        }.getOrDefault(false)
-    }
-
-    var isResumed by remember { mutableStateOf(true) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> isResumed = true
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> isResumed = false
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    val driftPhase: Float = if (isReducedMotion || !isResumed) {
-        0.35f
-    } else {
-        val infiniteTransition = rememberInfiniteTransition(label = "OnboardingAmbientLight")
-        val animated by infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 14000, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "AmbientLightDrift"
-        )
-        animated
-    }
-
-    val stepShift = (stepIndex.coerceIn(0, 3) * 0.04f)
-    val primaryRibbonPath = remember { Path() }
-    val secondaryRibbonPath = remember { Path() }
-
-    Box(
-        modifier = modifier.drawWithCache {
-            val w = size.width
-            val h = size.height
-            val baseBrush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF07080B),
-                    Color(0xFF0B0D12),
-                    Color(0xFF06070A)
-                )
-            )
-
-            onDrawBehind {
-                // 1. Deep near-black & graphite base
-                drawRect(brush = baseBrush)
-
-                val phase = (driftPhase + stepShift).coerceIn(0f, 1f)
-
-                // 2. Upper-left / upper-center warm diffuse amber light form
-                val topLightCenter = Offset(
-                    x = w * (0.24f + 0.18f * phase),
-                    y = h * (0.18f + 0.08f * (1f - phase))
-                )
-                val topLightRadius = maxOf(w, h) * 0.58f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFFF7A00).copy(alpha = 0.14f),
-                            Color(0xFFD95B00).copy(alpha = 0.06f),
-                            Color(0xFF6B2B00).copy(alpha = 0.02f),
-                            Color.Transparent
-                        ),
-                        center = topLightCenter,
-                        radius = topLightRadius
-                    ),
-                    radius = topLightRadius,
-                    center = topLightCenter
-                )
-
-                // 3. Lower-right soft warm amber counter-glow
-                val bottomLightCenter = Offset(
-                    x = w * (0.78f - 0.16f * phase),
-                    y = h * (0.78f - 0.07f * phase)
-                )
-                val bottomLightRadius = maxOf(w, h) * 0.52f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFFF7A00).copy(alpha = 0.11f),
-                            Color(0xFFB84A00).copy(alpha = 0.045f),
-                            Color.Transparent
-                        ),
-                        center = bottomLightCenter,
-                        radius = bottomLightRadius
-                    ),
-                    radius = bottomLightRadius,
-                    center = bottomLightCenter
-                )
-
-                // 4. Subtle silky curved light contour (matching the dark glass wave reference)
-                primaryRibbonPath.reset()
-                primaryRibbonPath.moveTo(-w * 0.1f, h * (0.34f - 0.03f * phase))
-                primaryRibbonPath.cubicTo(
-                    w * 0.28f,
-                    h * (0.24f + 0.04f * phase),
-                    w * 0.65f,
-                    h * (0.14f - 0.03f * phase),
-                    w * 1.12f,
-                    h * (0.04f + 0.02f * phase)
-                )
-                drawPath(
-                    path = primaryRibbonPath,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFFFF8820).copy(alpha = 0.11f),
-                            Color.White.copy(alpha = 0.04f),
-                            Color.Transparent
-                        )
-                    ),
-                    style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
-                )
-
-                secondaryRibbonPath.reset()
-                secondaryRibbonPath.moveTo(-w * 0.08f, h * (0.86f - 0.02f * phase))
-                secondaryRibbonPath.cubicTo(
-                    w * 0.35f,
-                    h * (0.76f + 0.03f * phase),
-                    w * 0.72f,
-                    h * (0.66f - 0.02f * phase),
-                    w * 1.1f,
-                    h * (0.54f + 0.03f * phase)
-                )
-                drawPath(
-                    path = secondaryRibbonPath,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFFFF7A00).copy(alpha = 0.09f),
-                            Color.White.copy(alpha = 0.03f),
-                            Color.Transparent
-                        )
-                    ),
-                    style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-        }
+    BstoreAmbientGlassBackground(
+        isDark = isDark,
+        stepShift = stepIndex.coerceIn(0, TOTAL_ONBOARDING_STEPS - 1) * 0.04f,
+        modifier = modifier
     )
 }
 
@@ -611,6 +549,7 @@ fun OnboardingAnimatedGlassBackground(
 private fun WelcomeOnboardingStep(
     onNext: () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -627,74 +566,63 @@ private fun WelcomeOnboardingStep(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Upper-middle: BEKASERVICE Brand Emblem & Wordmark
+            // Upper-middle: Animated BSTORE Brand & Product Showcase + Wordmark
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(92.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFF1A1817).copy(alpha = 0.86f),
-                                    Color(0xFF0E1015).copy(alpha = 0.92f)
-                                )
-                            )
-                        )
-                        .border(
-                            width = 1.dp,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFFFF7A00).copy(alpha = 0.55f),
-                                    Color.White.copy(alpha = 0.18f),
-                                    Color(0xFFFF7A00).copy(alpha = 0.30f)
-                                )
-                            ),
-                            shape = RoundedCornerShape(26.dp)
-                        )
-                        .padding(14.dp)
-                        .testTag("onboarding_brand_logo")
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_beka_main_emblem),
-                        contentDescription = "BEKASERVICE",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                OnboardingBrandProductShowcase(
+                    isDark = isDark
+                )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = "BEKA",
-                        color = Color.White,
-                        fontSize = 25.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.8.sp,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-                    )
-                    Text(
-                        text = "SERVICE",
-                        color = Color(0xFFFF7A00),
-                        fontSize = 25.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.8.sp,
-                        style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                    androidx.compose.material3.Text(
+                        text = buildAnnotatedString {
+                            withStyle(
+                                SpanStyle(
+                                    color = if (isDark) Color(0xFFFF6B00) else Color(0xFFF36B16),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 26.8.sp,
+                                    fontFamily = FontFamily.SansSerif,
+                                    letterSpacing = 0.8.sp
+                                )
+                            ) {
+                                append("B")
+                            }
+                            withStyle(
+                                SpanStyle(
+                                    color = if (isDark) Color.White else Color(0xFF20242B),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 26.sp,
+                                    fontFamily = FontFamily.SansSerif,
+                                    letterSpacing = 0.8.sp
+                                )
+                            ) {
+                                append("STORE")
+                            }
+                        },
+                        maxLines = 1,
+                        softWrap = false,
+                        style = TextStyle(
+                            fontFamily = FontFamily.SansSerif,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 26.sp,
+                            lineHeight = 26.sp,
+                            letterSpacing = 0.8.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "შენი ციფრული სერვისები",
-                    color = Color(0xFF94A3B8),
+                    text = "ტექნიკა, აქსესუარები და სერვისი",
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF687180),
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
                     textAlign = TextAlign.Center
@@ -710,7 +638,7 @@ private fun WelcomeOnboardingStep(
             ) {
                 Text(
                     text = "მოგესალმები!",
-                    color = Color.White,
+                    color = if (isDark) Color.White else Color(0xFF20242B),
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,
                     lineHeight = 34.sp,
@@ -721,7 +649,7 @@ private fun WelcomeOnboardingStep(
 
                 Text(
                     text = "ყველაფერი, რაც გჭირდება — ერთ სივრცეში.",
-                    color = Color(0xFFA0A8B8),
+                    color = if (isDark) Color(0xFFA0A8B8) else Color(0xFF687180),
                     fontSize = 15.5.sp,
                     lineHeight = 23.sp,
                     fontWeight = FontWeight.Normal,
@@ -753,17 +681,19 @@ private fun WelcomeOnboardingStep(
                             .size(dotWidth)
                             .clip(CircleShape)
                             .background(
-                                if (isCurrent) Color(0xFFFF7A00)
-                                else Color.White.copy(alpha = 0.22f)
+                                if (isCurrent) (if (isDark) Color(0xFFFF7A00) else Color(0xFFF36B16))
+                                else if (isDark) Color.White.copy(alpha = 0.22f)
+                                else Color(0xFF20242B).copy(alpha = 0.18f)
                             )
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 androidx.compose.material3.Text(
                     text = "1 / $TOTAL_ONBOARDING_STEPS",
-                    color = Color(0xFF7E8695),
+                    color = if (isDark) Color(0xFF7E8695) else Color(0xFF687180),
                     fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.testTag("onboarding_welcome_step_counter")
                 )
             }
 
@@ -771,6 +701,222 @@ private fun WelcomeOnboardingStep(
                 onClick = onNext,
                 modifier = Modifier.testTag("onboarding_welcome_next_button")
             )
+        }
+    }
+}
+
+@Composable
+internal fun OnboardingBrandProductShowcase(
+    isDark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val stages = remember { OnboardingIntroVisualStage.entries }
+
+    val isReducedMotion = remember(context) {
+        runCatching {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        }.getOrDefault(false)
+    }
+
+    var isLifecycleResumed by remember { mutableStateOf(true) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isLifecycleResumed = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> isLifecycleResumed = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    var currentStageIndex by remember { mutableIntStateOf(0) }
+    var initialLogoRevealDone by remember { mutableStateOf(isReducedMotion) }
+
+    val initialScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (initialLogoRevealDone) 1f else 0.92f,
+        animationSpec = tween(durationMillis = 680, easing = FastOutSlowInEasing),
+        label = "OnboardingInitialLogoScale"
+    )
+    val initialAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (initialLogoRevealDone) 1f else 0f,
+        animationSpec = tween(durationMillis = 680, easing = LinearOutSlowInEasing),
+        label = "OnboardingInitialLogoAlpha"
+    )
+
+    LaunchedEffect(isReducedMotion, isLifecycleResumed) {
+        if (isReducedMotion) {
+            currentStageIndex = 0
+            initialLogoRevealDone = true
+            return@LaunchedEffect
+        }
+        initialLogoRevealDone = true
+        while (isLifecycleResumed) {
+            val activeStage = stages[currentStageIndex]
+            delay(activeStage.enterDurationMs.toLong() + activeStage.holdDurationMs)
+            if (!isLifecycleResumed) break
+            val nextIdx = (currentStageIndex + 1) % stages.size
+            // Skip repeating Stage 0 after BRAND_RETURN (index 5) so the logo doesn't double-hold
+            currentStageIndex = if (currentStageIndex == stages.lastIndex) 1 else nextIdx
+        }
+    }
+
+    val activeStage = stages[currentStageIndex]
+    val accentOrange = if (isDark) Color(0xFFFF6B00) else Color(0xFFF36B16)
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(148.dp)
+            .graphicsLayer {
+                scaleX = initialScale
+                scaleY = initialScale
+                alpha = initialAlpha
+            }
+            .testTag("onboarding_brand_logo")
+    ) {
+        // Subtle ambient radial halo behind logo/product
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = if (isDark) {
+                        listOf(
+                            accentOrange.copy(alpha = if (activeStage.isBrandLogo) 0.16f else 0.22f),
+                            accentOrange.copy(alpha = 0.05f),
+                            Color.Transparent
+                        )
+                    } else {
+                        listOf(
+                            accentOrange.copy(alpha = if (activeStage.isBrandLogo) 0.12f else 0.18f),
+                            Color(0xFFFFF0E5).copy(alpha = 0.55f),
+                            Color.Transparent
+                        )
+                    }
+                ),
+                radius = size.minDimension * 0.50f
+            )
+        }
+
+        AnimatedContent(
+            targetState = activeStage,
+            transitionSpec = {
+                val enterMs = targetState.enterDurationMs
+                val exitMs = (enterMs * 0.78f).toInt().coerceAtLeast(380)
+                (fadeIn(
+                    animationSpec = tween(durationMillis = enterMs, easing = FastOutSlowInEasing)
+                ) + slideInVertically(
+                    animationSpec = tween(durationMillis = enterMs, easing = FastOutSlowInEasing),
+                    initialOffsetY = { fullHeight -> fullHeight / 8 }
+                ) + scaleIn(
+                    animationSpec = tween(durationMillis = enterMs, easing = FastOutSlowInEasing),
+                    initialScale = 0.90f
+                )).togetherWith(
+                    fadeOut(
+                        animationSpec = tween(durationMillis = exitMs, easing = FastOutLinearInEasing)
+                    ) + slideOutVertically(
+                        animationSpec = tween(durationMillis = exitMs, easing = FastOutLinearInEasing),
+                        targetOffsetY = { fullHeight -> -fullHeight / 10 }
+                    ) + scaleOut(
+                        animationSpec = tween(durationMillis = exitMs, easing = FastOutLinearInEasing),
+                        targetScale = 0.94f
+                    )
+                ).using(SizeTransform(clip = false))
+            },
+            contentAlignment = Alignment.Center,
+            label = "OnboardingBrandProductStageTransition",
+            modifier = Modifier.fillMaxSize()
+        ) { stage ->
+            if (stage.isBrandLogo) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(Color.Black)
+                        .border(
+                            width = 1.2.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    accentOrange.copy(alpha = 0.78f),
+                                    Color.White.copy(alpha = 0.24f),
+                                    accentOrange.copy(alpha = 0.45f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(26.dp)
+                        )
+                        .padding(8.dp)
+                        .testTag("onboarding_intro_stage_${stage.id}")
+                ) {
+                    Image(
+                        painter = painterResource(id = stage.drawableRes),
+                        contentDescription = stage.contentDescription,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(18.dp))
+                    )
+                }
+            } else {
+                // Product stage inside a refined Soft Graphite / Dark glass showcase pedestal
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(136.dp)
+                        .clip(RoundedCornerShape(30.dp))
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = if (isDark) {
+                                    listOf(
+                                        Color(0xFF161920).copy(alpha = 0.88f),
+                                        Color(0xFF0E1015).copy(alpha = 0.92f)
+                                    )
+                                } else {
+                                    listOf(
+                                        Color(0xFFF8F9FB).copy(alpha = 0.96f),
+                                        Color(0xFFE9EBEF).copy(alpha = 0.94f)
+                                    )
+                                }
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = if (isDark) {
+                                    listOf(
+                                        accentOrange.copy(alpha = 0.55f),
+                                        Color.White.copy(alpha = 0.14f),
+                                        accentOrange.copy(alpha = 0.30f)
+                                    )
+                                } else {
+                                    listOf(
+                                        accentOrange.copy(alpha = 0.48f),
+                                        Color(0xFFDCE0E6),
+                                        accentOrange.copy(alpha = 0.28f)
+                                    )
+                                }
+                            ),
+                            shape = RoundedCornerShape(30.dp)
+                        )
+                        .padding(12.dp)
+                        .testTag("onboarding_intro_stage_${stage.id}")
+                ) {
+                    Image(
+                        painter = painterResource(id = stage.drawableRes),
+                        contentDescription = stage.contentDescription,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         }
     }
 }
@@ -785,6 +931,7 @@ private fun LanguageSelectionOnboardingStep(
     onBack: () -> Unit,
     onNext: () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -808,7 +955,7 @@ private fun LanguageSelectionOnboardingStep(
         ) {
             Text(
                 text = "აირჩიეთ ენა",
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.testTag("onboarding_language_headline")
@@ -822,7 +969,7 @@ private fun LanguageSelectionOnboardingStep(
                     AppLanguage.EN -> "Choose your preferred language"
                     AppLanguage.RU -> "Выберите предпочитаемый язык"
                 },
-                color = Color(0xFF94A3B8),
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Normal
             )
@@ -861,38 +1008,69 @@ private fun OnboardingLanguageRow(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val rowShape = RoundedCornerShape(18.dp)
     val borderBrush = if (isSelected) {
         Brush.linearGradient(
-            colors = listOf(
-                Color(0xFFFF7A00).copy(alpha = 0.65f),
-                Color.White.copy(alpha = 0.22f),
-                Color(0xFFFF7A00).copy(alpha = 0.45f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color(0xFFFF7A00).copy(alpha = 0.65f),
+                    Color.White.copy(alpha = 0.22f),
+                    Color(0xFFFF7A00).copy(alpha = 0.45f)
+                )
+            } else {
+                listOf(
+                    Color(0xFFFF7A00),
+                    Color(0xFFFFA94D).copy(alpha = 0.65f),
+                    Color(0xFFFF7A00).copy(alpha = 0.85f)
+                )
+            }
         )
     } else {
         Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.15f),
-                Color.White.copy(alpha = 0.06f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = 0.15f),
+                    Color.White.copy(alpha = 0.06f)
+                )
+            } else {
+                listOf(
+                    Color.White,
+                    Color(0xFFCBD5E1).copy(alpha = 0.75f)
+                )
+            }
         )
     }
 
     val backgroundBrush = if (isSelected) {
         Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFF231B16).copy(alpha = 0.82f),
-                Color(0xFF191B22).copy(alpha = 0.80f),
-                Color(0xFF281C14).copy(alpha = 0.82f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color(0xFF231B16).copy(alpha = 0.82f),
+                    Color(0xFF191B22).copy(alpha = 0.80f),
+                    Color(0xFF281C14).copy(alpha = 0.82f)
+                )
+            } else {
+                listOf(
+                    Color(0xFFFFF5EB).copy(alpha = 0.92f),
+                    Color(0xFFFFFFFF).copy(alpha = 0.88f),
+                    Color(0xFFFFEFE0).copy(alpha = 0.92f)
+                )
+            }
         )
     } else {
         Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFF14171F).copy(alpha = 0.72f),
-                Color(0xFF10131A).copy(alpha = 0.72f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color(0xFF14171F).copy(alpha = 0.72f),
+                    Color(0xFF10131A).copy(alpha = 0.72f)
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = 0.82f),
+                    Color(0xFFF3F7FD).copy(alpha = 0.78f)
+                )
+            }
         )
     }
 
@@ -918,7 +1096,7 @@ private fun OnboardingLanguageRow(
             // Native language name stays in its own script (ქართული / English / Русский)
             androidx.compose.material3.Text(
                 text = language.label,
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
                 fontSize = 16.sp,
                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
             )
@@ -926,7 +1104,9 @@ private fun OnboardingLanguageRow(
 
         // Restrained orange selection radio indicator
         val outerRingColor by animateColorAsState(
-            targetValue = if (isSelected) Color(0xFFFF7A00) else Color.White.copy(alpha = 0.28f),
+            targetValue = if (isSelected) Color(0xFFFF7A00)
+            else if (isDark) Color.White.copy(alpha = 0.28f)
+            else Color(0xFF94A3B8).copy(alpha = 0.55f),
             animationSpec = tween(180),
             label = "langRadioRing_${language.code}"
         )
@@ -950,11 +1130,12 @@ private fun OnboardingLanguageRow(
 
 @Composable
 private fun LanguageFlagBadge(language: AppLanguage) {
+    val isDark = AppPreferencesManager.isDarkMode
     Canvas(
         modifier = Modifier
             .size(width = 30.dp, height = 21.dp)
             .clip(RoundedCornerShape(5.dp))
-            .border(0.6.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(5.dp))
+            .border(0.6.dp, if (isDark) Color.White.copy(alpha = 0.24f) else Color(0xFF94A3B8).copy(alpha = 0.45f), RoundedCornerShape(5.dp))
     ) {
         val w = size.width
         val h = size.height
@@ -1113,6 +1294,7 @@ private fun AuthOrGuestOnboardingStep(
     onContinueAuthenticated: () -> Unit,
     onSwitchAccount: () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1144,20 +1326,35 @@ private fun AuthOrGuestOnboardingStep(
                     .clip(RoundedCornerShape(22.dp))
                     .background(
                         Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF1C2029).copy(alpha = 0.80f),
-                                Color(0xFF10131A).copy(alpha = 0.88f)
-                            )
+                            colors = if (isDark) {
+                                listOf(
+                                    Color(0xFF1C2029).copy(alpha = 0.80f),
+                                    Color(0xFF10131A).copy(alpha = 0.88f)
+                                )
+                            } else {
+                                listOf(
+                                    Color.White.copy(alpha = 0.90f),
+                                    Color(0xFFEAF1FC).copy(alpha = 0.82f)
+                                )
+                            }
                         )
                     )
                     .border(
                         width = 1.dp,
                         brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.25f),
-                                Color.White.copy(alpha = 0.08f),
-                                Color(0xFFFF7A00).copy(alpha = 0.24f)
-                            )
+                            colors = if (isDark) {
+                                listOf(
+                                    Color.White.copy(alpha = 0.25f),
+                                    Color.White.copy(alpha = 0.08f),
+                                    Color(0xFFFF7A00).copy(alpha = 0.24f)
+                                )
+                            } else {
+                                listOf(
+                                    Color.White,
+                                    Color(0xFFCBD5E1).copy(alpha = 0.7f),
+                                    Color(0xFFFF7A00).copy(alpha = 0.35f)
+                                )
+                            }
                         ),
                         shape = RoundedCornerShape(22.dp)
                     )
@@ -1165,7 +1362,7 @@ private fun AuthOrGuestOnboardingStep(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "Account",
-                    tint = Color(0xFFD0D7E2),
+                    tint = if (isDark) Color(0xFFD0D7E2) else Color(0xFF334155),
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -1174,7 +1371,7 @@ private fun AuthOrGuestOnboardingStep(
 
             Text(
                 text = "შესვლა ანგარიშით",
-                color = Color.White,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -1185,7 +1382,7 @@ private fun AuthOrGuestOnboardingStep(
 
             Text(
                 text = "აირჩიე შენთვის მოსახერხებელი გზა ან გააგრძელე ანგარიშის გარეშე.",
-                color = Color(0xFF94A3B8),
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
                 fontSize = 13.5.sp,
                 lineHeight = 19.sp,
                 textAlign = TextAlign.Center,
@@ -1201,14 +1398,21 @@ private fun AuthOrGuestOnboardingStep(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(cardShape)
-                        .background(Color(0xFF141820).copy(alpha = 0.78f))
+                        .background(if (isDark) Color(0xFF141820).copy(alpha = 0.78f) else Color.White.copy(alpha = 0.86f))
                         .border(
                             width = 1.dp,
                             brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFFFF7A00).copy(alpha = 0.50f),
-                                    Color.White.copy(alpha = 0.14f)
-                                )
+                                colors = if (isDark) {
+                                    listOf(
+                                        Color(0xFFFF7A00).copy(alpha = 0.50f),
+                                        Color.White.copy(alpha = 0.14f)
+                                    )
+                                } else {
+                                    listOf(
+                                        Color(0xFFFF7A00).copy(alpha = 0.65f),
+                                        Color(0xFFCBD5E1)
+                                    )
+                                }
                             ),
                             shape = cardShape
                         )
@@ -1222,18 +1426,18 @@ private fun AuthOrGuestOnboardingStep(
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = Color(0xFF4ADE80),
+                            tint = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A),
                             modifier = Modifier.size(24.dp)
                         )
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "თქვენ უკვე შესული ხართ სისტემაში",
-                                color = Color(0xFF94A3B8),
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
                                 fontSize = 12.sp
                             )
                             androidx.compose.material3.Text(
                                 text = currentUser.displayName,
-                                color = Color.White,
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
@@ -1242,7 +1446,7 @@ private fun AuthOrGuestOnboardingStep(
                             if (currentUser.email.isNotBlank()) {
                                 androidx.compose.material3.Text(
                                     text = currentUser.email,
-                                    color = Color(0xFFA0A8B8),
+                                    color = if (isDark) Color(0xFFA0A8B8) else Color(0xFF475569),
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -1295,7 +1499,7 @@ private fun AuthOrGuestOnboardingStep(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_apple_logo),
                             contentDescription = "Apple",
-                            tint = Color.White,
+                            tint = if (isDark) Color.White else Color(0xFF0F172A),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -1336,7 +1540,7 @@ private fun AuthOrGuestOnboardingStep(
                         Icon(
                             imageVector = Icons.Default.Email,
                             contentDescription = "Email",
-                            tint = Color(0xFFD0D7E2),
+                            tint = if (isDark) Color(0xFFD0D7E2) else Color(0xFF334155),
                             modifier = Modifier.size(19.dp)
                         )
                     }
@@ -1371,14 +1575,14 @@ private fun AuthOrGuestOnboardingStep(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF261719).copy(alpha = 0.78f))
-                            .border(1.dp, Color(0xFFF87171).copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                            .background(if (isDark) Color(0xFF261719).copy(alpha = 0.78f) else Color(0xFFFEE2E2))
+                            .border(1.dp, if (isDark) Color(0xFFF87171).copy(alpha = 0.35f) else Color(0xFFF87171), RoundedCornerShape(12.dp))
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                             .testTag("onboarding_auth_status_message")
                     ) {
                         androidx.compose.material3.Text(
                             text = statusMessage,
-                            color = Color(0xFFFCA5A5),
+                            color = if (isDark) Color(0xFFFCA5A5) else Color(0xFFB91C1C),
                             fontSize = 12.5.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
@@ -1422,20 +1626,27 @@ private fun OnboardingAppleAuthFormPanel(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val panelShape = RoundedCornerShape(18.dp)
+    val panelBg = if (isDark) Color(0xFF12151D).copy(alpha = 0.86f) else Color.White.copy(alpha = 0.88f)
+    val panelBorderColors = if (isDark) {
+        listOf(Color.White.copy(alpha = 0.16f), Color(0xFFFF7A00).copy(alpha = 0.28f))
+    } else {
+        listOf(Color(0xFFCBD5E1), Color(0xFFFF7A00).copy(alpha = 0.40f))
+    }
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569)
+    val inputBg = if (isDark) Color(0xFF0E1117) else Color(0xFFF8FAFC)
+    val inputBorderUnfocused = if (isDark) Color.White.copy(alpha = 0.14f) else Color(0xFFCBD5E1)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(panelShape)
-            .background(Color(0xFF12151D).copy(alpha = 0.86f))
+            .background(panelBg)
             .border(
                 width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.16f),
-                        Color(0xFFFF7A00).copy(alpha = 0.28f)
-                    )
-                ),
+                brush = Brush.linearGradient(colors = panelBorderColors),
                 shape = panelShape
             )
             .padding(16.dp)
@@ -1449,12 +1660,12 @@ private fun OnboardingAppleAuthFormPanel(
             Icon(
                 painter = painterResource(id = R.drawable.ic_apple_logo),
                 contentDescription = "Apple",
-                tint = Color.White,
+                tint = textPrimary,
                 modifier = Modifier.size(16.dp)
             )
             Text(
                 text = "Apple ID ავტორიზაცია",
-                color = Color.White,
+                color = textPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold
             )
@@ -1463,17 +1674,17 @@ private fun OnboardingAppleAuthFormPanel(
         androidx.compose.material3.OutlinedTextField(
             value = appleEmailInput,
             onValueChange = onAppleEmailChange,
-            label = { Text("Apple ID (ელ. ფოსტა)", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+            label = { Text("Apple ID (ელ. ფოსტა)", fontSize = 12.sp, color = textSecondary) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0E1117),
-                unfocusedContainerColor = Color(0xFF0E1117),
+                focusedTextColor = textPrimary,
+                unfocusedTextColor = textPrimary,
+                focusedContainerColor = inputBg,
+                unfocusedContainerColor = inputBg,
                 focusedBorderColor = Color(0xFFFF7A00).copy(alpha = 0.7f),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                unfocusedBorderColor = inputBorderUnfocused,
                 cursorColor = Color(0xFFFF7A00)
             ),
             modifier = Modifier
@@ -1484,7 +1695,7 @@ private fun OnboardingAppleAuthFormPanel(
         androidx.compose.material3.OutlinedTextField(
             value = applePasswordInput,
             onValueChange = onApplePasswordChange,
-            label = { Text("პაროლი", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+            label = { Text("პაროლი", fontSize = 12.sp, color = textSecondary) },
             singleLine = true,
             visualTransformation = if (showApplePassword) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
@@ -1492,18 +1703,18 @@ private fun OnboardingAppleAuthFormPanel(
                     Icon(
                         imageVector = if (showApplePassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = "Toggle password",
-                        tint = Color(0xFF94A3B8)
+                        tint = textSecondary
                     )
                 }
             },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0E1117),
-                unfocusedContainerColor = Color(0xFF0E1117),
+                focusedTextColor = textPrimary,
+                unfocusedTextColor = textPrimary,
+                focusedContainerColor = inputBg,
+                unfocusedContainerColor = inputBg,
                 focusedBorderColor = Color(0xFFFF7A00).copy(alpha = 0.7f),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                unfocusedBorderColor = inputBorderUnfocused,
                 cursorColor = Color(0xFFFF7A00)
             ),
             modifier = Modifier
@@ -1515,10 +1726,10 @@ private fun OnboardingAppleAuthFormPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFF0B0D12).copy(alpha = 0.85f))
+                .background(if (isDark) Color(0xFF0B0D12).copy(alpha = 0.85f) else Color(0xFFF1F5F9))
                 .border(
                     width = 0.8.dp,
-                    color = if (hideAppleEmail) Color(0xFFFF7A00).copy(alpha = 0.55f) else Color.White.copy(alpha = 0.12f),
+                    color = if (hideAppleEmail) Color(0xFFFF7A00).copy(alpha = 0.55f) else inputBorderUnfocused,
                     shape = RoundedCornerShape(10.dp)
                 )
                 .clickable(onClick = onToggleHideAppleEmail)
@@ -1529,7 +1740,7 @@ private fun OnboardingAppleAuthFormPanel(
         ) {
             Text(
                 text = "დამალე ჩემი ელ. ფოსტა (Private Relay)",
-                color = Color(0xFFD0D7E2),
+                color = if (isDark) Color(0xFFD0D7E2) else Color(0xFF334155),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
@@ -1540,7 +1751,7 @@ private fun OnboardingAppleAuthFormPanel(
                     .size(18.dp)
                     .border(
                         width = 1.4.dp,
-                        color = if (hideAppleEmail) Color(0xFFFF7A00) else Color.White.copy(alpha = 0.28f),
+                        color = if (hideAppleEmail) Color(0xFFFF7A00) else if (isDark) Color.White.copy(alpha = 0.28f) else Color(0xFF94A3B8),
                         shape = CircleShape
                     )
             ) {
@@ -1575,40 +1786,70 @@ private fun OnboardingAuthOptionButton(
     modifier: Modifier = Modifier,
     leadingBadge: @Composable () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val shape = RoundedCornerShape(18.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val borderBrush = if (isPrimaryHighlight || isPressed) {
         Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.24f),
-                Color(0xFFFF7A00).copy(alpha = 0.42f),
-                Color.White.copy(alpha = 0.14f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = 0.24f),
+                    Color(0xFFFF7A00).copy(alpha = 0.42f),
+                    Color.White.copy(alpha = 0.14f)
+                )
+            } else {
+                listOf(
+                    Color(0xFFFF7A00).copy(alpha = 0.72f),
+                    Color.White,
+                    Color(0xFFFF7A00).copy(alpha = 0.45f)
+                )
+            }
         )
     } else {
         Brush.linearGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.16f),
-                Color.White.copy(alpha = 0.07f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = 0.16f),
+                    Color.White.copy(alpha = 0.07f)
+                )
+            } else {
+                listOf(
+                    Color.White,
+                    Color(0xFFCBD5E1).copy(alpha = 0.8f)
+                )
+            }
         )
     }
 
     val containerBrush = if (isPrimaryHighlight) {
         Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFF171B24).copy(alpha = 0.82f),
-                Color(0xFF1E1B1A).copy(alpha = 0.82f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color(0xFF171B24).copy(alpha = 0.82f),
+                    Color(0xFF1E1B1A).copy(alpha = 0.82f)
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = 0.90f),
+                    Color(0xFFFFF4EA).copy(alpha = 0.90f)
+                )
+            }
         )
     } else {
         Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFF13161E).copy(alpha = 0.75f),
-                Color(0xFF101319).copy(alpha = 0.75f)
-            )
+            colors = if (isDark) {
+                listOf(
+                    Color(0xFF13161E).copy(alpha = 0.75f),
+                    Color(0xFF101319).copy(alpha = 0.75f)
+                )
+            } else {
+                listOf(
+                    Color.White.copy(alpha = 0.84f),
+                    Color(0xFFF2F6FC).copy(alpha = 0.80f)
+                )
+            }
         )
     }
 
@@ -1620,7 +1861,9 @@ private fun OnboardingAuthOptionButton(
             .border(width = 1.dp, brush = borderBrush, shape = shape)
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(color = Color.White.copy(alpha = 0.2f)),
+                indication = androidx.compose.material3.ripple(
+                    color = if (isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFFF7A00).copy(alpha = 0.2f)
+                ),
                 enabled = !isLoading,
                 onClick = onClick
             )
@@ -1632,8 +1875,8 @@ private fun OnboardingAuthOptionButton(
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF1E232E).copy(alpha = 0.85f))
-                .border(0.8.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                .background(if (isDark) Color(0xFF1E232E).copy(alpha = 0.85f) else Color(0xFFF1F5F9))
+                .border(0.8.dp, if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1), CircleShape)
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -1648,7 +1891,7 @@ private fun OnboardingAuthOptionButton(
 
         Text(
             text = text,
-            color = Color.White,
+            color = if (isDark) Color.White else Color(0xFF0F172A),
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
@@ -1674,19 +1917,32 @@ private fun OnboardingEmailAuthFormPanel(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val panelShape = RoundedCornerShape(18.dp)
+    val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+    val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569)
+    val inputBg = if (isDark) Color(0xFF0E1117) else Color(0xFFF8FAFC)
+    val inputBorderUnfocused = if (isDark) Color.White.copy(alpha = 0.14f) else Color(0xFFCBD5E1)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(panelShape)
-            .background(Color(0xFF12151D).copy(alpha = 0.86f))
+            .background(if (isDark) Color(0xFF12151D).copy(alpha = 0.86f) else Color.White.copy(alpha = 0.88f))
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.16f),
-                        Color(0xFFFF7A00).copy(alpha = 0.28f)
-                    )
+                    colors = if (isDark) {
+                        listOf(
+                            Color.White.copy(alpha = 0.16f),
+                            Color(0xFFFF7A00).copy(alpha = 0.28f)
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFFCBD5E1),
+                            Color(0xFFFF7A00).copy(alpha = 0.40f)
+                        )
+                    }
                 ),
                 shape = panelShape
             )
@@ -1699,7 +1955,7 @@ private fun OnboardingEmailAuthFormPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF0B0D12).copy(alpha = 0.85f))
+                .background(if (isDark) Color(0xFF0B0D12).copy(alpha = 0.85f) else Color(0xFFE9EEF5))
                 .padding(3.dp)
         ) {
             val loginTabSelected = !isRegisterMode
@@ -1710,11 +1966,13 @@ private fun OnboardingEmailAuthFormPanel(
                     .defaultMinSize(minHeight = 38.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(
-                        if (loginTabSelected) Color(0xFF232834) else Color.Transparent
+                        if (loginTabSelected) {
+                            if (isDark) Color(0xFF232834) else Color.White
+                        } else Color.Transparent
                     )
                     .border(
                         width = if (loginTabSelected) 0.8.dp else 0.dp,
-                        color = if (loginTabSelected) Color(0xFFFF7A00).copy(alpha = 0.55f) else Color.Transparent,
+                        color = if (loginTabSelected) Color(0xFFFF7A00).copy(alpha = 0.65f) else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     )
                     .clickable { onToggleRegisterMode(false) }
@@ -1722,7 +1980,7 @@ private fun OnboardingEmailAuthFormPanel(
             ) {
                 Text(
                     text = "შესვლა",
-                    color = if (loginTabSelected) Color.White else Color(0xFF8E96A4),
+                    color = if (loginTabSelected) textPrimary else textSecondary,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1735,11 +1993,13 @@ private fun OnboardingEmailAuthFormPanel(
                     .defaultMinSize(minHeight = 38.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(
-                        if (isRegisterMode) Color(0xFF232834) else Color.Transparent
+                        if (isRegisterMode) {
+                            if (isDark) Color(0xFF232834) else Color.White
+                        } else Color.Transparent
                     )
                     .border(
                         width = if (isRegisterMode) 0.8.dp else 0.dp,
-                        color = if (isRegisterMode) Color(0xFFFF7A00).copy(alpha = 0.55f) else Color.Transparent,
+                        color = if (isRegisterMode) Color(0xFFFF7A00).copy(alpha = 0.65f) else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     )
                     .clickable { onToggleRegisterMode(true) }
@@ -1747,7 +2007,7 @@ private fun OnboardingEmailAuthFormPanel(
             ) {
                 Text(
                     text = "რეგისტრაცია",
-                    color = if (isRegisterMode) Color.White else Color(0xFF8E96A4),
+                    color = if (isRegisterMode) textPrimary else textSecondary,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1758,16 +2018,16 @@ private fun OnboardingEmailAuthFormPanel(
             androidx.compose.material3.OutlinedTextField(
                 value = nameInput,
                 onValueChange = onNameChange,
-                label = { Text("თქვენი სახელი და გვარი", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+                label = { Text("თქვენი სახელი და გვარი", fontSize = 12.sp, color = textSecondary) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedContainerColor = Color(0xFF0E1117),
-                    unfocusedContainerColor = Color(0xFF0E1117),
+                    focusedTextColor = textPrimary,
+                    unfocusedTextColor = textPrimary,
+                    focusedContainerColor = inputBg,
+                    unfocusedContainerColor = inputBg,
                     focusedBorderColor = Color(0xFFFF7A00).copy(alpha = 0.7f),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                    unfocusedBorderColor = inputBorderUnfocused,
                     cursorColor = Color(0xFFFF7A00)
                 ),
                 modifier = Modifier
@@ -1779,17 +2039,17 @@ private fun OnboardingEmailAuthFormPanel(
         androidx.compose.material3.OutlinedTextField(
             value = emailInput,
             onValueChange = onEmailChange,
-            label = { Text("ელ. ფოსტა", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+            label = { Text("ელ. ფოსტა", fontSize = 12.sp, color = textSecondary) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0E1117),
-                unfocusedContainerColor = Color(0xFF0E1117),
+                focusedTextColor = textPrimary,
+                unfocusedTextColor = textPrimary,
+                focusedContainerColor = inputBg,
+                unfocusedContainerColor = inputBg,
                 focusedBorderColor = Color(0xFFFF7A00).copy(alpha = 0.7f),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                unfocusedBorderColor = inputBorderUnfocused,
                 cursorColor = Color(0xFFFF7A00)
             ),
             modifier = Modifier
@@ -1800,7 +2060,7 @@ private fun OnboardingEmailAuthFormPanel(
         androidx.compose.material3.OutlinedTextField(
             value = passwordInput,
             onValueChange = onPasswordChange,
-            label = { Text("პაროლი", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+            label = { Text("პაროლი", fontSize = 12.sp, color = textSecondary) },
             singleLine = true,
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
@@ -1808,18 +2068,18 @@ private fun OnboardingEmailAuthFormPanel(
                     Icon(
                         imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = "Toggle password",
-                        tint = Color(0xFF94A3B8)
+                        tint = textSecondary
                     )
                 }
             },
             shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0E1117),
-                unfocusedContainerColor = Color(0xFF0E1117),
+                focusedTextColor = textPrimary,
+                unfocusedTextColor = textPrimary,
+                focusedContainerColor = inputBg,
+                unfocusedContainerColor = inputBg,
                 focusedBorderColor = Color(0xFFFF7A00).copy(alpha = 0.7f),
-                unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                unfocusedBorderColor = inputBorderUnfocused,
                 cursorColor = Color(0xFFFF7A00)
             ),
             modifier = Modifier
@@ -1839,18 +2099,22 @@ private fun OnboardingEmailAuthFormPanel(
 }
 
 // ==============================================================================
-// Screen 4 — Introductory Benefits & Ready ("მზად ხარ!" / "დაიწყე →")
+// Screen 4 (Final, 4/4) — Theme Selection ("აირჩიე აპის თემა")
 // ==============================================================================
 @Composable
-private fun ReadyAndBenefitsOnboardingStep(
+private fun ThemeSelectionOnboardingStep(
+    isDark: Boolean,
+    onSelectDarkMode: (Boolean) -> Unit,
     onBack: () -> Unit,
     onFinish: () -> Unit
 ) {
+    val accentOrange = if (isDark) Color(0xFFFF6B00) else Color(0xFFF36B16)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp, vertical = 18.dp)
-            .testTag("onboarding_ready_step"),
+            .testTag("onboarding_theme_step"),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1869,212 +2133,405 @@ private fun ReadyAndBenefitsOnboardingStep(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // BEKASERVICE Emblem & Brand Header
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF1A1817).copy(alpha = 0.85f),
-                                Color(0xFF0E1015).copy(alpha = 0.90f)
-                            )
-                        )
-                    )
-                    .border(
-                        width = 1.dp,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFFFF7A00).copy(alpha = 0.55f),
-                                Color.White.copy(alpha = 0.18f)
-                            )
-                        ),
-                        shape = RoundedCornerShape(20.dp)
-                    )
-                    .padding(10.dp)
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_beka_main_emblem),
-                    contentDescription = "BEKASERVICE",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "BEKA",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.6.sp
-                )
-                Text(
-                    text = "SERVICE",
-                    color = Color(0xFFFF7A00),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.6.sp
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
             Text(
-                text = "მზად ხარ!",
-                color = Color.White,
-                fontSize = 25.sp,
+                text = "აირჩიე აპის თემა",
+                color = if (isDark) Color.White else Color(0xFF20242B),
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.testTag("onboarding_ready_headline")
+                modifier = Modifier.testTag("onboarding_theme_headline")
             )
 
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "გაეცანი ციფრულ სერვისებს BEKASERVICE-ში.",
-                color = Color(0xFF94A3B8),
+                text = "შეგიძლია ნებისმიერ დროს შეცვალო პარამეტრებიდან.",
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF687180),
                 fontSize = 13.5.sp,
                 lineHeight = 19.sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.testTag("onboarding_ready_subtitle")
+                modifier = Modifier.testTag("onboarding_theme_subtitle")
             )
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // Concise Introductory Benefits inside subtle glass containers
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Max),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OnboardingBenefitGlassRow(
-                    icon = Icons.Default.Explore,
-                    title = "მარტივი ნავიგაცია",
-                    description = "სწრაფი ძიება და კატეგორიები ერთ სივრცეში"
+                OnboardingThemePreviewCard(
+                    title = "ნათელი თემა",
+                    subtitle = "რბილი გრაფიტის ნათელი ფონი",
+                    icon = Icons.Default.LightMode,
+                    isPreviewDark = false,
+                    isSelected = !isDark,
+                    parentIsDark = isDark,
+                    accentOrange = accentOrange,
+                    cardTestTag = "onboarding_theme_light_card",
+                    iconTestTag = "onboarding_theme_light_icon",
+                    previewTestTag = "onboarding_theme_light_preview",
+                    onClick = { onSelectDarkMode(false) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
-                OnboardingBenefitGlassRow(
-                    icon = Icons.Default.VerifiedUser,
-                    title = "სანდოობა",
-                    description = "გარანტირებული ხარისხი და ოფიციალური სერვისი"
-                )
-                OnboardingBenefitGlassRow(
-                    icon = Icons.Default.Memory,
-                    title = "ციფრული სერვისები",
-                    description = "AI პაკეტები, პროგრამული უზრუნველყოფა და ტექნიკა"
+
+                OnboardingThemePreviewCard(
+                    title = "მუქი თემა",
+                    subtitle = "კლასიკური მუქი ფონი",
+                    icon = Icons.Default.DarkMode,
+                    isPreviewDark = true,
+                    isSelected = isDark,
+                    parentIsDark = isDark,
+                    accentOrange = accentOrange,
+                    cardTestTag = "onboarding_theme_dark_card",
+                    iconTestTag = "onboarding_theme_dark_icon",
+                    previewTestTag = "onboarding_theme_dark_preview",
+                    onClick = { onSelectDarkMode(true) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
                 )
             }
         }
 
-        // Bottom Actions pinned cleanly so they remain visible on all screen heights
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             OnboardingPrimaryGlassButton(
-                text = "დაიწყე",
+                text = "მთავარ გვერდზე გადასვლა",
                 onClick = onFinish,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("onboarding_finish_button")
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            OnboardingUnderlinedTextAction(
-                text = "მთავარ გვერდზე",
-                onClick = onFinish,
-                modifier = Modifier
-                    .padding(bottom = 4.dp)
-                    .testTag("onboarding_home_link_button")
             )
         }
     }
 }
 
 @Composable
-private fun OnboardingBenefitGlassRow(
-    icon: ImageVector,
+internal fun OnboardingThemePreviewCard(
     title: String,
-    description: String
+    subtitle: String,
+    icon: ImageVector,
+    isPreviewDark: Boolean,
+    isSelected: Boolean,
+    parentIsDark: Boolean,
+    accentOrange: Color,
+    cardTestTag: String,
+    iconTestTag: String,
+    previewTestTag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(16.dp)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(
-                Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFF14171F).copy(alpha = 0.72f),
-                        Color(0xFF0F1218).copy(alpha = 0.74f)
-                    )
-                )
-            )
+    val cardShape = RoundedCornerShape(20.dp)
+    val outerContainerBg = when {
+        parentIsDark && isSelected -> Color(0xFF1F1916)
+        parentIsDark -> Color(0xFF13161D)
+        isSelected -> Color(0xFFFFF0E5)
+        else -> Color(0xFFF8F9FB)
+    }
+    val outerBorderColor = when {
+        isSelected -> accentOrange
+        parentIsDark -> Color(0xFF282F3A)
+        else -> Color(0xFFDCE0E6)
+    }
+
+    // Miniature preview tokens accurately representing BSTORE Soft Graphite Light & Dark themes
+    val miniPageBg = if (isPreviewDark) Color(0xFF0D0F12) else Color(0xFFF0F1F4)
+    val miniHeaderBg = if (isPreviewDark) Color(0xFF16191E) else Color(0xFFF8F9FB)
+    val miniSearchBg = if (isPreviewDark) Color(0xFF1F242C) else Color(0xFFE5E8ED)
+    val miniCardBg = if (isPreviewDark) Color(0xFF16191E) else Color(0xFFF8F9FB)
+    val miniElevatedBg = if (isPreviewDark) Color(0xFF1F242C) else Color(0xFFFFFFFF)
+    val miniBorder = if (isPreviewDark) Color(0xFF282F3A) else Color(0xFFDCE0E6)
+    val miniTextPrimary = if (isPreviewDark) Color(0xFFF8FAFC) else Color(0xFF20242B)
+    val miniTextSecondary = if (isPreviewDark) Color(0xFFA0A5B0) else Color(0xFF687180)
+    val miniOrange = if (isPreviewDark) Color(0xFFFF7A00) else Color(0xFFF36B16)
+
+    val cardTextStyle = TextStyle(
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+
+    Column(
+        modifier = modifier
+            .clip(cardShape)
+            .background(outerContainerBg)
             .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.14f),
-                        Color(0xFFFF7A00).copy(alpha = 0.22f),
-                        Color.White.copy(alpha = 0.06f)
-                    )
-                ),
-                shape = shape
+                width = if (isSelected) 2.dp else 1.dp,
+                color = outerBorderColor,
+                shape = cardShape
             )
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+            .clickable(onClick = onClick)
+            .padding(12.dp)
+            .testTag(cardTestTag),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
+        // 1. Top header row (fixed 36.dp height): Sun / Moon Icon + Selection Check
+        Row(
             modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF1B1F29).copy(alpha = 0.85f))
-                .border(
-                    width = 0.8.dp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.20f),
-                            Color(0xFFFF7A00).copy(alpha = 0.35f)
-                        )
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                .fillMaxWidth()
+                .height(36.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = Color(0xFFE2E8F0),
-                modifier = Modifier.size(19.dp)
-            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(
+                        if (isSelected) accentOrange.copy(alpha = 0.16f)
+                        else if (parentIsDark) Color(0xFF1D222C)
+                        else Color(0xFFE5E8ED)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isSelected) accentOrange.copy(alpha = 0.55f) else miniBorder,
+                        shape = RoundedCornerShape(11.dp)
+                    )
+                    .testTag(iconTestTag)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (isSelected) accentOrange else if (parentIsDark) Color(0xFFE2E8F0) else Color(0xFF20242B),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) accentOrange else Color.Transparent)
+                    .border(
+                        width = 1.5.dp,
+                        color = if (isSelected) accentOrange else if (parentIsDark) Color(0xFF3B4354) else Color(0xFFAEB4BE),
+                        shape = CircleShape
+                    )
+                    .testTag("${cardTestTag}_indicator")
+            ) {
+                if (isSelected) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
         }
 
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // 2. Miniature BSTORE UI Preview Window (identical 108.dp height & structure)
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(108.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(miniPageBg)
+                .border(1.dp, miniBorder, RoundedCornerShape(14.dp))
+                .padding(8.dp)
+                .testTag(previewTestTag),
+            verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = description,
-                color = Color(0xFF94A3B8),
-                fontSize = 11.5.sp,
-                lineHeight = 15.sp
-            )
+            // Mini Top Bar (BS badge + title bar + status dot)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(19.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(miniHeaderBg)
+                    .border(0.6.dp, miniBorder, RoundedCornerShape(7.dp))
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(11.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(miniOrange)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(28.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(miniTextPrimary)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(miniTextSecondary.copy(alpha = 0.55f))
+                )
+            }
+
+            // Mini Search Input Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(miniSearchBg)
+                    .border(0.6.dp, miniBorder, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = miniTextSecondary,
+                    modifier = Modifier.size(10.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .width(38.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(miniTextSecondary.copy(alpha = 0.55f))
+                )
+            }
+
+            // Mini Product Card with Surface Hierarchy + Orange CTA Pill
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(49.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(miniCardBg)
+                    .border(0.8.dp, miniBorder, RoundedCornerShape(9.dp))
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(miniElevatedBg)
+                            .border(0.5.dp, miniBorder, RoundedCornerShape(6.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(miniOrange.copy(alpha = 0.85f))
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(miniTextPrimary)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.55f)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(miniTextSecondary)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(24.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(miniOrange)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(34.dp)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(miniOrange)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // 3. Controlled Title & Description Block (fixed 54.dp height so 1-line and 2-line descriptions never alter card height)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = title,
+                    color = if (parentIsDark) Color.White else Color(0xFF20242B),
+                    fontSize = 14.5.sp,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    style = cardTextStyle,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(30.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Text(
+                    text = subtitle,
+                    color = if (parentIsDark) Color(0xFF94A3B8) else Color(0xFF687180),
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    style = cardTextStyle,
+                    textAlign = TextAlign.Center,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }
@@ -2088,6 +2545,7 @@ private fun OnboardingStepHeader(
     totalSteps: Int,
     onBack: () -> Unit
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -2099,14 +2557,21 @@ private fun OnboardingStepHeader(
                 .minimumInteractiveComponentSize()
                 .size(42.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF151821).copy(alpha = 0.72f))
+                .background(if (isDark) Color(0xFF151821).copy(alpha = 0.72f) else Color.White.copy(alpha = 0.84f))
                 .border(
                     width = 1.dp,
                     brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.20f),
-                            Color.White.copy(alpha = 0.07f)
-                        )
+                        colors = if (isDark) {
+                            listOf(
+                                Color.White.copy(alpha = 0.20f),
+                                Color.White.copy(alpha = 0.07f)
+                            )
+                        } else {
+                            listOf(
+                                Color.White,
+                                Color(0xFFCBD5E1)
+                            )
+                        }
                     ),
                     shape = CircleShape
                 )
@@ -2116,14 +2581,14 @@ private fun OnboardingStepHeader(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                 contentDescription = "უკან დაბრუნება",
-                tint = Color.White,
+                tint = if (isDark) Color.White else Color(0xFF0F172A),
                 modifier = Modifier.size(22.dp)
             )
         }
 
         androidx.compose.material3.Text(
             text = "$stepNumber / $totalSteps",
-            color = Color(0xFF94A3B8),
+            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569),
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium
         )
@@ -2135,6 +2600,7 @@ private fun OnboardingCircularForwardButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
@@ -2145,33 +2611,47 @@ private fun OnboardingCircularForwardButton(
             .clip(CircleShape)
             .background(
                 Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF281C15).copy(alpha = if (isPressed) 0.92f else 0.80f),
-                        Color(0xFF14161D).copy(alpha = 0.86f)
-                    )
+                    colors = if (isDark) {
+                        listOf(
+                            Color(0xFF281C15).copy(alpha = if (isPressed) 0.92f else 0.80f),
+                            Color(0xFF14161D).copy(alpha = 0.86f)
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFFFF8820).copy(alpha = if (isPressed) 0.95f else 0.90f),
+                            Color(0xFFFF6B00)
+                        )
+                    }
                 )
             )
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFFFF7A00).copy(alpha = 0.65f),
-                        Color.White.copy(alpha = 0.18f),
-                        Color(0xFFFF7A00).copy(alpha = 0.40f)
-                    )
+                    colors = if (isDark) {
+                        listOf(
+                            Color(0xFFFF7A00).copy(alpha = 0.65f),
+                            Color.White.copy(alpha = 0.18f),
+                            Color(0xFFFF7A00).copy(alpha = 0.40f)
+                        )
+                    } else {
+                        listOf(
+                            Color.White.copy(alpha = 0.72f),
+                            Color(0xFFFF6B00)
+                        )
+                    }
                 ),
                 shape = CircleShape
             )
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(color = Color(0xFFFF7A00)),
+                indication = androidx.compose.material3.ripple(color = if (isDark) Color(0xFFFF7A00) else Color.White),
                 onClick = onClick
             )
     ) {
         Icon(
             imageVector = Icons.AutoMirrored.Filled.ArrowForward,
             contentDescription = "შემდეგი",
-            tint = Color(0xFFFF7A00),
+            tint = if (isDark) Color(0xFFFF7A00) else Color.White,
             modifier = Modifier.size(22.dp)
         )
     }
@@ -2183,6 +2663,7 @@ private fun OnboardingPrimaryGlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     val shape = RoundedCornerShape(28.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -2194,52 +2675,70 @@ private fun OnboardingPrimaryGlassButton(
             .clip(shape)
             .background(
                 Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFF1A1E27).copy(alpha = if (isPressed) 0.90f else 0.78f),
-                        Color(0xFF231D1B).copy(alpha = if (isPressed) 0.90f else 0.80f),
-                        Color(0xFF332014).copy(alpha = if (isPressed) 0.92f else 0.82f)
-                    )
+                    colors = if (isDark) {
+                        listOf(
+                            Color(0xFF1A1E27).copy(alpha = if (isPressed) 0.90f else 0.78f),
+                            Color(0xFF231D1B).copy(alpha = if (isPressed) 0.90f else 0.80f),
+                            Color(0xFF332014).copy(alpha = if (isPressed) 0.92f else 0.82f)
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFFFF6B00).copy(alpha = if (isPressed) 0.96f else 0.90f),
+                            Color(0xFFFF7A00).copy(alpha = if (isPressed) 0.98f else 0.92f),
+                            Color(0xFFEA580C).copy(alpha = if (isPressed) 0.98f else 0.94f)
+                        )
+                    }
                 )
             )
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.24f),
-                        Color(0xFFFF7A00).copy(alpha = 0.35f),
-                        Color(0xFFFF7A00).copy(alpha = 0.58f)
-                    )
+                    colors = if (isDark) {
+                        listOf(
+                            Color.White.copy(alpha = 0.24f),
+                            Color(0xFFFF7A00).copy(alpha = 0.35f),
+                            Color(0xFFFF7A00).copy(alpha = 0.58f)
+                        )
+                    } else {
+                        listOf(
+                            Color.White.copy(alpha = 0.70f),
+                            Color(0xFFFF7A00).copy(alpha = 0.60f),
+                            Color(0xFFEA580C).copy(alpha = 0.85f)
+                        )
+                    }
                 ),
                 shape = shape
             )
             .clickable(
                 interactionSource = interactionSource,
-                indication = androidx.compose.material3.ripple(color = Color(0xFFFF7A00).copy(alpha = 0.3f)),
+                indication = androidx.compose.material3.ripple(color = Color.White.copy(alpha = 0.28f)),
                 onClick = onClick
             )
             .padding(horizontal = 22.dp, vertical = 13.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Spacer(modifier = Modifier.width(20.dp))
+        CompositionLocalProvider(LocalPreserveWhiteText provides true) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Spacer(modifier = Modifier.width(20.dp))
 
-            Text(
-                text = text,
-                color = Color.White,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center
-            )
+                Text(
+                    text = text,
+                    color = Color.White,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center
+                )
 
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.92f),
-                modifier = Modifier.size(19.dp)
-            )
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.92f),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
         }
     }
 }
@@ -2250,6 +2749,7 @@ private fun OnboardingUnderlinedTextAction(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = AppPreferencesManager.isDarkMode
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -2260,7 +2760,7 @@ private fun OnboardingUnderlinedTextAction(
     ) {
         Text(
             text = text,
-            color = Color(0xFFA0A8B8),
+            color = if (isDark) Color(0xFFA0A8B8) else Color(0xFF475569),
             fontSize = 13.5.sp,
             fontWeight = FontWeight.Medium,
             textDecoration = TextDecoration.Underline,

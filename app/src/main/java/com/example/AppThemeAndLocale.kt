@@ -59,7 +59,7 @@ object AppPreferencesManager {
     private const val KEY_APP_LANG = "app_language_code"
     private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 
-    var isDarkMode by mutableStateOf(true)
+    var isDarkMode by mutableStateOf(false)
         private set
 
     var currentLanguage by mutableStateOf(AppLanguage.KA)
@@ -70,7 +70,7 @@ object AppPreferencesManager {
 
     fun init(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        isDarkMode = prefs.getBoolean(KEY_DARK_MODE, true)
+        isDarkMode = prefs.getBoolean(KEY_DARK_MODE, false)
         currentLanguage = AppLanguage.fromCode(prefs.getString(KEY_APP_LANG, AppLanguage.KA.code))
         isOnboardingCompleted = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
     }
@@ -126,20 +126,20 @@ object AppThemeColorAdapter {
 
     fun adaptPageBackground(darkColor: Color): Color {
         if (AppPreferencesManager.isDarkMode) return darkColor
-        return Color(0xFFF3F6FB)
+        return Color(0xFFF0F1F4)
     }
 
     fun adaptTopBarBackground(darkColor: Color): Color {
         if (AppPreferencesManager.isDarkMode) return darkColor
-        return Color(0xFFFFFFFF)
+        return Color(0xFFF8F9FB)
     }
 
     fun inputTextColor(): Color {
-        return if (AppPreferencesManager.isDarkMode) Color.White else Color(0xFF0F172A)
+        return if (AppPreferencesManager.isDarkMode) Color.White else Color(0xFF20242B)
     }
 
     fun dividerColor(darkColor: Color = Color(0xFF242830)): Color {
-        return if (AppPreferencesManager.isDarkMode) darkColor else Color(0xFFE2E8F0)
+        return if (AppPreferencesManager.isDarkMode) darkColor else Color(0xFFDCE0E6)
     }
 
     fun adaptSurfaceColor(color: Color): Color {
@@ -156,7 +156,7 @@ object AppThemeColorAdapter {
         }
         if (isVividAccentColor(color)) return color
 
-        // Search bars, chat inputs, and primary cards -> crisp white in Light Mode
+        // Search bars, chat inputs, and primary cards -> Soft Graphite primary surface (#F8F9FB) in Light Mode
         if (color == Color(0xFF16191E) || color == Color(0xFF1A1D24) ||
             color == Color(0xFF14171E) || color == Color(0xFF14171D) ||
             color == Color(0xFF141820) || color == Color(0xFF12151B) ||
@@ -164,7 +164,7 @@ object AppThemeColorAdapter {
             color == Color(0xFF191D24) || color == Color(0xFF0F1216) ||
             color == Color(0xFF0F1217)
         ) {
-            return Color(0xFFFFFFFF)
+            return Color(0xFFF8F9FB)
         }
 
         val lum = color.luminance()
@@ -181,17 +181,17 @@ object AppThemeColorAdapter {
                 return Color(0xFFEFF6FF) // Light blue/Telegram/Gemini tint (#0E2235, #1E2640, #1B2230)
             }
             if (color.red > color.blue * 1.35f && color.green > color.blue * 1.15f) {
-                return Color(0xFFFFFBEB) // Light amber/warning tint (#1F1A14, #1A1712)
+                return Color(0xFFFFF0E5) // Soft orange background (#FFF0E5)
             }
         }
 
         return when {
             // Deep nested box or page background (#0A0B0E, #0D0F12, #121212, #0F1115, #101318, #121418, #12151A)
-            lum < 0.0068f -> Color(0xFFF1F5F9)
+            lum < 0.0068f -> Color(0xFFE9EBEF)
             // Primary card / container / input surface (#16191E, #12151B, #141820, #181C23, #161A22, #191D24)
-            lum < 0.0125f -> Color(0xFFFFFFFF)
+            lum < 0.0125f -> Color(0xFFF8F9FB)
             // Secondary chip / nested surface (#1C2028, #1E222B, #1E2430, #1E2532, #222630, #262A34, #282D37, #2E3440)
-            lum < 0.16f -> Color(0xFFEEF2F8)
+            lum < 0.16f -> Color(0xFFE5E8ED)
             else -> color
         }
     }
@@ -202,7 +202,7 @@ object AppThemeColorAdapter {
         if (brush is androidx.compose.ui.graphics.SolidColor) {
             val c = brush.value
             if (!isVividAccentColor(c) && c.luminance() < 0.22f && c.alpha > 0.5f) {
-                return BorderStroke(border.width, Color(0xFFD8E0EC))
+                return BorderStroke(border.width, Color(0xFFDCE0E6))
             }
         }
         return border
@@ -211,27 +211,27 @@ object AppThemeColorAdapter {
     fun adaptTextColor(color: Color, preserveWhite: Boolean): Color {
         if (AppPreferencesManager.isDarkMode) return color
         if (preserveWhite) return color
-        if (color == Color.Unspecified) return Color(0xFF0F172A)
+        if (color == Color.Unspecified) return Color(0xFF20242B)
 
         val max = maxOf(color.red, color.green, color.blue)
         val min = minOf(color.red, color.green, color.blue)
         val delta = max - min
 
-        // 1. Neutral text colors (white, near-white, silver, gray) -> high-contrast dark slate
+        // 1. Neutral text colors (white, near-white, silver, gray) -> Soft Graphite text hierarchy
         if (delta < 0.12f) {
             val lum = color.luminance()
             return when {
-                // White or near-white primary text (#FFFFFF, #E2E8F0, #CBD5E1, #D0D5E0) -> Deep Slate
-                lum > 0.55f -> Color(0xFF0F172A)
-                // Secondary gray text (#A0A5B0, #94A3B8, #8C94A4, #888E9B, #8A92A0) -> Dark Slate
-                lum > 0.20f -> Color(0xFF334155)
-                // Muted / placeholder gray text (#6E7582, #7E8695, #505560) -> Medium-Dark Slate
-                lum > 0.08f -> Color(0xFF475569)
+                // White or near-white primary text (#FFFFFF, #E2E8F0, #CBD5E1, #D0D5E0) -> Primary text (#20242B)
+                lum > 0.55f -> Color(0xFF20242B)
+                // Secondary gray text (#A0A5B0, #94A3B8, #8C94A4, #888E9B, #8A92A0) -> Secondary text (#687180)
+                lum > 0.20f -> Color(0xFF687180)
+                // Muted / placeholder gray text (#6E7582, #7E8695, #505560) -> Tertiary text (#9299A5)
+                lum > 0.08f -> Color(0xFF9299A5)
                 else -> color
             }
         }
 
-        // 2. Colored/accent text: deepen light/pastel accents on white backgrounds for strong readability
+        // 2. Colored/accent text: deepen light/pastel accents on Soft Graphite backgrounds for strong readability
         if (color.green > 0.7f && color.red < 0.45f) {
             return Color(0xFF15803D) // #4ADE80 -> Deep Green
         }
@@ -244,8 +244,8 @@ object AppThemeColorAdapter {
         if (color.red > 0.85f && color.green > 0.68f && color.blue < 0.35f) {
             return Color(0xFFB45309) // #FBBF24 -> Deep Amber
         }
-        if (color == Color(0xFFFF9E40)) {
-            return Color(0xFFEA580C) // Soft orange -> High-contrast orange
+        if (color == Color(0xFFFF9E40) || color == Color(0xFFFF7A00) || color == Color(0xFFFF6B00)) {
+            return Color(0xFFF36B16) // Primary brand orange (#F36B16)
         }
 
         return color
@@ -258,11 +258,15 @@ object AppThemeColorAdapter {
 object AppLocaleManager {
     private val exactTranslationsEn = mapOf(
         // Header & Navigation
-        "სანდო სერვისი" to "Trusted Service",
         "მთავარი" to "Home",
         "მთავარი გვერდი" to "Home Page",
         "კატალოგი" to "Catalog",
         "კატალოგი & სერვისები" to "Catalog & Services",
+        "ფასდაკლება" to "Discount",
+        "ფასდაკლებები" to "Discounts",
+        "სპეციალური შეთავაზებები" to "Special Offers",
+        "ყველაზე მოთხოვნადი პროდუქტები" to "Most Popular Products",
+        "მარაგშია" to "In Stock",
         "დიაგნოსტიკა" to "Diagnostics",
         "ონლაინ დიაგნოსტიკა" to "Online Diagnostics",
         "AI ასისტენტი" to "AI Assistant",
@@ -331,7 +335,7 @@ object AppLocaleManager {
         "თავსებადი მოდელები" to "Compatible Models",
         "თავსებადი პლატფორმები და მოწყობილობები" to "Compatible Platforms & Devices",
         "გარანტია" to "Warranty",
-        "BEKASERVICE გარანტია და მხარდაჭერა" to "BEKASERVICE Warranty & Support",
+        "BSTORE გარანტია და მხარდაჭერა" to "BSTORE Warranty & Support",
         "ხარისხის არჩევა:" to "Select Quality:",
         "სერვისის ტიპი / პაკეტი:" to "Service Type / Package:",
         "სტანდარტული" to "Standard",
@@ -363,7 +367,7 @@ object AppLocaleManager {
 
         // Admin Panel
         "ADMIN მართვის პანელი" to "ADMIN Control Panel",
-        "BEKASERVICE • სრული კონტროლი" to "BEKASERVICE • Full Control",
+        "BSTORE • სრული კონტროლი" to "BSTORE • Full Control",
         "პროდუქტები & სერვისები" to "Products & Services",
         "შეკვეთები" to "Orders",
         "მომხმარებლები" to "Users",
@@ -417,7 +421,8 @@ object AppLocaleManager {
         "გააგრძელეთ ანგარიშის გარეშე" to "Continue without an account",
         "შეგიძლიათ გამოიყენოთ აპლიკაცია ანგარიშის გარეშე — დაათვალიეროთ და შეუკვეთოთ სერვისები." to "You can use the app without an account — browse and order services freely.",
         "მზად ხარ!" to "You're Ready!",
-        "გაეცანი ციფრულ სერვისებს BEKASERVICE-ში." to "Explore digital services in BEKASERVICE.",
+        "გაეცანი ციფრულ სერვისებს BSTORE-ში." to "Explore digital services in BSTORE.",
+        "გაეცანი პროდუქციასა და სერვისებს BSTORE-ში." to "Explore products and services in BSTORE.",
         "მარტივი ნავიგაცია" to "Easy Navigation",
         "სწრაფი ძიება და კატეგორიები ერთ სივრცეში" to "Fast search and categories in one place",
         "სანდოობა" to "Reliability",
@@ -448,16 +453,27 @@ object AppLocaleManager {
         "ქლაუდი" to "Cloud",
         "AI სერვისები" to "AI Services",
         "დიზაინი" to "Design",
-        "და სხვა..." to "And more..."
+        "და სხვა..." to "And more...",
+        "აირჩიე აპის თემა" to "Choose App Theme",
+        "შეგიძლია ნებისმიერ დროს შეცვალო პარამეტრებიდან." to "You can change it anytime from settings.",
+        "ნათელი თემა" to "Light Theme",
+        "მუქი თემა" to "Dark Theme",
+        "რბილი გრაფიტის ნათელი ფონი" to "Soft graphite light surface",
+        "კლასიკური მუქი ფონი" to "Classic dark graphite surface",
+        "არჩეულია" to "Selected"
     )
 
     private val exactTranslationsRu = mapOf(
         // Header & Navigation
-        "სანდო სერვისი" to "Надёжный сервис",
         "მთავარი" to "Главная",
         "მთავარი გვერდი" to "Главная страница",
         "კატალოგი" to "Каталог",
         "კატალოგი & სერვისები" to "Каталог и сервисы",
+        "ფასდაკლება" to "Скидка",
+        "ფასდაკლებები" to "Скидки",
+        "სპეციალური შეთავაზებები" to "Специальные предложения",
+        "ყველაზე მოთხოვნადი პროდუქტები" to "Самые востребованные товары",
+        "მარაგშია" to "В наличии",
         "დიაგნოსტიკა" to "Диагностика",
         "ონლაინ დიაგნოსტიკა" to "Онлайн диагностика",
         "AI ასისტენტი" to "AI Ассистент",
@@ -526,7 +542,7 @@ object AppLocaleManager {
         "თავსებადი მოდელები" to "Совместимые модели",
         "თავსებადი პლატფორმები და მოწყობილობები" to "Совместимые платформы и устройства",
         "გარანტია" to "Гарантия",
-        "BEKASERVICE გარანტია და მხარდაჭერა" to "Гарантия и поддержка BEKASERVICE",
+        "BSTORE გარანტია და მხარდაჭერა" to "Гарантия и поддержка BSTORE",
         "ხარისხის არჩევა:" to "Выбор качества:",
         "სერვისის ტიპი / პაკეტი:" to "Тип сервиса / пакет:",
         "სტანდარტული" to "Стандартный",
@@ -558,7 +574,7 @@ object AppLocaleManager {
 
         // Admin Panel
         "ADMIN მართვის პანელი" to "ADMIN Панель управления",
-        "BEKASERVICE • სრული კონტროლი" to "BEKASERVICE • Полный контроль",
+        "BSTORE • სრული კონტროლი" to "BSTORE • Полный контроль",
         "პროდუქტები & სერვისები" to "Товары и сервисы",
         "შეკვეთები" to "Заказы",
         "მომხმარებლები" to "Пользователи",
@@ -609,10 +625,18 @@ object AppLocaleManager {
         "ელ. ფოსტით შესვლა" to "Вход по эл. почте",
         "ავტორიზაციის გამოტოვება" to "Пропустить авторизацию",
         "გაგრძელება" to "Продолжить",
+        "აირჩიე აპის თემა" to "Выберите тему приложения",
+        "შეგიძლია ნებისმიერ დროს შეცვალო პარამეტრებიდან." to "Вы можете изменить её в любое время в настройках.",
+        "ნათელი თემა" to "Светлая тема",
+        "მუქი თემა" to "Тёмная тема",
+        "რბილი გრაფიტის ნათელი ფონი" to "Мягкий графитовый светлый фон",
+        "კლასიკური მუქი ფონი" to "Классический тёмный графитовый фон",
+        "არჩეულია" to "Выбрано",
         "გააგრძელეთ ანგარიშის გარეშე" to "Продолжить без аккаунта",
         "შეგიძლიათ გამოიყენოთ აპლიკაცია ანგარიშის გარეშე — დაათვალიეროთ და შეუკვეთოთ სერვისები." to "Вы можете пользоваться приложением без аккаунта — просматривать и заказывать сервисы.",
         "მზად ხარ!" to "Всё готово!",
-        "გაეცანი ციფრულ სერვისებს BEKASERVICE-ში." to "Откройте цифровые сервисы в BEKASERVICE.",
+        "გაეცანი ციფრულ სერვისებს BSTORE-ში." to "Откройте цифровые сервисы в BSTORE.",
+        "გაეცანი პროდუქციასა და სერვისებს BSTORE-ში." to "Откройте товары и сервисы в BSTORE.",
         "მარტივი ნავიგაცია" to "Простая навигация",
         "სწრაფი ძიება და კატეგორიები ერთ სივრცეში" to "Быстрый поиск и категории в одном месте",
         "სანდოობა" to "Надёжность",
@@ -959,15 +983,15 @@ fun OutlinedTextField(
         colors
     } else {
         OutlinedTextFieldDefaults.colors(
-            focusedTextColor = Color(0xFF0F172A),
-            unfocusedTextColor = Color(0xFF0F172A),
+            focusedTextColor = Color(0xFF20242B),
+            unfocusedTextColor = Color(0xFF20242B),
             focusedContainerColor = Color(0xFFFFFFFF),
-            unfocusedContainerColor = Color(0xFFF8FAFC),
-            focusedBorderColor = Color(0xFFFF6A00),
-            unfocusedBorderColor = Color(0xFFCBD5E1),
-            focusedLabelColor = Color(0xFFFF6A00),
-            unfocusedLabelColor = Color(0xFF475569),
-            cursorColor = Color(0xFFFF6A00)
+            unfocusedContainerColor = Color(0xFFF8F9FB),
+            focusedBorderColor = Color(0xFFF36B16),
+            unfocusedBorderColor = Color(0xFFDCE0E6),
+            focusedLabelColor = Color(0xFFF36B16),
+            unfocusedLabelColor = Color(0xFF687180),
+            cursorColor = Color(0xFFF36B16)
         )
     }
 
@@ -1036,7 +1060,7 @@ fun HorizontalDivider(
     val adaptedColor = if (AppPreferencesManager.isDarkMode) {
         color
     } else if (!AppThemeColorAdapter.isVividAccentColor(color) && color.luminance() < 0.25f) {
-        Color(0xFFE2E8F0)
+        Color(0xFFDCE0E6)
     } else {
         color
     }
@@ -1046,4 +1070,5 @@ fun HorizontalDivider(
         color = adaptedColor
     )
 }
+
 

@@ -489,73 +489,6 @@ fun DiagnosticsWorkspaceScreen(
         }
     }
 
-    val imeiStateVersion = ImeiCheckManager.stateVersion.intValue
-    val currentUser = remember(imeiStateVersion) { AuthAndOrderManager.getCurrentUser(context) }
-    val resolvedUid = remember(currentUser, imeiStateVersion) {
-        ImeiCheckManager.resolveCurrentUserId(context, currentUser)
-    }
-    val imeiConfig = remember(imeiStateVersion) { ImeiCheckManager.loadConfig(context) }
-    val imeiHistoryCount = remember(resolvedUid, imeiStateVersion) {
-        if (resolvedUid.isNotBlank()) ImeiCheckManager.loadUserHistoryLocal(context, resolvedUid).size else 0
-    }
-
-    var activeImeiSubScreen by remember { mutableStateOf("NONE") }
-    var activeImeiReportId by remember { mutableStateOf("") }
-
-    LaunchedEffect(Unit) {
-        ImeiCheckManager.syncPublicCatalogAndConfigFromCloud(context)
-    }
-
-    DisposableEffect(resolvedUid) {
-        val reg = if (resolvedUid.isNotBlank()) {
-            ImeiCheckManager.listenToUserImeiHistory(context, resolvedUid) { _ -> }
-        } else null
-        onDispose { reg?.remove() }
-    }
-
-    if (activeImeiSubScreen != "NONE") {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(palette.pageBg)
-                .padding(top = topPadding, bottom = effectiveBottomInset)
-        ) {
-            when (activeImeiSubScreen) {
-                "IMEI_CHECK" -> ImeiCheckFullScreen(
-                    currentUser = currentUser,
-                    onBack = { activeImeiSubScreen = "NONE" },
-                    onOpenHistory = { activeImeiSubScreen = "IMEI_HISTORY" },
-                    onOpenReport = { repId ->
-                        activeImeiReportId = repId
-                        activeImeiSubScreen = "IMEI_REPORT"
-                    },
-                    onRequireAuth = {
-                        Toast.makeText(
-                            context,
-                            "გთხოვთ გაიაროთ ავტორიზაცია პროფილის გვერდიდან",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                )
-                "IMEI_HISTORY" -> ImeiCustomerHistoryScreen(
-                    currentUser = currentUser,
-                    onBack = { activeImeiSubScreen = "IMEI_CHECK" },
-                    onOpenReport = { repId ->
-                        activeImeiReportId = repId
-                        activeImeiSubScreen = "IMEI_REPORT"
-                    },
-                    onStartNewCheck = { activeImeiSubScreen = "IMEI_CHECK" }
-                )
-                "IMEI_REPORT" -> ImeiCustomerReportScreen(
-                    requestId = activeImeiReportId,
-                    currentUser = currentUser,
-                    onBack = { activeImeiSubScreen = "IMEI_HISTORY" }
-                )
-            }
-        }
-        return
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -588,10 +521,6 @@ fun DiagnosticsWorkspaceScreen(
                     palette = palette,
                     selectedMode = stateHolder.selectedMode,
                     startersDismissed = stateHolder.startersDismissed,
-                    imeiConfig = imeiConfig,
-                    imeiHistoryCount = imeiHistoryCount,
-                    onOpenImeiCheck = { activeImeiSubScreen = "IMEI_CHECK" },
-                    onOpenImeiHistory = { activeImeiSubScreen = "IMEI_HISTORY" },
                     onDismissStarters = { stateHolder.startersDismissed = true },
                     onPickGallery = {
                         galleryLauncher.launch(
@@ -945,10 +874,6 @@ private fun DiagnosticsEmptyStateContent(
     palette: DiagnosticsThemePalette,
     selectedMode: DiagnosticUserMode,
     startersDismissed: Boolean,
-    imeiConfig: ImeiServiceConfig,
-    imeiHistoryCount: Int,
-    onOpenImeiCheck: () -> Unit,
-    onOpenImeiHistory: () -> Unit,
     onDismissStarters: () -> Unit,
     onPickGallery: () -> Unit,
     onTakePhoto: () -> Unit,
@@ -979,16 +904,6 @@ private fun DiagnosticsEmptyStateContent(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (imeiConfig.entryCardVisible) {
-            item(key = "imei_diagnostics_entry_card_item") {
-                ImeiCheckDiagnosticsEntryCard(
-                    config = imeiConfig,
-                    historyCount = imeiHistoryCount,
-                    onOpenImeiCheck = onOpenImeiCheck,
-                    onOpenHistory = onOpenImeiHistory
-                )
-            }
-        }
 
         item {
             Surface(
@@ -1391,7 +1306,7 @@ private fun DiagnosticAssistantCard(
                     }
                     Column {
                         Text(
-                            text = "BEKASERVICE AI ინჟინერი",
+                            text = "BSTORE AI ინჟინერი",
                             color = palette.textPrimary,
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold
@@ -1698,14 +1613,14 @@ private fun DiagnosticAssistantCard(
                 }
             }
 
-            // Optional Relevant BEKASERVICE Catalog Items (only if genuinely matched)
+            // Optional Relevant BSTORE Catalog Items (only if genuinely matched)
             val matchedCatalogItems = remember(message.recommendedProductIds, catalogProducts) {
                 catalogProducts.filter { it.id in message.recommendedProductIds }.take(3)
             }
             if (matchedCatalogItems.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "შესაბამისი სერვისი / პროდუქტი BEKASERVICE-ის კატალოგში:",
+                        text = "შესაბამისი სერვისი / პროდუქტი BSTORE-ის კატალოგში:",
                         color = BrandOrange,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold
@@ -1748,7 +1663,7 @@ private fun DiagnosticAssistantCard(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = prod.price,
+                                        text = prod.effectiveDisplayPrice,
                                         color = BrandOrange,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.ExtraBold
@@ -1811,10 +1726,11 @@ private fun DiagnosticAssistantCard(
                                 .clickable {
                                     val device = section?.deviceIdentification ?: "ტელეფონი"
                                     val summary = message.text.take(250)
-                                    val waText = "გამარჯობა ბექა! AI დიაგნოსტიკის დასკვნა ($device): $summary"
+                                    val waText = "გამარჯობა BSTORE! მჭირდება ხელოსნის კონსულტაცია დიაგნოსტიკის შედეგზე:\nმოწყობილობა: $device\nშედეგი: $summary"
+                                    val waUrl = ContactAndSocialManager.getPrimaryWhatsAppUrl(context, waText)
                                     val intent = Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://wa.me/995598233332?text=${Uri.encode(waText)}")
+                                        Uri.parse(waUrl)
                                     )
                                     try {
                                         context.startActivity(intent)

@@ -7,6 +7,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -37,12 +38,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.launch
+import androidx.compose.ui.window.DialogProperties
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.example.ui.theme.*
 
 @Composable
 fun BekaSideNavigationDrawerContent(
@@ -50,628 +56,1508 @@ fun BekaSideNavigationDrawerContent(
     unreadNotificationsCount: Int,
     cartItemsCount: Int,
     onSelectTab: (Int) -> Unit,
+    onOpenDiagnostics: () -> Unit = {},
+    onOpenAiAssistant: () -> Unit = {},
     onOpenAdminPanel: () -> Unit,
-    onCloseDrawer: () -> Unit
+    onCloseDrawer: () -> Unit,
+    products: List<ProductItem> = emptyList(),
+    onProductClick: (ProductItem) -> Unit = {},
+    onAddToCart: (ProductItem) -> Unit = {},
+    onToggleFavorite: (ProductItem) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val isDark = AppPreferencesManager.isDarkMode
     val currentLang = AppPreferencesManager.currentLanguage
-    val currentUser = remember(selectedTab, isDark, currentLang) {
-        AuthAndOrderManager.getCurrentUser(context)
+    val authVersion = AuthAndOrderManager.authStateVersion.intValue
+    val favVersion = AuthAndOrderManager.favoritesStateVersion.intValue
+
+    var currentUser by remember(selectedTab, isDark, currentLang, authVersion, favVersion) {
+        mutableStateOf(AuthAndOrderManager.getCurrentUser(context))
+    }
+    val isAuthorizedAdminUi = remember(currentUser?.id, currentUser?.email, authVersion, favVersion) {
+        AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
     }
 
-    val sheetBgColor = if (isDark) Color(0xFF101318) else Color(0xFFFFFFFF)
-    val cardBgColor = if (isDark) Color(0xFF16191E) else Color(0xFFF4F7FB)
-    val borderCol = if (isDark) Color(0xFF242830) else Color(0xFFDCE3EE)
+    val userOrders = remember(currentUser?.id, authVersion) {
+        if (currentUser != null && AuthAndOrderManager.isRegisteredAuthenticatedUser(context)) {
+            AuthAndOrderManager.getOrders(context)
+        } else {
+            emptyList()
+        }
+    }
+    val favoriteIds = remember(currentUser?.id, favVersion) {
+        AuthAndOrderManager.getFavoriteProductIds(context)
+    }
+    val favoriteProducts = remember(products, favoriteIds, currentUser?.id, favVersion) {
+        val baseCatalog = if (products.isNotEmpty()) products else AdminStorage.loadProducts(context).ifEmpty { ProductRepository.getAllProducts() }
+        baseCatalog.filter { it.id in favoriteIds || it.isFavorite }
+    }
+
+    val installedVersionName = remember(context) {
+        runCatching {
+            val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            pkgInfo.versionName?.takeIf { it.isNotBlank() } ?: "1.0"
+        }.getOrDefault("1.0")
+    }
+
+    // Dialog states triggered directly from the drawer
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showAllOrdersDialog by remember { mutableStateOf(false) }
+    var selectedOrderForDetail by remember { mutableStateOf<OrderRecord?>(null) }
+    var selectedOrderForPaymentInstructions by remember { mutableStateOf<OrderRecord?>(null) }
+    var showAllFavoritesDialog by remember { mutableStateOf(false) }
+    var showHelpContactDialog by remember { mutableStateOf(false) }
+    var showServiceCenterDialog by remember { mutableStateOf(false) }
+    var activeLegalPolicyTopic by remember { mutableStateOf<LegalPolicyTopic?>(null) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var isDeletingAccount by remember { mutableStateOf(false) }
+
+    // Reference visual palette (deep dark graphite drawer in Dark Mode; Soft Graphite Light in Light Mode)
+    val sheetBgColor = if (isDark) Color(0xFF0E1015) else Color(0xFFF0F1F4)
+    val cardBgColor = if (isDark) Color(0xFF161922) else Color(0xFFF8F9FB)
+    val borderCol = if (isDark) Color(0xFF252A34) else Color(0xFFDCE0E6)
+    val dividerCol = if (isDark) Color(0xFF222733) else Color(0xFFDCE0E6)
+    val primaryTextCol = if (isDark) Color.White else Color(0xFF20242B)
+    val secondaryTextCol = if (isDark) Color(0xFF9BA3B2) else Color(0xFF687180)
+    val iconMutedCol = if (isDark) Color(0xFFCBD5E1) else Color(0xFF687180)
+    val chevronCol = if (isDark) Color(0xFF94A3B8) else Color(0xFF9299A5)
+    val brandOrange = if (isDark) Color(0xFFFF6B00) else Color(0xFFF36B16)
 
     ModalDrawerSheet(
         drawerContainerColor = sheetBgColor,
         drawerTonalElevation = 0.dp,
+        windowInsets = WindowInsets.systemBars,
         modifier = Modifier
-            .fillMaxWidth(0.84f)
-            .widthIn(max = 330.dp)
+            .fillMaxWidth(0.86f)
+            .widthIn(max = 340.dp)
             .fillMaxHeight()
+            .testTag("bstore_side_navigation_drawer")
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 14.dp, vertical = 14.dp)
+                .testTag("drawer_scroll_column"),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. ლოგო და მომხმარებლის სტატუსის ჰედერი
+            // =========================================================================
+            // 1. HEADER: BS Logo + BSTORE Wordmark + Circular X Close Button
+            // =========================================================================
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("drawer_header_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Black,
+                        border = BorderStroke(1.2.dp, brandOrange),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("drawer_brand_icon")
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_bstore_brand_icon),
+                            contentDescription = "BSTORE Logo",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(2.dp)
+                        )
+                    }
+
+                    androidx.compose.material3.Text(
+                        text = androidx.compose.ui.text.buildAnnotatedString {
+                            append(
+                                androidx.compose.ui.text.AnnotatedString(
+                                    "B",
+                                    androidx.compose.ui.text.SpanStyle(
+                                        color = brandOrange,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 22.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif,
+                                        letterSpacing = 0.6.sp
+                                    )
+                                )
+                            )
+                            append(
+                                androidx.compose.ui.text.AnnotatedString(
+                                    "STORE",
+                                    androidx.compose.ui.text.SpanStyle(
+                                        color = primaryTextCol,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 21.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif,
+                                        letterSpacing = 0.6.sp
+                                    )
+                                )
+                            )
+                        },
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.testTag("drawer_brand_wordmark")
+                    )
+                }
+
+                Surface(
+                    shape = CircleShape,
+                    color = if (isDark) Color(0xFF1A1E28) else Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, borderCol),
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .clickable { onCloseDrawer() }
+                        .testTag("drawer_close_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "მენიუს დახურვა",
+                            tint = primaryTextCol,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 2. USER PROFILE CARD (Real user data, Google verified badge, Edit button)
+            // =========================================================================
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = cardBgColor,
-                border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.45f)),
-                modifier = Modifier.fillMaxWidth()
+                border = BorderStroke(1.dp, borderCol),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("drawer_profile_card")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.ic_beka_main_emblem),
-                                contentDescription = "BEKASERVICE",
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                            )
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterVertically),
-                                horizontalAlignment = Alignment.Start
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Start
-                                ) {
-                                    Text(
-                                        text = "BEKA",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 17.sp,
-                                        lineHeight = 17.sp,
-                                        letterSpacing = 0.4.sp,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        style = androidx.compose.ui.text.TextStyle(
-                                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
-                                        )
-                                    )
-                                    Text(
-                                        text = "SERVICE",
-                                        color = Color(0xFFFF7A00),
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 17.sp,
-                                        lineHeight = 17.sp,
-                                        letterSpacing = 0.4.sp,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        style = androidx.compose.ui.text.TextStyle(
-                                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
-                                        )
-                                    )
-                                }
-                                Text(
-                                    text = "სანდო სერვისი",
-                                    color = Color(0xFFA0A5B0),
-                                    fontSize = 10.sp,
-                                    lineHeight = 11.sp,
-                                    letterSpacing = 0.4.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Start,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    style = androidx.compose.ui.text.TextStyle(
-                                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
-                                    )
-                                )
-                            }
-                        }
-
-                        IconButton(
-                            onClick = onCloseDrawer,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close Drawer",
-                                tint = Color(0xFFA0A5B0),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = borderCol)
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable {
                                 onSelectTab(4)
                                 onCloseDrawer()
-                            },
+                            }
+                            .testTag("drawer_profile_identity_row"),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                        // Circular Avatar with 2dp Orange Ring
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isDark) Color(0xFF1E222D) else Color(0xFFF1F5F9),
+                            border = BorderStroke(2.dp, brandOrange),
+                            modifier = Modifier
+                                .size(60.dp)
+                                .testTag("drawer_user_avatar")
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xFFFF7A00).copy(alpha = 0.18f),
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
+                            Box(contentAlignment = Alignment.Center) {
+                                val avatarUrl = currentUser?.avatarUrl.orEmpty().trim()
+                                if (avatarUrl.isNotBlank()) {
+                                    coil.compose.AsyncImage(
+                                        model = avatarUrl,
+                                        contentDescription = "მომხმარებლის ფოტო",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape)
+                                    )
+                                } else {
                                     Icon(
                                         imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFF7A00),
-                                        modifier = Modifier.size(17.dp)
+                                        contentDescription = "მომხმარებლის ავატარი",
+                                        tint = if (isDark) Color.White else Color(0xFF334155),
+                                        modifier = Modifier.size(32.dp)
                                     )
                                 }
                             }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = currentUser?.displayName?.ifBlank { "მომხმარებელი" }
-                                        ?: AppLocaleManager.tr("სტუმრის რეჟიმი", "Guest Mode", "Гостевой режим"),
-                                    color = Color.White,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = currentUser?.email?.ifBlank {
-                                        AppLocaleManager.tr("პროფილის გახსნა", "Open Profile", "Открыть профиль")
-                                    } ?: AppLocaleManager.tr("ავტორიზაცია / პროფილი", "Sign In / Profile", "Вход / Профиль"),
-                                    color = Color(0xFFA0A5B0),
-                                    fontSize = 10.5.sp,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            val displayNameText = currentUser?.displayName?.trim()?.takeIf { it.isNotBlank() }
+                                ?: if (currentUser != null) "მომხმარებელი" else "სტუმარი"
+                            val emailText = currentUser?.email?.trim()?.takeIf { it.isNotBlank() }
+                                ?: if (currentUser != null) "ელ. ფოსტა არ არის მითითებული" else "გაიარეთ ავტორიზაცია"
+
+                            androidx.compose.material3.Text(
+                                text = displayNameText,
+                                color = primaryTextCol,
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("drawer_user_name")
+                            )
+
+                            androidx.compose.material3.Text(
+                                text = emailText,
+                                color = secondaryTextCol,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("drawer_user_email")
+                            )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            // Provider Status Pill — strictly reflects real session provider
+                            val isGoogleAuth = currentUser != null && currentUser!!.provider.equals("Google", ignoreCase = true)
+                            val isAuthenticatedUser = currentUser != null
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = when {
+                                    isGoogleAuth -> if (isDark) Color(0xFF0F3923) else Color(0xFFDCFCE7)
+                                    isAuthenticatedUser -> if (isDark) Color(0xFF1E293B) else Color(0xFFE0F2FE)
+                                    else -> if (isDark) Color(0xFF1F2430) else Color(0xFFF1F5F9)
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isGoogleAuth -> if (isDark) Color(0xFF22C55E).copy(alpha = 0.65f) else Color(0xFF16A34A)
+                                        isAuthenticatedUser -> Color(0xFF38BDF8).copy(alpha = 0.45f)
+                                        else -> borderCol
+                                    }
+                                ),
+                                modifier = Modifier.testTag("drawer_auth_provider_badge")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isGoogleAuth) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        androidx.compose.material3.Text(
+                                            text = "ავტორიზებული (Google)",
+                                            color = if (isDark) Color(0xFFE8F5E9) else Color(0xFF14532D),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    } else if (isAuthenticatedUser) {
+                                        Icon(
+                                            imageVector = Icons.Default.VerifiedUser,
+                                            contentDescription = null,
+                                            tint = Color(0xFF38BDF8),
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        androidx.compose.material3.Text(
+                                            text = "ავტორიზებული (${currentUser!!.provider.ifBlank { "Email" }})",
+                                            color = if (isDark) Color(0xFF7DD3FC) else Color(0xFF0369A1),
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.PersonOutline,
+                                            contentDescription = null,
+                                            tint = secondaryTextCol,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        androidx.compose.material3.Text(
+                                            text = "სტუმრის რეჟიმი",
+                                            color = secondaryTextCol,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                }
                             }
                         }
+
                         Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFFFF7A00),
-                            modifier = Modifier.size(18.dp)
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "პროფილი",
+                            tint = chevronCol,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .testTag("drawer_profile_chevron")
                         )
                     }
-                }
-            }
 
-            // 2. ნავიგაციის პუნქტები
-            Text(
-                text = "ნავიგაციის მენიუ",
-                color = Color(0xFFA0A5B0),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-
-            val drawerItems = listOf(
-                DrawerMenuItemData(0, "მთავარი გვერდი", Icons.Default.Home, 0),
-                DrawerMenuItemData(1, "კატალოგი & სერვისები", Icons.Default.GridView, 0),
-                DrawerMenuItemData(2, "ონლაინ დიაგნოსტიკა", Icons.Default.Build, 0),
-                DrawerMenuItemData(3, "AI ასისტენტი", Icons.Default.SmartToy, 0),
-                DrawerMenuItemData(6, "შეტყობინებები", Icons.Default.Notifications, unreadNotificationsCount),
-                DrawerMenuItemData(5, "კალათა", Icons.Default.ShoppingCart, cartItemsCount),
-                DrawerMenuItemData(4, "პროფილი & შეკვეთები", Icons.Default.Person, 0)
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                drawerItems.forEach { item ->
-                    val isSelected = selectedTab == item.tabIndex
+                    // Full-width outlined orange Edit Profile button inside the card
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) Color(0xFFFF6A00).copy(alpha = 0.16f) else cardBgColor,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) Color(0xFFFF7A00) else borderCol
-                        ),
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isDark) Color(0xFF1B1614) else Color(0xFFFFF7ED),
+                        border = BorderStroke(1.dp, brandOrange),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(20.dp))
                             .clickable {
-                                onSelectTab(item.tabIndex)
-                                onCloseDrawer()
-                            }
-                            .testTag("drawer_item_${item.tabIndex}")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.title,
-                                    tint = if (isSelected) Color(0xFFFF7A00) else Color(0xFFA0A5B0),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Text(
-                                    text = item.title,
-                                    color = if (isSelected) Color(0xFFFF7A00) else Color.White,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            if (item.badgeCount > 0) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFFFF6A00)
-                                ) {
-                                    Text(
-                                        text = "${item.badgeCount}",
-                                        color = Color.White,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                    )
+                                if (currentUser != null) {
+                                    showEditProfileDialog = true
+                                } else {
+                                    onSelectTab(4)
+                                    onCloseDrawer()
                                 }
                             }
-                        }
-                    }
-                }
-            }
-
-            // 3. Light / Dark Mode გადამრთველი
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = cardBgColor,
-                border = BorderStroke(1.dp, borderCol),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .testTag("drawer_edit_profile_button")
                     ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (isDark) Icons.Default.DarkMode else Icons.Default.LightMode,
+                                imageVector = if (currentUser != null) Icons.Default.Edit else Icons.Default.Login,
                                 contentDescription = null,
-                                tint = Color(0xFFFF7A00),
-                                modifier = Modifier.size(19.dp)
+                                tint = brandOrange,
+                                modifier = Modifier.size(15.dp)
                             )
-                            Text(
-                                text = "თემა (Dark / Light)",
-                                color = Color.White,
+                            Spacer(modifier = Modifier.width(7.dp))
+                            androidx.compose.material3.Text(
+                                text = if (currentUser != null) "რედაქტირება" else "შესვლა / ავტორიზაცია",
+                                color = brandOrange,
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = false
                             )
-                        }
-                        Switch(
-                            checked = !isDark,
-                            onCheckedChange = { lightSelected ->
-                                AppPreferencesManager.setDarkMode(context, !lightSelected)
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFFF7A00),
-                                uncheckedThumbColor = Color(0xFFFF7A00),
-                                uncheckedTrackColor = Color(0xFF262B35)
-                            )
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (isDark) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
-                                .clickable { AppPreferencesManager.setDarkMode(context, true) }
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Text(
-                                    text = "🌙 Dark Mode",
-                                    color = Color.White,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (!isDark) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
-                                .clickable { AppPreferencesManager.setDarkMode(context, false) }
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Text(
-                                    text = "☀️ Light Mode",
-                                    color = Color.White,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false
-                                )
-                            }
                         }
                     }
                 }
             }
 
-            // 4. ენის არჩევა (ქართული Default / English / Русский)
+            // =========================================================================
+            // 3. SHOPPING SECTION (🛍️ შოპინგი)
+            // =========================================================================
+            DrawerSectionHeader(
+                icon = Icons.Default.ShoppingBag,
+                title = "შოპინგი",
+                brandOrange = brandOrange
+            )
+
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = cardBgColor,
                 border = BorderStroke(1.dp, borderCol),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
-                            tint = Color(0xFFFF7A00),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "აპლიკაციის ენა",
-                            color = Color.White,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        AppLanguage.entries.forEach { lang ->
-                            val isSelected = currentLang == lang
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) Color(0xFFFF7A00) else borderCol
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(38.dp)
-                                    .clickable {
-                                        AppPreferencesManager.setLanguage(context, lang)
-                                    }
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "${lang.flag} ${lang.label}",
-                                        color = Color.White,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 5. მართვის პანელში შესვლის ღილაკი (გადატანილია გვერდითა ნავიგაციის მენიუში)
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFFFF6A00).copy(alpha = 0.14f),
-                border = BorderStroke(1.dp, Color(0xFFFF7A00)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        onCloseDrawer()
-                        onOpenAdminPanel()
-                    }
-                    .testTag("admin_button")
+                    .testTag("drawer_shopping_card")
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AdminPanelSettings,
-                            contentDescription = "Admin Panel",
-                            tint = Color(0xFFFF7A00),
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "⚙️ მართვის პანელი",
-                                color = Color(0xFFFF7A00),
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "BEKASERVICE • სრული კონტროლი",
-                                color = Color(0xFFA0A5B0),
-                                fontSize = 10.5.sp,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    DrawerGroupedRow(
+                        icon = Icons.Default.ShoppingBag,
+                        title = "ჩემი შეკვეთები",
+                        badgeCount = userOrders.size,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_my_orders_row",
+                        onClick = {
+                            if (currentUser != null) {
+                                showAllOrdersDialog = true
+                            } else {
+                                onSelectTab(4)
+                                onCloseDrawer()
+                            }
                         }
-                    }
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        tint = Color(0xFFFF7A00),
-                        modifier = Modifier.size(16.dp)
+                    )
+                    HorizontalDivider(color = dividerCol, thickness = 0.8.dp)
+                    DrawerGroupedRow(
+                        icon = Icons.Default.Favorite,
+                        title = "რჩეულები",
+                        badgeCount = favoriteProducts.size,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_favorites_row",
+                        onClick = {
+                            showAllFavoritesDialog = true
+                        }
+                    )
+                    HorizontalDivider(color = dividerCol, thickness = 0.8.dp)
+                    DrawerGroupedRow(
+                        icon = Icons.Default.ShoppingCart,
+                        title = "კალათა",
+                        badgeCount = cartItemsCount,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_cart_row",
+                        onClick = {
+                            onSelectTab(5)
+                            onCloseDrawer()
+                        }
                     )
                 }
             }
 
-            // 6. სწრაფი კონტაქტი
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF0F2618),
-                    border = BorderStroke(1.dp, Color(0xFF1B4E2E)),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/995598233332"))
-                            context.startActivity(intent)
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text(
-                            text = "💬 WhatsApp",
-                            color = Color(0xFF4ADE80),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
-                }
+            // =========================================================================
+            // 4. HELP SECTION (🎧 დახმარება)
+            // =========================================================================
+            DrawerSectionHeader(
+                icon = Icons.Default.HeadsetMic,
+                title = "დახმარება",
+                brandOrange = brandOrange
+            )
 
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = cardBgColor,
-                    border = BorderStroke(1.dp, borderCol),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clickable {
-                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:+995598233332"))
-                            context.startActivity(intent)
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text(
-                            text = "📞 598 23 33 32",
-                            color = Color.White,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                    }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = cardBgColor,
+                border = BorderStroke(1.dp, borderCol),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("drawer_help_card")
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    DrawerGroupedRow(
+                        icon = Icons.Default.Chat,
+                        title = "დახმარება და კონტაქტი",
+                        badgeCount = 0,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_help_contact_row",
+                        onClick = { showHelpContactDialog = true }
+                    )
+                    HorizontalDivider(color = dividerCol, thickness = 0.8.dp)
+                    DrawerGroupedRow(
+                        icon = Icons.Default.LocationOn,
+                        title = "სერვისცენტრი",
+                        badgeCount = 0,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_service_center_row",
+                        onClick = { showServiceCenterDialog = true }
+                    )
                 }
             }
 
-            // 7. აპლიკაციის განახლება — გვერდითა პანელის ყველაზე ქვედა ნავიგაციის პუნქტი
-            val isUpdateSelected = selectedTab == 7
+            // =========================================================================
+            // 5. INFORMATION SECTION (ℹ️ ინფორმაცია)
+            // =========================================================================
+            DrawerSectionHeader(
+                icon = Icons.Default.Info,
+                title = "ინფორმაცია",
+                brandOrange = brandOrange
+            )
+
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isUpdateSelected) Color(0xFFFF6A00).copy(alpha = 0.16f) else cardBgColor,
-                border = BorderStroke(
-                    1.dp,
-                    if (isUpdateSelected) Color(0xFFFF7A00) else borderCol
-                ),
+                shape = RoundedCornerShape(14.dp),
+                color = cardBgColor,
+                border = BorderStroke(1.dp, borderCol),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable {
-                        onSelectTab(7)
-                        onCloseDrawer()
-                    }
-                    .testTag("drawer_item_7")
+                    .testTag("drawer_information_card")
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    DrawerGroupedRow(
+                        icon = Icons.Default.Description,
+                        title = "წესები და პირობები",
+                        badgeCount = 0,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_terms_row",
+                        onClick = { activeLegalPolicyTopic = LegalPolicyTopic.TERMS_AND_CONDITIONS }
+                    )
+                    HorizontalDivider(color = dividerCol, thickness = 0.8.dp)
+                    DrawerGroupedRow(
+                        icon = Icons.Default.VerifiedUser,
+                        title = "კონფიდენციალურობა",
+                        badgeCount = 0,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_privacy_row",
+                        onClick = { activeLegalPolicyTopic = LegalPolicyTopic.PRIVACY_POLICY }
+                    )
+                    HorizontalDivider(color = dividerCol, thickness = 0.8.dp)
+                    DrawerGroupedRow(
+                        icon = Icons.Default.CreditCard,
+                        title = "გადახდა და დაბრუნება",
+                        badgeCount = 0,
+                        primaryTextCol = primaryTextCol,
+                        iconTint = iconMutedCol,
+                        chevronCol = chevronCol,
+                        brandOrange = brandOrange,
+                        testTag = "drawer_payment_return_row",
+                        onClick = { activeLegalPolicyTopic = LegalPolicyTopic.RETURN_AND_REFUND_POLICY }
+                    )
+                }
+            }
+
+            // =========================================================================
+            // 6. SETTINGS ROW (⚙️ პარამეტრები)
+            // =========================================================================
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = cardBgColor,
+                border = BorderStroke(1.dp, borderCol),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable { showSettingsDialog = true }
+                    .testTag("drawer_settings_row")
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.SystemUpdate,
-                            contentDescription = "განახლება",
-                            tint = if (isUpdateSelected) Color(0xFFFF7A00) else Color(0xFFA0A5B0),
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "პარამეტრები",
+                            tint = iconMutedCol,
                             modifier = Modifier.size(20.dp)
                         )
-                        Text(
-                            text = "განახლება",
-                            color = if (isUpdateSelected) Color(0xFFFF7A00) else Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = if (isUpdateSelected) FontWeight.Bold else FontWeight.Medium,
+                        androidx.compose.material3.Text(
+                            text = "პარამეტრები",
+                            color = primaryTextCol,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
-                            softWrap = false,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
-                        tint = if (isUpdateSelected) Color(0xFFFF7A00) else Color(0xFF8C94A4),
-                        modifier = Modifier.size(18.dp)
+                        tint = chevronCol,
+                        modifier = Modifier.size(19.dp)
                     )
+                }
+            }
+
+            // =========================================================================
+            // 7. ADMINISTRATOR ROW (ONLY for verified sole admin: beqa1994@gmail.com)
+            // =========================================================================
+            if (isAuthorizedAdminUi) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDark) Color(0xFF1C1613) else Color(0xFFFFF7ED),
+                    border = BorderStroke(1.dp, if (isDark) Color(0xFF5C3418) else brandOrange),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            onCloseDrawer()
+                            onOpenAdminPanel()
+                        }
+                        .testTag("admin_button")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = "ადმინისტრატორი",
+                                tint = brandOrange,
+                                modifier = Modifier.size(21.dp)
+                            )
+                            androidx.compose.material3.Text(
+                                text = "ადმინისტრატორი",
+                                color = if (isDark) Color(0xFFFFB366) else Color(0xFFC2410C),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "გადასვლა",
+                            tint = if (isDark) Color(0xFFFFB366) else brandOrange,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .testTag("drawer_admin_arrow_icon")
+                        )
+                    }
+                }
+            }
+
+            // =========================================================================
+            // 8. APPLICATION INFORMATION ROW (BSTORE / აპლიკაციის ვერსია + real vX.Y)
+            // =========================================================================
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        onSelectTab(7)
+                        onCloseDrawer()
+                    }
+                    .padding(horizontal = 6.dp, vertical = 6.dp)
+                    .testTag("drawer_item_7"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isDark) Color(0xFF1A1E28) else Color(0xFFE2E8F0),
+                        border = BorderStroke(1.dp, borderCol),
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "აპლიკაციის ვერსია",
+                                tint = secondaryTextCol,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+                    Column {
+                        androidx.compose.material3.Text(
+                            text = "BSTORE",
+                            color = primaryTextCol,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        androidx.compose.material3.Text(
+                            text = "აპლიკაციის ვერსია",
+                            color = secondaryTextCol,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                androidx.compose.material3.Text(
+                    text = "v$installedVersionName",
+                    color = secondaryTextCol,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("drawer_app_version_text")
+                )
+            }
+
+            // =========================================================================
+            // 9. LOGOUT BUTTON (გასვლა — restrained red outline & icon)
+            // =========================================================================
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (isDark) Color(0xFF1B1316) else Color(0xFFFEF2F2),
+                border = BorderStroke(1.dp, if (isDark) Color(0xFF991B1B) else Color(0xFFF87171)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable {
+                        coroutineScope.launch {
+                            if (currentUser != null) {
+                                AuthAndOrderManager.logoutSafely(context)
+                                currentUser = null
+                                Toast.makeText(context, "სისტემიდან გამოსვლა წარმატებულია", Toast.LENGTH_SHORT).show()
+                                onCloseDrawer()
+                            } else {
+                                onSelectTab(4)
+                                onCloseDrawer()
+                            }
+                        }
+                    }
+                    .testTag("drawer_logout_button")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Logout,
+                        contentDescription = "გასვლა",
+                        tint = Color(0xFFEF4444),
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    androidx.compose.material3.Text(
+                        text = "გასვლა",
+                        color = Color(0xFFEF4444),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Safe bottom padding ensuring logout button is never overlapped by gesture or nav bar
+            Spacer(modifier = Modifier.navigationBarsPadding().height(20.dp))
+        }
+    }
+
+    // =========================================================================
+    // REAL DIALOGS LAUNCHED FROM THE SIDE NAVIGATION DRAWER
+    // =========================================================================
+    if (showEditProfileDialog && currentUser != null) {
+        EditProfileDialog(
+            user = currentUser!!,
+            onDismiss = { showEditProfileDialog = false },
+            onSaved = { updated ->
+                currentUser = updated
+                showEditProfileDialog = false
+                Toast.makeText(context, "პროფილი წარმატებით განახლდა", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showAllOrdersDialog && currentUser != null) {
+        AllOrdersDialog(
+            orders = userOrders,
+            products = products,
+            initialFilter = "აქტიური",
+            onDismiss = { showAllOrdersDialog = false },
+            onSelectOrder = { ord ->
+                showAllOrdersDialog = false
+                selectedOrderForDetail = ord
+            },
+            onOpenPaymentInstructions = { ord ->
+                showAllOrdersDialog = false
+                selectedOrderForPaymentInstructions = ord
+            }
+        )
+    }
+
+    if (selectedOrderForDetail != null) {
+        val ord = selectedOrderForDetail!!
+        val canShowInstr = PaymentMethodType.fromCode(ord.paymentMethodCode, ord.paymentMethod) == PaymentMethodType.BANK_TRANSFER &&
+            BstorePaymentManager.canUserAccessOrderPaymentInstructions(context, ord)
+        OrderDetailModal(
+            order = ord,
+            onClose = { selectedOrderForDetail = null },
+            onOpenPaymentInstructions = if (canShowInstr) {
+                {
+                    selectedOrderForDetail = null
+                    selectedOrderForPaymentInstructions = ord
+                }
+            } else null,
+            onDelete = {
+                AuthAndOrderManager.deleteOrder(context, ord.id)
+                selectedOrderForDetail = null
+            }
+        )
+    }
+
+    if (selectedOrderForPaymentInstructions != null) {
+        OrderPaymentInstructionsDialog(
+            order = selectedOrderForPaymentInstructions!!,
+            onDismiss = { selectedOrderForPaymentInstructions = null },
+            onOrderUpdated = { updated ->
+                selectedOrderForPaymentInstructions = updated
+            }
+        )
+    }
+
+    if (showAllFavoritesDialog) {
+        AllFavoritesDialog(
+            favoriteProducts = favoriteProducts,
+            onDismiss = { showAllFavoritesDialog = false },
+            onProductClick = { item ->
+                showAllFavoritesDialog = false
+                onCloseDrawer()
+                onProductClick(item)
+            },
+            onAddToCart = onAddToCart,
+            onRemoveFavorite = onToggleFavorite
+        )
+    }
+
+    if (showHelpContactDialog) {
+        DrawerHelpAndContactDialog(
+            onDismiss = { showHelpContactDialog = false },
+            onOpenAiAssistant = {
+                showHelpContactDialog = false
+                onCloseDrawer()
+                onOpenAiAssistant()
+            }
+        )
+    }
+
+    if (showServiceCenterDialog) {
+        DrawerServiceCenterDialog(
+            onDismiss = { showServiceCenterDialog = false },
+            onOpenDiagnostics = {
+                showServiceCenterDialog = false
+                onCloseDrawer()
+                onOpenDiagnostics()
+            }
+        )
+    }
+
+    if (activeLegalPolicyTopic != null) {
+        BstoreLegalPoliciesDialog(
+            initialTopic = activeLegalPolicyTopic!!,
+            onDismiss = { activeLegalPolicyTopic = null }
+        )
+    }
+
+    if (showSettingsDialog) {
+        SecurityAndSettingsDialog(
+            user = currentUser,
+            onDismiss = { showSettingsDialog = false },
+            onOpenChangePassword = {
+                showSettingsDialog = false
+                showChangePasswordDialog = true
+            },
+            onOpenDeleteAccount = {
+                showSettingsDialog = false
+                showDeleteAccountDialog = true
+            }
+        )
+    }
+
+    if (showChangePasswordDialog && currentUser != null) {
+        ChangeUserPasswordDialog(
+            onDismiss = { showChangePasswordDialog = false },
+            onSuccess = {
+                showChangePasswordDialog = false
+                Toast.makeText(context, "პაროლი წარმატებით შეიცვალა", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showDeleteAccountDialog) {
+        DeleteAccountConfirmationDialog(
+            isDeleting = isDeletingAccount,
+            onDismiss = { if (!isDeletingAccount) showDeleteAccountDialog = false },
+            onConfirmDelete = {
+                coroutineScope.launch {
+                    isDeletingAccount = true
+                    AuthAndOrderManager.deleteUserAccount(context)
+                    isDeletingAccount = false
+                    showDeleteAccountDialog = false
+                    currentUser = null
+                    Toast.makeText(context, "ანგარიში და მონაცემები წაიშალა", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DrawerSectionHeader(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    brandOrange: Color
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = brandOrange,
+            modifier = Modifier.size(18.dp)
+        )
+        androidx.compose.material3.Text(
+            text = title,
+            color = brandOrange,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun DrawerGroupedRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    badgeCount: Int,
+    primaryTextCol: Color,
+    iconTint: Color,
+    chevronCol: Color,
+    brandOrange: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+            .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = iconTint,
+                modifier = Modifier.size(20.dp)
+            )
+            androidx.compose.material3.Text(
+                text = title,
+                color = primaryTextCol,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (badgeCount > 0) {
+                val badgeText = "$badgeCount"
+                val isSingleDigit = badgeText.length == 1
+                Surface(
+                    shape = CircleShape,
+                    color = brandOrange,
+                    modifier = if (isSingleDigit) Modifier.size(20.dp) else Modifier.height(20.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxSize().padding(horizontal = if (isSingleDigit) 0.dp else 6.dp)
+                    ) {
+                        androidx.compose.material3.Text(
+                            text = badgeText,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = chevronCol,
+                modifier = Modifier.size(19.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun DrawerHelpAndContactDialog(
+    onDismiss: () -> Unit,
+    onOpenAiAssistant: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val isDark = AppPreferencesManager.isDarkMode
+    val contactConfig = ContactAndSocialManager.currentConfig
+    val activePhones = contactConfig.phoneNumbers.filter { it.isEnabled }.sortedBy { it.displayOrder }
+    val activeSocials = contactConfig.socialLinks.filter { it.isEnabled }.sortedBy { it.displayOrder }
+    var showDirectContacts by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = if (isDark) Color(0xFF161922) else Color.White,
+            border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.5f)),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(12.dp)
+                .testTag("drawer_help_contact_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (showDirectContacts) {
+                            IconButton(
+                                onClick = { showDirectContacts = false },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "უკან",
+                                    tint = Color(0xFFFF6B00),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        androidx.compose.material3.Text(
+                            text = if (showDirectContacts) "📞 კონტაქტი" else "🎧 დახმარება და კონტაქტი",
+                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "დახურვა", tint = Color.Gray)
+                    }
+                }
+
+                if (!showDirectContacts) {
+                    androidx.compose.material3.Text(
+                        text = "აირჩიეთ დახმარების სასურველი ფორმა:",
+                        color = if (isDark) Color(0xFF9BA3B2) else Color(0xFF64748B),
+                        fontSize = 12.5.sp
+                    )
+
+                    // Option 1: AI Assistant
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isDark) Color(0xFF1E2430) else Color(0xFFFFF7ED),
+                        border = BorderStroke(1.2.dp, Color(0xFFFF6B00)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onOpenAiAssistant()
+                            }
+                            .testTag("help_option_ai_assistant")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFFF6B00).copy(alpha = 0.2f),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    androidx.compose.material3.Text("🤖", fontSize = 22.sp)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                androidx.compose.material3.Text(
+                                    text = "AI ასისტენტი",
+                                    color = Color(0xFFFF7A00),
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                androidx.compose.material3.Text(
+                                    text = "დაგეხმარებით პროდუქტის შერჩევაში და კითხვებზე პასუხის მიღებაში.",
+                                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFFFF7A00),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Option 2: Direct Contact
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isDark) Color(0xFF1E222D) else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (isDark) Color(0xFF2B3140) else Color(0xFFCBD5E1)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDirectContacts = true }
+                            .testTag("help_option_contacts")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isDark) Color(0xFF262C3A) else Color(0xFFE2E8F0),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Phone,
+                                        contentDescription = null,
+                                        tint = if (isDark) Color.White else Color(0xFF0F172A),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                androidx.compose.material3.Text(
+                                    text = "კონტაქტი",
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                androidx.compose.material3.Text(
+                                    text = "დაგვიკავშირდით დამატებითი ინფორმაციისა და დახმარებისთვის.",
+                                    color = if (isDark) Color(0xFF9BA3B2) else Color(0xFF64748B),
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                } else {
+                    androidx.compose.material3.Text(
+                        text = "დაგვიკავშირდით ტელეფონით ან სოციალური არხებით:",
+                        color = if (isDark) Color(0xFF9BA3B2) else Color(0xFF64748B),
+                        fontSize = 12.sp
+                    )
+
+                    activePhones.forEach { phone ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isDark) Color(0xFF1E222D) else Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, if (isDark) Color(0xFF2B3140) else Color(0xFFE2E8F0)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { ContactAndSocialManager.openDialer(context, phone.number) }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    androidx.compose.material3.Text(
+                                        text = phone.label.ifBlank { "ცხელი ხაზი" },
+                                        color = if (isDark) Color(0xFF9BA3B2) else Color(0xFF64748B),
+                                        fontSize = 11.sp
+                                    )
+                                    androidx.compose.material3.Text(
+                                        text = phone.number,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFF6B00)
+                                ) {
+                                    androidx.compose.material3.Text(
+                                        text = "დარეკვა",
+                                        color = Color.White,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (activeSocials.isNotEmpty()) {
+                        androidx.compose.material3.Text(
+                            text = "სოციალური ქსელები:",
+                            color = if (isDark) Color(0xFF9BA3B2) else Color(0xFF64748B),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            activeSocials.forEach { social ->
+                                val brandColor = Color(social.platform.brandColorHex)
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = brandColor.copy(alpha = 0.15f),
+                                    border = BorderStroke(1.dp, brandColor.copy(alpha = 0.55f)),
+                                    modifier = Modifier.clickable {
+                                        ContactAndSocialManager.openSocialLink(context, social)
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        SocialPlatformBrandIcon(
+                                            platform = social.platform,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        androidx.compose.material3.Text(
+                                            text = social.title.ifBlank { social.platform.titleKa },
+                                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-private data class DrawerMenuItemData(
-    val tabIndex: Int,
-    val title: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
-    val badgeCount: Int
-)
+@Composable
+fun DrawerServiceCenterDialog(
+    onDismiss: () -> Unit,
+    onOpenDiagnostics: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val isDark = AppPreferencesManager.isDarkMode
+    val locationConfig = ServiceCenterLocationManager.currentConfig
+    val contactConfig = ContactAndSocialManager.currentConfig
+    val primaryPhone = locationConfig.phone.ifBlank {
+        contactConfig.phoneNumbers.firstOrNull { it.isEnabled }?.number ?: AppBrandConfig.SUPPORT_PHONE
+    }
+
+    val serviceCategories = if (locationConfig.services.isNotEmpty()) {
+        locationConfig.services
+    } else {
+        listOf(
+            "ტელეფონის აქსესუარები",
+            "პროგრამული მომსახურება",
+            "ტელეფონის პროგრამული აღდგენა და განახლება",
+            "პროგრამირება და განბლოკვა",
+            "ტელეფონების შეკეთება",
+            "სხვა ტექნიკური მომსახურება"
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = if (isDark) Color(0xFF161922) else Color.White,
+            border = BorderStroke(1.dp, Color(0xFFFF6B00).copy(alpha = 0.5f)),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(12.dp)
+                .testTag("drawer_service_center_dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            androidx.compose.material3.Text(
+                                text = locationConfig.centerName.ifBlank { "BEKASERVICE" },
+                                color = Color(0xFFFF6B00),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFFFF6B00).copy(alpha = 0.16f)
+                            ) {
+                                androidx.compose.material3.Text(
+                                    text = "სერვისცენტრი",
+                                    color = Color(0xFFFF7A00),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFFFF7A00), modifier = Modifier.size(14.dp))
+                            androidx.compose.material3.Text(
+                                text = locationConfig.physicalAddress.ifBlank { "კოსტავას N10, ახალციხე" },
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "დახურვა", tint = Color.Gray)
+                    }
+                }
+
+                // სერვისების კომპაქტური ჩამონათვალი
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isDark) Color(0xFF1E222D) else Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, if (isDark) Color(0xFF2B3140) else Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        androidx.compose.material3.Text(
+                            text = "სერვისები და მომსახურება:",
+                            color = Color(0xFFFF9E40),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        serviceCategories.forEach { srv ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                androidx.compose.material3.Text("•", color = Color(0xFFFF7A00), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                androidx.compose.material3.Text(
+                                    text = srv,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // სამუშაო საათები
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFFA0A5B0), modifier = Modifier.size(15.dp))
+                    androidx.compose.material3.Text(
+                        text = "სამუშაო საათები: ${locationConfig.workingHours.ifBlank { "10:00 – 20:00 (ყოველდღე)" }}",
+                        color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                        fontSize = 11.5.sp
+                    )
+                }
+
+                // 2 Action Buttons: დარეკვა & რუკაზე ნახვა (ზუსტი Google Maps Share ბმულით!)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFFF6B00),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clickable { ServiceCenterLocationManager.openDialer(context, primaryPhone) }
+                            .testTag("service_center_call_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Phone, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            androidx.compose.material3.Text(
+                                text = "დარეკვა",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isDark) Color(0xFF1E222D) else Color(0xFFF1F5F9),
+                        border = BorderStroke(1.dp, Color(0xFFFF6B00)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                            .clickable {
+                                ServiceCenterLocationManager.openOnMap(
+                                    context = context,
+                                    rawInput = locationConfig.googleMapsUrl,
+                                    fallbackAddress = locationConfig.physicalAddress
+                                )
+                            }
+                            .testTag("service_center_map_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = null, tint = Color(0xFFFF6B00), modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            androidx.compose.material3.Text(
+                                text = "რუკაზე ნახვა",
+                                color = Color(0xFFFF6B00),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 // ==============================================================================
 // ზოგადი შეტყობინებების გვერდი მომხმარებლისთვის (Notifications Center - Tab 6)
@@ -680,34 +1566,42 @@ private data class DrawerMenuItemData(
 fun UserNotificationsScreen(
     cloudNotifications: List<PushNotificationRecord>,
     products: List<ProductItem>,
-    onNavigateToTarget: (targetTab: Int, targetProductId: Int) -> Unit,
+    onNavigateToTarget: (targetTab: Int, targetProductId: Int, targetOrderId: String) -> Unit,
     onBack: () -> Unit,
     isLoading: Boolean = false,
     errorMessage: String? = null,
     onRetry: () -> Unit = {},
-    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp)
+    contentPadding: PaddingValues = PaddingValues(top = 74.dp, bottom = 82.dp),
+    onNavigateToProductDoc: ((targetTab: Int, targetProductId: Int, targetProductDocId: String, targetOrderId: String) -> Unit)? = null,
+    onNavigateDestination: ((NotificationDestination) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val firestoreRepo = remember { runCatching { FirestoreRepository(context) }.getOrNull() }
     val version = BekaNotificationManager.stateVersion.intValue
+    val authVersion = AuthAndOrderManager.authStateVersion.intValue
     var selectedFilter by remember { mutableStateOf("all") }
 
     LaunchedEffect(Unit) {
         BekaNotificationManager.purgeSyntheticNotificationsIfNeeded(context, force = true)
     }
 
-    val allVisibleNotifications = remember(cloudNotifications, version) {
+    val allVisibleNotifications = remember(cloudNotifications, version, authVersion) {
         BekaNotificationManager.getVisibleUserNotifications(context, cloudNotifications)
     }
 
-    val unreadCount = remember(allVisibleNotifications, version) {
+    val unreadCount = remember(allVisibleNotifications, version, authVersion) {
         allVisibleNotifications.count { !BekaNotificationManager.isNotificationRead(context, it.id) }
     }
 
-    val filteredNotifications = remember(allVisibleNotifications, selectedFilter, version) {
+    val filteredNotifications = remember(allVisibleNotifications, selectedFilter, version, authVersion) {
         when (selectedFilter) {
             "unread" -> allVisibleNotifications.filter { !BekaNotificationManager.isNotificationRead(context, it.id) }
-            "product_offer" -> allVisibleNotifications.filter { it.type == "product_offer" }
-            "service_update" -> allVisibleNotifications.filter { it.type == "service_update" }
+            "product_offer" -> allVisibleNotifications.filter { it.type == "product" || it.type == "product_offer" }
+            "orders" -> allVisibleNotifications.filter {
+                it.type == "order_update" || it.type == "service_update" ||
+                    it.orderId.isNotBlank() || it.orderNumber.isNotBlank()
+            }
             "announcement" -> allVisibleNotifications.filter { it.type == "announcement" }
             else -> allVisibleNotifications
         }
@@ -716,9 +1610,9 @@ fun UserNotificationsScreen(
     val filterTabs = listOf(
         "all" to "ყველა (${allVisibleNotifications.size})",
         "unread" to "წაუკითხავი ($unreadCount)",
-        "product_offer" to "🔥 პროდუქტის აქცია",
-        "service_update" to "🛠️ სერვისის სიახლე",
-        "announcement" to "📢 ზოგადი განცხადება"
+        "product_offer" to "🔥 პროდუქტები",
+        "orders" to "📦 შეკვეთები",
+        "announcement" to "📢 განცხადებები"
     )
 
     LazyColumn(
@@ -800,6 +1694,16 @@ fun UserNotificationsScreen(
                                 color = Color(0xFFFF6A00),
                                 modifier = Modifier.clickable {
                                     BekaNotificationManager.markAllNotificationsRead(context, allVisibleNotifications)
+                                    val privateIds = allVisibleNotifications
+                                        .filter { BekaNotificationManager.classifyRecord(it) == NotificationVisibility.PRIVATE_USER }
+                                        .map { it.id }
+                                    if (privateIds.isNotEmpty()) {
+                                        coroutineScope.launch {
+                                            privateIds.forEach { pid ->
+                                                firestoreRepo?.markUserNotificationReadInCloud(pid)
+                                            }
+                                        }
+                                    }
                                     Toast.makeText(
                                         context,
                                         "ყველა შეტყობინება მოინიშნა წაკითხულად",
@@ -820,7 +1724,10 @@ fun UserNotificationsScreen(
                         }
                     }
 
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.testTag("notif_filter_tabs_row")
+                    ) {
                         items(filterTabs, key = { it.first }) { (key, label) ->
                             val isSelected = selectedFilter == key
                             Surface(
@@ -896,28 +1803,54 @@ fun UserNotificationsScreen(
                                 maxLines = 1
                             )
                         }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFFF7A00).copy(alpha = 0.18f),
-                            border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.45f)),
-                            modifier = Modifier
-                                .clickable {
-                                    BekaNotificationManager.openSystemNotificationSettings(
-                                        context,
-                                        BekaNotificationManager.CHANNEL_ID
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (!diagnostics.runtimePermissionGranted || !diagnostics.appNotificationsEnabled) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFFF6A00),
+                                    modifier = Modifier
+                                        .clickable {
+                                            BekaNotificationManager.openSystemNotificationSettings(context)
+                                        }
+                                        .testTag("enable_notifications_from_settings_button")
+                                ) {
+                                    Text(
+                                        text = "შეტყობინებების ჩართვა",
+                                        color = Color.White,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
                                 }
-                                .testTag("open_notification_channel_settings_button")
-                        ) {
-                            Text(
-                                text = "არხის პარამეტრები",
-                                color = Color(0xFFFF9E40),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFFFF7A00).copy(alpha = 0.18f),
+                                border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.45f)),
+                                modifier = Modifier
+                                    .clickable {
+                                        BekaNotificationManager.openSystemNotificationSettings(
+                                            context,
+                                            BekaNotificationManager.CHANNEL_ID
+                                        )
+                                    }
+                                    .testTag("open_notification_channel_settings_button")
+                            ) {
+                                Text(
+                                    text = "არხის პარამეტრები",
+                                    color = Color(0xFFFF9E40),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
                         }
                     }
 
@@ -1070,12 +2003,56 @@ fun UserNotificationsScreen(
             // 3. რეალური შეტყობინებების სია (დალაგებული უახლესიდან უძველესისკენ)
             items(filteredNotifications, key = { it.id }) { notif ->
                 val isRead = BekaNotificationManager.isNotificationRead(context, notif.id)
-                val targetProd = remember(notif.targetProductId, products) {
-                    if (notif.targetProductId > 0) products.find { it.id == notif.targetProductId } else null
+                val targetProd = remember(notif.targetProductId, notif.targetProductDocId, products) {
+                    products.find {
+                        (notif.targetProductDocId.isNotBlank() &&
+                            (it.firestoreDocId == notif.targetProductDocId || "prod_${it.id}" == notif.targetProductDocId)) ||
+                            (notif.targetProductId > 0 && it.id == notif.targetProductId)
+                    }
+                }
+                val destination = remember(notif) { BekaNotificationManager.resolveDestination(notif) }
+                val resolvedOrderNumber = remember(notif.orderNumber, notif.title, notif.body) {
+                    notif.orderNumber.ifBlank {
+                        Regex("#BS-[A-Z0-9\\-]+").find("${notif.title} ${notif.body}")?.value.orEmpty()
+                    }
+                }
+                val resolvedOrderId = remember(notif.orderId, resolvedOrderNumber) {
+                    notif.orderId.ifBlank { resolvedOrderNumber }
+                }
+                val isOrderNotif = destination is NotificationDestination.CustomerOrderDetail ||
+                    destination is NotificationDestination.ProductRequestDetail
+                val effectiveTargetTab = when (destination) {
+                    is NotificationDestination.CustomerOrderDetail, is NotificationDestination.ProductRequestDetail -> 4
+                    is NotificationDestination.ProductDetail -> 1
+                    is NotificationDestination.Discounts -> 2
+                    is NotificationDestination.AppUpdate -> 7
+                    is NotificationDestination.InAppTab -> destination.tabIndex
+                    else -> if (isOrderNotif) 4 else notif.targetTab
                 }
                 val dateStr = remember(notif.createdAtMillis) {
                     SimpleDateFormat("dd.MM.yyyy • HH:mm", Locale.getDefault())
                         .format(Date(notif.createdAtMillis))
+                }
+
+                val performNavigation = {
+                    BekaNotificationManager.markNotificationRead(context, notif.id)
+                    if (BekaNotificationManager.classifyRecord(notif) == NotificationVisibility.PRIVATE_USER) {
+                        coroutineScope.launch {
+                            firestoreRepo?.markUserNotificationReadInCloud(notif.id)
+                        }
+                    }
+                    if (onNavigateDestination != null) {
+                        onNavigateDestination(destination)
+                    } else if (onNavigateToProductDoc != null) {
+                        onNavigateToProductDoc(
+                            effectiveTargetTab,
+                            notif.targetProductId,
+                            notif.targetProductDocId,
+                            resolvedOrderId
+                        )
+                    } else {
+                        onNavigateToTarget(effectiveTargetTab, notif.targetProductId, resolvedOrderId)
+                    }
                 }
 
                 Surface(
@@ -1087,10 +2064,7 @@ fun UserNotificationsScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            BekaNotificationManager.markNotificationRead(context, notif.id)
-                            onNavigateToTarget(notif.targetTab, notif.targetProductId)
-                        }
+                        .clickable { performNavigation() }
                         .testTag("notification_history_item_${notif.id}")
                 ) {
                     Column(
@@ -1154,7 +2128,37 @@ fun UserNotificationsScreen(
                             lineHeight = 18.sp
                         )
 
-                        // სამიზნე გვერდის / პროდუქტის ბეიჯი
+                        // სამიზნე გვერდის / შეკვეთის / პროდუქტის ბეიჯი
+                        val badgeLabel = when (destination) {
+                            is NotificationDestination.ProductDetail -> {
+                                if (targetProd != null) "🔗 ${targetProd.title} (${targetProd.price})"
+                                else if (notif.targetProductDocId.isNotBlank()) "🔗 პროდუქტი ${notif.targetProductDocId}"
+                                else "🛍️ პროდუქტის დეტალები"
+                            }
+                            is NotificationDestination.Discounts -> "🏷️ ფასდაკლებები"
+                            is NotificationDestination.CustomerOrderDetail -> {
+                                if (destination.orderNumber.isNotBlank()) "📦 შეკვეთა ${destination.orderNumber}"
+                                else if (resolvedOrderNumber.isNotBlank()) "📦 შეკვეთა $resolvedOrderNumber"
+                                else "📦 ჩემი შეკვეთები"
+                            }
+                            is NotificationDestination.ProductRequestDetail -> {
+                                if (destination.requestNumber.isNotBlank()) "📩 მოთხოვნა ${destination.requestNumber}"
+                                else "📩 პროდუქტის მოთხოვნა"
+                            }
+                            is NotificationDestination.AppUpdate -> "📲 აპის განახლება"
+                            is NotificationDestination.InAppTab -> "📍 ${BekaNotificationManager.targetTabLabel(destination.tabIndex)}"
+                            is NotificationDestination.NotificationDetailModal -> "ℹ️ ინფორმაციული შეტყობინება"
+                            is NotificationDestination.AdminOrderDetail -> "📦 შეკვეთა (ადმინი)"
+                            is NotificationDestination.UnavailableOrFallback -> "⚠️ ${destination.reasonKa}"
+                        }
+                        val badgeColor = when (destination) {
+                            is NotificationDestination.CustomerOrderDetail, is NotificationDestination.ProductRequestDetail -> Color(0xFF60A5FA)
+                            is NotificationDestination.ProductDetail, is NotificationDestination.Discounts -> Color(0xFFFF7A00)
+                            is NotificationDestination.AppUpdate -> Color(0xFFA855F7)
+                            is NotificationDestination.UnavailableOrFallback -> Color(0xFFF87171)
+                            else -> Color(0xFF4ADE80)
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1164,12 +2168,8 @@ fun UserNotificationsScreen(
                                 color = Color(0xFF1E222B)
                             ) {
                                 Text(
-                                    text = if (targetProd != null) {
-                                        "🔗 ${targetProd.title} (${targetProd.price})"
-                                    } else {
-                                        "📍 ${BekaNotificationManager.targetTabLabel(notif.targetTab)}"
-                                    },
-                                    color = Color(0xFF4ADE80),
+                                    text = badgeLabel,
+                                    color = badgeColor,
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
@@ -1221,10 +2221,7 @@ fun UserNotificationsScreen(
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
                                     color = Color(0xFFFF6A00),
-                                    modifier = Modifier.clickable {
-                                        BekaNotificationManager.markNotificationRead(context, notif.id)
-                                        onNavigateToTarget(notif.targetTab, notif.targetProductId)
-                                    }
+                                    modifier = Modifier.clickable { performNavigation() }
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -1270,6 +2267,162 @@ fun UserNotificationsScreen(
     }
 }
 
+/**
+ * შეტყობინებების ნებართვის წინასწარი განმარტებითი დიალოგი (ქართულ ენაზე).
+ * ჩნდება ონბორდინგის დასრულების შემდეგ, სანამ Android-ის სისტემური POST_NOTIFICATIONS დიალოგი გამოჩნდება.
+ */
+@Composable
+fun BekaNotificationPermissionExplanationDialog(
+    onEnableClick: () -> Unit,
+    onNotNowClick: () -> Unit
+) {
+    androidx.activity.compose.BackHandler(onBack = onNotNowClick)
+
+    CompositionLocalProvider(LocalPreserveWhiteText provides true) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            // Backdrop scrim as a sibling so its clickable semantics never merge/swallow dialog child testTags
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF06080C).copy(alpha = 0.76f))
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+            )
+
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF14171E),
+                border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.48f)),
+                modifier = Modifier
+                    .fillMaxWidth(0.90f)
+                    .widthIn(max = 380.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("notification_permission_explanation_dialog")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Bell Icon Badge
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xFFFF6A00).copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.42f)),
+                        modifier = Modifier
+                            .size(58.dp)
+                            .testTag("notification_permission_bell_icon")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "შეტყობინებები",
+                                tint = Color(0xFFFF7A00),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+
+                    // Title
+                    Text(
+                        text = "არ გამოგრჩეს მნიშვნელოვანი სიახლეები",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        lineHeight = 23.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = TextAlign.Center,
+                        softWrap = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("notification_permission_dialog_title")
+                    )
+
+                    // Description
+                    Text(
+                        text = "ჩართე შეტყობინებები, რომ დროულად მიიღო ინფორმაცია შენი შეკვეთების სტატუსის, სიახლეებისა და მნიშვნელოვანი განახლებების შესახებ.",
+                        color = Color(0xFFB4BCC8),
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.5.sp,
+                        fontWeight = FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                        softWrap = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("notification_permission_dialog_description")
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Primary Action: "შეტყობინებების ჩართვა"
+                    Button(
+                        onClick = onEnableClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF6A00),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("notification_permission_enable_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "შეტყობინებების ჩართვა",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    // Secondary Action: "ახლა არა"
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1C2029),
+                        border = BorderStroke(1.dp, Color(0xFF2B313E)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable(onClick = onNotNowClick)
+                            .testTag("notification_permission_not_now_button")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Text(
+                                text = "ახლა არა",
+                                color = Color(0xFFA0A8B8),
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 // ==============================================================================
 // აპლიკაციის განახლების გვერდი მომხმარებლისთვის (App Update Screen - Tab 7)
 // ==============================================================================
@@ -1409,7 +2562,7 @@ fun AppUpdateScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "BEKASERVICE ოფიციალური ვერსიის კონტროლი",
+                                text = "BSTORE ოფიციალური ვერსიის კონტროლი",
                                 color = Color(0xFFA0A5B0),
                                 fontSize = 11.5.sp,
                                 maxLines = 1,

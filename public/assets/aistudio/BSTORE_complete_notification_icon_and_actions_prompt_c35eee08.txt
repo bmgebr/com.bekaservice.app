@@ -1,0 +1,381 @@
+BSTORE — COMPLETE NOTIFICATION ICON, NOTIFICATION EXPANSION, AND END-TO-END ACTION / DEEP-LINK FIX
+Production-grade implementation prompt for Google AI Studio (Gemini 4 Argon recommended)
+
+ROLE AND EXPECTED RESULT
+Act as a senior Android engineer specializing in Kotlin, Jetpack Compose, Firebase Cloud Messaging (FCM), Android notification rendering, navigation architecture, deep links, and production QA.
+
+Your task is to inspect and FIX the existing BSTORE Android application. This is an implementation task, not a design proposal. Do not merely explain what should be changed or add placeholder code. Trace the current notification pipeline from the admin action/backend through FCM delivery, Android notification construction, user interaction, app launch/resume, navigation, and final destination. Implement the complete solution in the existing project.
+
+The two primary defects to eliminate are:
+1. The notification icon/logo is visibly cropped in the notification itself. It is also cropped when the user expands the notification directly from the Android status bar / notification shade to read it without opening the app.
+2. Notifications of different types do not reliably perform their intended action when tapped. Some may open an unrelated screen such as Profile or Home, or navigate without purpose. Every notification must open the exact screen and relevant item/action it represents. Home/Profile is acceptable only when that is explicitly the intended destination for that notification type.
+
+IMPORTANT PROJECT PRESERVATION RULES
+- The application brand is BSTORE. Keep this spelling uppercase wherever the brand is displayed in code/UI/notification content.
+- This is the existing native Android Kotlin + Jetpack Compose application using Firebase Authentication, Firestore, Firebase Storage and Firebase Cloud Messaging.
+- First inspect the real project structure, navigation graph, notification implementation, FCM service, AndroidManifest.xml, drawable/mipmap resources, notification channels, Firestore models/repositories, admin notification sender, and any Cloud Functions/backend code available in this project.
+- Do not create a second notification system beside the existing one. Repair and consolidate the existing implementation.
+- Do not rebuild the application from scratch.
+- Preserve the current package name, application ID, Firebase project/configuration, signing configuration, release keystore, app icon, splash screen, theme system, existing navigation, product/catalog/order/admin functionality, and all existing data.
+- Do not rename or replace existing screens, routes, collections, document IDs, or model fields unless absolutely necessary. If a schema change is unavoidable, provide a backward-compatible migration plan and implement it safely.
+- Do not remove working features or change unrelated UI.
+- Do not hardcode product IDs, order IDs, user IDs, arbitrary route names, bank/payment data, or notification destinations.
+- Do not place Firebase service-account credentials, server keys, FCM legacy keys, or other secrets in Android client code.
+- Do not claim that Cloud Functions, Firestore Rules, or remote configuration have been deployed unless deployment was actually performed and verified.
+- Do not use fabricated test data as if it were real production data.
+- Keep all customer-facing text in Georgian, consistent with the existing BSTORE app.
+
+PART 1 — FIX THE CROPPED NOTIFICATION ICON IN EVERY NOTIFICATION PRESENTATION
+
+A. Diagnose the actual cause before changing assets
+1. Find every place where an icon is assigned to a notification:
+   - FirebaseMessagingService / onMessageReceived implementation.
+   - NotificationCompat.Builder.setSmallIcon().
+   - NotificationCompat.Builder.setLargeIcon(), if used.
+   - FCM manifest metadata such as com.google.firebase.messaging.default_notification_icon.
+   - FCM notification payloads and data payload handling.
+   - Any helper/factory used to build notifications.
+   - Any foreground/in-app notification implementation that may use a different image.
+2. Identify whether the currently used image is the launcher icon, adaptive icon, full-color brand logo, or a drawable with unsuitable padding/transparent bounds.
+3. Determine why the icon is cropped in BOTH:
+   - the normal/collapsed notification row in the notification shade/status panel;
+   - the expanded notification view shown when the user expands the notification from the shade without opening BSTORE.
+4. Do not assume that changing only the launcher icon or only the large icon will fix the small status-bar icon. Identify and fix the exact rendering path.
+
+B. Create/use the correct Android small notification icon
+1. Android's small notification icon must be a dedicated notification asset, not the launcher icon or an arbitrary full-color logo.
+2. Create or adapt a dedicated monochrome notification drawable using the BSTORE brand mark in a form that is legible at Android notification-icon sizes.
+3. The drawable must use a transparent background and the correct alpha/monochrome silhouette. Do not bake a black, white, orange, or other solid square/circle background into the small icon.
+4. Do not use a full-color PNG as the small icon if Android will convert it into a mask and make it appear incorrectly.
+5. Keep the essential brand mark fully inside the safe drawable bounds. Add sufficient transparent padding so that no part of the mark is clipped by Android's icon mask or OEM notification rendering.
+6. Center the mark optically, not merely mathematically. Keep a balanced margin on every side. Do not stretch, squash, or crop the logo.
+7. Prefer a vector drawable where suitable. If a raster asset is required, provide density-appropriate resources and verify that they remain clear at actual notification sizes.
+8. Inspect the source image's alpha channel and visible content bounds. Do not mistake transparent padding for visible artwork.
+9. If the current BSTORE logo cannot be used legibly as a tiny monochrome icon, create a simplified notification-safe version of the existing brand mark while preserving its recognizable identity. Do not redesign the main BSTORE logo.
+10. Do not use an opaque black square or any artificial background behind the logo. This is a strict requirement because a previous attempt introduced an unwanted black square.
+
+C. Assign the icon consistently
+1. Use the dedicated small notification drawable for every notification built by the app.
+2. Set the correct small icon in every NotificationCompat.Builder path.
+3. Configure FCM's default notification icon metadata correctly for any notification payload that Firebase renders automatically.
+4. Ensure that the app does not have two competing notification paths where some messages use the custom service and others are automatically rendered with a different default icon.
+5. For large notification artwork, use setLargeIcon() only when it improves the expanded notification presentation. If the original full-color BSTORE logo is suitable as a large icon, it may be used there, but it must not replace the small monochrome icon.
+6. If a notification uses a product image, keep it as optional large/big-picture content where appropriate. Never use the product image as the small status-bar icon.
+7. Ensure all notification types use the same correct small icon, including product, price/discount, order, product request, app update, admin announcement, and other existing notification types.
+
+D. Verify both collapsed and expanded notification rendering
+Test on a real Android device, not only a preview:
+- Normal notification row in the notification shade.
+- Expanded notification view after the user expands it directly from the shade.
+- Heads-up notification/banner, if enabled by the channel/device.
+- Lock-screen notification where device privacy settings permit.
+- Light and dark system notification surfaces.
+- Different Android API levels supported by the project, including the app's target SDK behavior.
+- Xiaomi / HyperOS notification rendering if a Xiaomi device is available.
+The brand mark must be complete, centered, legible, and not cropped in all supported notification presentations. No black square or opaque background may appear behind the small icon.
+
+PART 2 — MAKE EVERY NOTIFICATION TAP PERFORM ITS REAL, INTENDED ACTION
+
+CORE REQUIREMENT
+Every notification must carry an explicit, validated destination/action. Tapping it must take the user to the exact screen and, when applicable, the exact entity or contextual section related to that notification.
+
+It is NOT acceptable for all notifications to open the Home screen or Profile screen by default. Do not use a generic fallback that silently sends every unknown or malformed notification to Profile/Home. If a notification is meant to open Home or Profile, preserve that only for the notification type whose explicit product requirement says so.
+
+Examples of intended behavior:
+- Product notification → open the exact product details page for that product.
+- Discount / price change notification → open the exact product or specific promotion destination represented by the notification.
+- Order notification → open the exact order details screen for the relevant order.
+- Product request / requested-product update → open the exact request details/status screen for that request.
+- App update notification → open the app's update/details destination or the appropriate in-app update screen, according to the existing BSTORE update flow. Do not send it to an unrelated profile or home page.
+- General announcement → open the announcement/details page or the intended destination configured by the admin.
+- Other existing notification types → resolve to their own actual intended destinations.
+- Notifications that intentionally open a particular tab or screen must continue doing so.
+- If an existing notification type has no destination specification, inspect its current product purpose and implement a deliberate destination rather than guessing.
+
+PART 3 — ESTABLISH A SINGLE, EXPLICIT NOTIFICATION CONTRACT
+
+Inspect existing notification payloads and models. Then establish one consistent, typed notification contract shared by the admin sender/backend and Android client. Reuse existing field names where they already exist and are in use. Avoid creating incompatible duplicate payload schemas.
+
+The contract should support, as applicable:
+- notificationId: stable unique notification identifier;
+- type: stable machine-readable notification type;
+- title: display title;
+- body: display text;
+- targetId: stable Firestore document ID of the target entity, when relevant;
+- targetType: product, order, product_request, promotion, announcement, app_update, or another real existing entity type;
+- destination/action: explicit semantic destination or action identifier;
+- optional imageUrl for large notification artwork only;
+- optional campaign/promotion identifier where relevant;
+- optional userId / audience metadata for delivery validation, according to the existing security model;
+- createdAt and other existing metadata required by the app.
+
+Rules:
+1. Use stable Firestore document IDs, not product names, SKU values, array indexes, or display text, to identify products/orders/requests.
+2. IDs must be passed as data fields, not embedded in an untrusted arbitrary URL or inferred from the notification title/body.
+3. Use a typed enum/sealed-class or equivalent centralized parser for notification types and destinations.
+4. Centralize payload parsing and destination resolution. Do not duplicate slightly different string checks in multiple screens/services.
+5. Normalize legacy payload formats if older notifications already exist, so old notifications do not crash the app. Preserve backward compatibility when possible.
+6. Validate required fields for each notification type. For example, a product notification without a valid product document ID must not pretend to be a valid product-detail notification.
+7. Do not trust arbitrary route strings sent by an external payload. Map known, validated semantic actions to existing in-app routes.
+8. Handle unknown types, missing IDs, malformed payloads, deleted entities, unavailable destinations, and expired content gracefully.
+9. Log diagnostic details without exposing private user data, authentication tokens, bank data, or other secrets.
+10. Do not silently redirect malformed notifications to an unrelated screen. Show a meaningful safe fallback, such as an in-app message/notification detail or a clear “content is no longer available” state, with a route back to the notification center. Only use Home as a deliberate, documented fallback if no safer existing destination exists.
+
+PART 4 — IMPLEMENT CORRECT NAVIGATION FOR EACH NOTIFICATION TYPE
+
+A. Product notifications
+- The admin must select an actual existing product from the BSTORE catalog when creating a product-targeted notification.
+- Use the selected product's real Firestore document ID.
+- Do not require the admin to type a product ID manually.
+- On tap, open the product detail route and load the exact product document by ID from the existing repository.
+- The correct product must open even if the product list order changes, the product name changes, or the app has been terminated.
+- If the product is inactive, unavailable, or deleted, show a clear unavailable state and do not open a different product.
+
+B. Discount / price / promotion notifications
+- Identify whether the notification targets a product, a promotion campaign, or a general discount page.
+- If it targets a product, open that exact product by Firestore ID.
+- If it targets a promotion, open the relevant promotion/details screen and filter/identify the correct campaign using its stable ID.
+- If the current app has no promotion-details route, implement the smallest coherent destination using the existing design/navigation patterns. Do not invent a fake destination.
+- Do not infer a discount amount or product from the notification text.
+
+C. Order notifications
+- Carry the actual order document ID.
+- On tap, open the correct order details screen, not the generic orders list unless the notification explicitly intends the list.
+- Validate that the signed-in user is authorized to view the order.
+- If the notification arrives while logged out, preserve the intended destination as a pending navigation request. After successful authentication, revalidate ownership and then open that exact order.
+- If ownership fails, do not expose order details. Show a safe access-denied/unavailable state.
+
+D. Product request notifications
+- Carry the actual product-request document ID.
+- Open the exact request details/status screen.
+- Apply the existing requester/admin authorization rules.
+- If the app currently has separate customer and admin request destinations, resolve based on authenticated role and intended action without leaking admin-only data.
+- If the request has been deleted or is inaccessible, show a clear unavailable state.
+
+E. App update notifications
+- Inspect the existing app update mechanism and determine what the notification means:
+  - a new version is available;
+  - an update is required;
+  - release notes/what's new;
+  - a maintenance notice.
+- Navigate to the appropriate existing update/details screen or implement a dedicated update details destination consistent with the app.
+- If the update requires opening an official store or trusted update source, use only the verified URL already configured by the project/admin. Never invent a download URL.
+- Do not redirect app-update notifications to Profile or Home without a deliberate product requirement.
+
+F. General announcements and other notification types
+- Inspect every notification type already present in the codebase, Firestore, and admin panel.
+- For each one, document its actual intended action and implement that destination.
+- If admins can configure a destination, expose only safe predefined destination types and the required target selector. Do not permit arbitrary unvalidated route injection.
+- If the notification is purely informational and has no deeper destination, make that explicit in its UI and do not create a fake navigation action.
+- If a notification is intended to open a particular in-app section, open that exact section/tab and preserve relevant contextual state.
+
+PART 5 — HANDLE ALL APP STATES AND NOTIFICATION ENTRY POINTS
+
+The same correct destination must work when the notification is tapped while BSTORE is:
+
+1. Fully terminated / process not running (cold start).
+2. In the background.
+3. Already open in the foreground.
+4. On a different screen.
+5. On the Home screen.
+6. On the Profile screen.
+7. In the middle of authentication or onboarding.
+8. Logged out, when the destination requires authentication.
+9. Receiving multiple notifications in quick succession.
+10. Restored after Android process death.
+
+Implementation requirements:
+- Inspect the existing Activity launch mode, intent flags, task/back-stack behavior, Compose navigation setup, and deep-link handling.
+- Use a single, reliable entry point for notification navigation.
+- Handle both notification payloads generated by FCM notification messages and data messages. Avoid relying on only one FCM delivery shape if the project currently uses both.
+- Correctly process FirebaseMessagingService callbacks and the Activity intent onCreate/onNewIntent as appropriate.
+- Ensure onNewIntent updates the Activity's current intent and triggers destination processing.
+- Do not navigate directly from a background service using an unsafe or incomplete navigation context.
+- Preserve the notification's intended destination until the navigation host is ready.
+- If authentication is required, queue the validated pending destination, complete login, then re-check permissions and navigate exactly once.
+- If onboarding/setup is required, complete it first and then resolve the pending destination.
+- Prevent duplicate navigation when the same notification is processed by both FCM handling and Activity intent handling.
+- Prevent stale intents from reopening an old destination after the user has already navigated elsewhere.
+- Support Android process recreation without losing the pending destination.
+- Use a stable notification ID and appropriate PendingIntent requestCode/identity so tapping one notification cannot accidentally open another notification's destination.
+- Use correct PendingIntent flags for supported Android versions, including immutable/update-current behavior as appropriate.
+- Ensure each notification's PendingIntent contains its own complete destination data and does not overwrite another notification's extras.
+- Use explicit intents targeting the correct app Activity. Avoid implicit or unsafe intent routing.
+- Maintain correct back-stack behavior: after opening a product/order/request/announcement detail from a notification, Back should return to a sensible previous screen (for example, the relevant catalog/orders/requests/notification center or Home according to the existing navigation design), not jump unexpectedly to Profile or produce duplicate copies of the same screen.
+- If the user taps a notification while the app is already open, navigate to the destination without unnecessarily restarting the entire app.
+- If the notification is tapped more than once, prevent duplicate destination instances where appropriate, without blocking a legitimate later tap.
+
+PART 6 — NOTIFICATION CENTER AND READ/UNREAD BEHAVIOR
+
+Inspect the existing in-app notification center and preserve its current functionality.
+- Tapping a notification inside the app's notification center must use the same central destination resolver as tapping the Android system notification.
+- Do not implement one navigation behavior for system notifications and a different, inconsistent behavior for in-app notification cards.
+- Mark a notification as read at the appropriate time, without losing its target/action payload.
+- Do not mark a notification as successfully acted upon merely because it was displayed.
+- If read state is stored per user, ensure it is isolated by authenticated user and protected by Firestore Rules/backend authorization.
+- Opening a notification must not change its target ID or type.
+- If a notification is informational and intentionally has no action, show it as such instead of navigating to an unrelated screen.
+
+PART 7 — ADMIN PANEL: VALIDATE NOTIFICATION DESTINATIONS BEFORE SENDING
+
+Inspect the existing admin notification creation/sending UI and implement the necessary selectors/validation:
+- Product notification: searchable selector populated from actual active BSTORE products; store the selected product's Firestore document ID.
+- Order notification: only if the current admin workflow supports sending order-related notifications; select/resolve the actual order document and preserve authorization.
+- Product request notification: select/resolve a real request document when applicable.
+- Promotion/discount: select an existing campaign or a real product, depending on notification purpose.
+- App update: select/configure a real update/release record or verified configured destination.
+- General announcement: choose a safe predefined destination, or explicitly mark it informational/no-navigation.
+- Do not show irrelevant target selectors for unrelated notification types.
+- Do not allow sending a product-targeted notification without a valid product selection.
+- Validate the selected target again in the trusted backend before sending, not only in the UI.
+- Keep admin authorization enforced server-side. A hidden admin button or client-side role check is not security.
+- Preserve existing audience targeting and delivery rules; do not accidentally send private order/request details to all users.
+- Show the admin a clear validation error if the selected target no longer exists or is not eligible.
+- Keep the notification title/body editable and Georgian-compatible, but never use those strings as navigation identifiers.
+
+PART 8 — SECURITY, PRIVACY, AND DATA CONSISTENCY
+
+- Reuse the existing Firebase Auth and backend security model.
+- Customer accounts must not be able to send admin notifications or alter destination metadata for notifications they do not own.
+- Users must not access other users' orders, product requests, private notification records, or admin-only destinations.
+- Validate target ownership/role on the server or through secure Firestore Rules/Cloud Functions before returning private data.
+- Do not trust user-editable notification payload fields for authorization.
+- Do not include sensitive order details, phone numbers, addresses, payment account information, IBANs, or private customer data in public FCM topics or notification text.
+- Use appropriate audience targeting and per-user delivery for private notifications.
+- Keep FCM tokens associated with the correct authenticated user/device using the existing token lifecycle. Do not leak tokens in logs.
+- Handle token refresh, logout, account switching, and multiple devices without sending a private notification to the previous user's device.
+- On logout/account switch, clear or re-associate user-specific notification state safely according to the existing architecture.
+- Do not weaken Firestore Rules to make notification navigation work.
+- If trusted backend changes are required, implement them in the existing backend structure and state clearly whether they were deployed or only prepared locally.
+
+PART 9 — NOTIFICATION CONTENT AND PRESENTATION
+
+- Preserve the existing BSTORE notification visual identity and Georgian copy.
+- Ensure title/body are readable and not truncated unexpectedly; use appropriate BigTextStyle for longer bodies.
+- Expanded notification layout should remain readable when the user expands it directly from the Android notification shade.
+- If an image is included, use BigPictureStyle only where it makes sense and ensure the text/action remains available.
+- The small icon remains the dedicated monochrome BSTORE notification drawable in every style.
+- Use correct notification channels and importance for each existing notification category. Do not create a new channel on every app launch.
+- Preserve user-controlled channel settings and do not silently reset importance/sound/vibration preferences.
+- Use appropriate channel names/descriptions in Georgian where the project currently localizes channels.
+- Add useful actions only when they have a real implemented function. Never show inert buttons.
+- Notification tap and action buttons must resolve to the correct target/action and obey the same authorization rules.
+- Keep Android notification permission behavior correct for supported API levels. Do not bypass user permission choices.
+
+PART 10 — CENTRAL ARCHITECTURE AND CODE QUALITY
+
+Implement a maintainable architecture consistent with the existing project:
+- One notification payload model/parser.
+- One notification type/action definition.
+- One central destination resolver.
+- One notification navigation coordinator/dispatcher integrated with the existing navigation host.
+- One notification builder/factory to ensure consistent small icon, channel, styles, and PendingIntent behavior.
+- Reuse the existing repository/data sources to load destination entities.
+- Avoid scattering string literals and navigation logic across composables, services, and activities.
+- Avoid duplicated navigation events.
+- Use lifecycle-aware state/event delivery so a pending notification is not lost before Compose Navigation is ready.
+- Use one-shot event semantics or equivalent reliable consumption, with process-death persistence where needed.
+- Ensure event consumption does not happen before successful navigation.
+- Handle coroutine cancellation, lifecycle transitions, and repository loading errors correctly.
+- Keep UI state and navigation events separate.
+- Do not add unnecessary dependencies if the existing Android/Firebase libraries already support the requirement.
+- Follow the project's current Kotlin, Compose, and navigation versions; do not upgrade unrelated dependencies.
+
+PART 11 — REQUIRED TESTS
+
+Do not finish after code compiles. Add/update automated tests where practical and perform real-device checks where possible.
+
+A. Icon tests / verification
+- Dedicated notification drawable exists and is actually used by all notification builder paths.
+- Small icon has no opaque square background and has safe transparent margins.
+- FCM default icon metadata points to the correct drawable.
+- Collapsed and expanded notifications show the complete icon.
+- Heads-up notification uses the same correct small icon.
+
+B. Destination mapping tests
+Create a test matrix for every actual notification type discovered in the project. At minimum, verify these cases if the corresponding types exist:
+- product → exact product detail by Firestore document ID;
+- discount/price/promotion → exact product or promotion;
+- order → exact authorized order detail;
+- product request → exact authorized request detail;
+- app update → exact update/release destination;
+- general announcement → configured details destination or explicit informational state;
+- informational/no-action type → no accidental navigation;
+- unknown type → safe fallback, not arbitrary Profile/Home;
+- missing/invalid target ID → clear unavailable state;
+- deleted product/order/request/promotion → clear unavailable state, never another entity.
+
+C. App lifecycle tests
+For each supported notification type, verify:
+- app terminated → tap → exact destination;
+- app backgrounded → tap → exact destination;
+- app foregrounded on another screen → tap → exact destination;
+- app foregrounded on the same screen → no duplicate route;
+- logged out → login → exact destination after authorization;
+- process recreation → pending destination is retained and processed once;
+- two different notifications → each opens its own correct target;
+- rapid repeated taps → no cross-contamination of PendingIntent extras.
+
+D. Security tests
+- User A cannot open User B's order/request from a forged notification payload.
+- A logged-out user cannot bypass authentication to view private content.
+- Customer cannot forge admin-only notification types/destinations.
+- Private notification data is not sent to public topics.
+- Logout/account switching does not expose prior user's notifications or FCM token association.
+
+E. Regression checks
+- Normal app launch and onboarding still work.
+- Existing Home, Catalog, Product Details, Cart, Checkout, Orders, Profile, Notification Center, Product Requests, Admin Panel, and update screens still work.
+- Existing notification delivery and read/unread behavior still work.
+- Product cards and deep links continue to use the correct Firestore document IDs.
+- No unrelated theme, setup, splash, launcher icon, or app branding changes.
+- No crashes, blank screens, infinite loading, or duplicate navigation.
+
+PART 12 — IMPLEMENTATION WORKFLOW (FOLLOW IN ORDER)
+
+1. Inspect the project and report the actual current notification architecture and all discovered notification types.
+2. Trace the icon from source asset to the final Android notification rendering path.
+3. Trace every notification type from admin creation/backend payload to tap handling and final navigation destination.
+4. Identify exact root causes for the cropped icon and incorrect destination behavior.
+5. Implement the dedicated notification icon and correct all notification builder/FCM paths.
+6. Implement the centralized typed payload and destination resolver using existing project conventions.
+7. Repair Activity/FCM/Compose lifecycle handling for cold start, background, foreground, authentication, and process recreation.
+8. Repair admin target selection and backend validation as needed.
+9. Add/update tests and execute them.
+10. Build the app and fix compilation/runtime issues introduced by the changes.
+11. Run the available real-device notification tests. If a device or backend deployment is unavailable, explicitly say which checks could not be performed. Do not claim unperformed tests passed.
+12. Review the diff for accidental changes to unrelated features, assets, Firebase configuration, package ID, signing, and production data.
+
+STRICT ACCEPTANCE CRITERIA
+The task is complete only when all of the following are true:
+- The BSTORE small notification icon is no longer cropped in the normal/collapsed notification row.
+- The icon is also complete when the notification is expanded directly from the Android notification shade.
+- No black square or opaque background appears behind the small icon.
+- Every existing notification type has a documented, intentional destination/action.
+- Product notifications open the exact selected product using its stable Firestore document ID.
+- Discount/price notifications open the exact product or promotion represented.
+- Order notifications open the exact authorized order.
+- Product request notifications open the exact authorized request.
+- App update notifications open the correct update/release destination.
+- General announcements open their configured destination or are explicitly informational.
+- Unknown/malformed/deleted-target notifications do not silently redirect to Profile or Home.
+- The same behavior works from cold start, background, and foreground.
+- Login/onboarding requirements are respected and the destination is resumed exactly once after authentication.
+- Notification taps from the Android shade and from the in-app notification center use the same destination resolver.
+- Multiple notifications cannot overwrite each other's PendingIntent target.
+- Existing app functionality, security, data, Firebase setup, branding, and signing remain intact.
+
+FINAL REPORT — IN GEORGIAN
+When implementation is complete, provide a concise but precise report in Georgian with these sections:
+1. აღმოჩენილი მიზეზები — explain the actual root cause of the cropped icon and incorrect navigation.
+2. შეცვლილი ფაილები — list the exact files changed and what changed in each.
+3. აიქონის შედეგი — state which drawable is now used as the small icon, how transparency/padding were handled, and whether collapsed + expanded rendering was tested on a real device.
+4. შეტყობინებების მარშრუტიზაცია — list every notification type discovered and its exact destination/action.
+5. აპის მდგომარეობები — report cold start/background/foreground/authentication/process-death results separately.
+6. უსაფრთხოება — summarize authorization and private-data protections preserved/added.
+7. ტესტები — list tests actually run and their results. Clearly distinguish automated tests, emulator tests, and real-device tests.
+8. შეზღუდვები / დარჩენილი სამუშაო — explicitly list anything not implemented, not deployed, or not verified.
+
+Do not report “fixed”, “tested”, “deployed”, or “working” unless supported by actual implementation and verification. If a requirement cannot be completed in the current environment, explain exactly why and identify the remaining manual step.
+
+IMPORTANT: First inspect the existing BSTORE project. Do not assume route names, collection names, notification types, or file names from this prompt. Discover the real ones, preserve working architecture, and implement the complete fix in that architecture.

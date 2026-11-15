@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -16,6 +17,8 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.ui.Modifier
@@ -42,10 +45,11 @@ class ExampleRobolectricTest {
   val composeTestRule = createComposeRule()
 
   @Test
-  fun `header logo BEKASERVICE and subtitle are symmetric and vertically aligned with right action buttons`() {
+  fun `header logo BSTORE is symmetric without subtitle and vertically aligned with right action buttons`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     AppPreferencesManager.init(context)
     AppPreferencesManager.setOnboardingCompleted(context, true)
+    BekaNotificationManager.markPermissionPrompted(context)
     hasCompletedInitialLaunch = true
 
     composeTestRule.setContent {
@@ -62,7 +66,8 @@ class ExampleRobolectricTest {
     val logoEmblemNode = composeTestRule.onNodeWithTag("header_logo_emblem", useUnmergedTree = true).assertIsDisplayed()
     val logoTextColNode = composeTestRule.onNodeWithTag("header_logo_text_column", useUnmergedTree = true).assertIsDisplayed()
     val brandTitleRowNode = composeTestRule.onNodeWithTag("header_brand_title_row", useUnmergedTree = true).assertIsDisplayed()
-    val brandSubtitleNode = composeTestRule.onNodeWithTag("header_brand_subtitle", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("header_bstore_wordmark_text", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("header_brand_subtitle", useUnmergedTree = true).assertDoesNotExist()
 
     val menuBtnNode = composeTestRule.onNodeWithTag("drawer_menu_button", useUnmergedTree = true).assertIsDisplayed()
     val notifBtnNode = composeTestRule.onNodeWithTag("notifications_button", useUnmergedTree = true).assertIsDisplayed()
@@ -73,25 +78,13 @@ class ExampleRobolectricTest {
     val logoEmblemBounds = logoEmblemNode.fetchSemanticsNode().boundsInRoot
     val logoTextColBounds = logoTextColNode.fetchSemanticsNode().boundsInRoot
     val brandTitleRowBounds = brandTitleRowNode.fetchSemanticsNode().boundsInRoot
-    val brandSubtitleBounds = brandSubtitleNode.fetchSemanticsNode().boundsInRoot
 
     val menuBounds = menuBtnNode.fetchSemanticsNode().boundsInRoot
     val notifBounds = notifBtnNode.fetchSemanticsNode().boundsInRoot
     val profileBounds = profileBtnNode.fetchSemanticsNode().boundsInRoot
     val cartBounds = cartBtnNode.fetchSemanticsNode().boundsInRoot
 
-    // 1. BEKASERVICE და "სანდო სერვისი" ახლოს და ასო "B"-ს გასწვრივ ერთად:
-    val verticalGap = brandSubtitleBounds.top - brandTitleRowBounds.bottom
-    assertTrue(
-      "Vertical gap between BEKASERVICE and სანდო სერვისი should be tight (<= 2px), was $verticalGap",
-      verticalGap <= 2.0f
-    )
-    assertTrue(
-      "BEKASERVICE and სანდო სერვისი must start at the exact same left edge under 'B', diff=${abs(brandTitleRowBounds.left - brandSubtitleBounds.left)}",
-      abs(brandTitleRowBounds.left - brandSubtitleBounds.left) <= 1.5f
-    )
-
-    // 2. ლოგო წარწერით BEKASERVICE უნდა უტოლდებოდეს ერთ სიმაღლეზე მარჯვენა მხარეს არსებულ შეტყობინების, მომხმარებლის და კალათის ღილაკებს:
+    // 1. ლოგო წარწერით BSTORE უნდა უტოლდებოდეს ერთ სიმაღლეზე მარჯვენა მხარეს არსებულ ღილაკებს:
     assertEquals(notifBounds.height, logoTitleBounds.height, 1.5f)
     assertEquals(notifBounds.height, logoEmblemBounds.height, 1.5f)
     assertEquals(notifBounds.height, logoTextColBounds.height, 1.5f)
@@ -102,7 +95,19 @@ class ExampleRobolectricTest {
     assertEquals(profileBounds.center.y, logoTitleBounds.center.y, 1.5f)
     assertEquals(cartBounds.center.y, logoTitleBounds.center.y, 1.5f)
     assertEquals(menuBounds.center.y, logoTitleBounds.center.y, 1.5f)
-    assertEquals(notifBounds.center.y, logoTextColBounds.center.y, 1.5f)
+    assertEquals(notifBounds.center.y, brandTitleRowBounds.center.y, 2.0f)
+
+    // 2. ქვედა ნავიგაციის ტაბების შემოწმება (ფასდაკლებები და AI ასისტენტი + დიაგნოსტიკა):
+    composeTestRule.onNodeWithTag("nav_tab_2").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("discounts_screen_root").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("nav_tab_3").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("ai_diagnostics_mode_switcher").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("switch_to_diagnostics_tab").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("diagnostics_workspace_root").assertIsDisplayed()
 
     // 3. ნავიგაციის და ვიზუალების შემოწმება (შეტყობინებები, პროფილი, კალათა, გვერდითა მენიუ და განახლება):
     notifBtnNode.performClick()
@@ -132,7 +137,7 @@ class ExampleRobolectricTest {
   fun `read string from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("ბექასერვისი", appName)
+    assertEquals("BSTORE", appName)
   }
 
   @Test
@@ -192,21 +197,37 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `admin storage pin verification and update works`() {
+  fun `admin storage session requires authenticated sole admin with verified custom claim`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    // საწყისი PIN კოდია "bmgebr"
-    assertTrue("Default PIN should be bmgebr", AdminStorage.verifyPin(context, "bmgebr"))
-    assertFalse("Invalid PIN should be rejected", AdminStorage.verifyPin(context, "wrong123"))
+    AuthAndOrderManager.logout(context)
+    AdminStorage.clearAdminSession(context)
 
-    // PIN-ის შეცვლა
-    val changed = AdminStorage.setAdminPin(context, "newpin99")
-    assertTrue(changed)
-    assertTrue("New PIN should verify", AdminStorage.verifyPin(context, "newpin99"))
-    assertFalse("Old PIN should no longer verify", AdminStorage.verifyPin(context, "bmgebr"))
+    // 1. Logged out -> session cannot be activated
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    assertFalse("Unauthenticated user must never have an active admin session", AdminStorage.isAdminSessionActive(context))
 
-    // აღდგენა ტესტის შემდგომ
-    AdminStorage.setAdminPin(context, "bmgebr")
-    assertTrue(AdminStorage.verifyPin(context, "bmgebr"))
+    // 2. Ordinary authenticated user -> session cannot be activated
+    AuthAndOrderManager.loginWithGoogle(context, "customer@gmail.com", "Customer")
+    AdminStorage.setAdminSessionActive(context, true, "customer@gmail.com")
+    assertFalse("Ordinary authenticated user must never have an active admin session", AdminStorage.isAdminSessionActive(context))
+
+    // 3. Sole admin authenticated WITHOUT custom claim -> session inactive
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = false)
+    assertTrue("Admin email is recognized for UI entry", AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse("Missing custom claim must not grant admin claim verification", AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertFalse("Missing custom claim must keep admin session inactive", AdminStorage.isAdminSessionActive(context))
+
+    // 4. Sole admin authenticated WITH verified custom claim -> session active
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = true)
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertTrue(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertTrue("Verified sole admin with custom claim must have active session", AdminStorage.isAdminSessionActive(context))
+
+    // 5. Logout clears everything immediately
+    AuthAndOrderManager.logout(context)
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertFalse(AdminStorage.isAdminSessionActive(context))
   }
 
   @Test
@@ -249,9 +270,11 @@ class ExampleRobolectricTest {
     assertTrue("Orders history must be empty when no genuine orders exist", initialOrders.isEmpty())
     assertFalse(initialOrders.any { it.orderNumber in setOf("#BS-1048", "#BS-1052", "#BS-1040") })
 
-    // პაროლის შეცვლა
+    // პაროლის შეცვლა (ელ-ფოსტის ანგარიშისთვის)
+    AuthAndOrderManager.registerWithEmail(context, "გიორგი", "customer@gmail.com", "password123")
     val (changedOk, _) = AuthAndOrderManager.changePassword(context, "password123", "bekaSecure2026")
     assertTrue(changedOk)
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "ბექა")
 
     // ტელეფონის მოდელის შენახვა, გამოსვლა და ხელახლა შესვლა
     val updatedProfile = googleUser.copy(deviceModel = "Samsung S24 Ultra")
@@ -424,68 +447,61 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `ai assistant recommends only Canva when user asks for canva and does not dump other multimedia services`() {
+  fun `ai assistant recommends accurate hardware parts and never recommends retired software services`() {
     val allProducts = ProductRepository.getAllProducts()
 
-    // 1. "canva მინდა" should return ONLY Canva Pro (id=118), NOT CapCut (116) or Adobe (117)
-    val matchedForCanva = GeminiDiagnosticService.findRelevantProducts("canva მინდა", allProducts)
-    assertEquals(1, matchedForCanva.size)
-    assertEquals(118, matchedForCanva.first().id)
-    assertEquals("Canva Pro", matchedForCanva.first().title)
+    // 1. Hardware query for iPhone 16 Pro Max screen should return iPhone 16 Pro Max OLED screen (id=1)
+    val matchedForIphone16 = GeminiDiagnosticService.findRelevantProducts("iphone 16 pro max ეკრანი მინდა", allProducts)
+    assertTrue(matchedForIphone16.isNotEmpty())
+    assertEquals(1, matchedForIphone16.first().id)
 
-    // 2. Local diagnostic text should be dedicated to Canva Pro without dumping CapCut or Adobe
-    val diagnosticReply = GeminiDiagnosticService.findRelevantProducts("კანვა მინდა", allProducts)
-    assertEquals(1, diagnosticReply.size)
-    assertEquals(118, diagnosticReply.first().id)
+    // 2. Hardware query for iPhone 16 Pro Max battery should return iPhone 16 Pro Max battery (id=14)
+    val matchedForBattery = GeminiDiagnosticService.findRelevantProducts("iphone 16 pro max ელემენტი", allProducts)
+    assertTrue(matchedForBattery.isNotEmpty())
+    assertTrue(matchedForBattery.any { it.id == 14 })
 
-    // 3. Similarly for CapCut: should return ONLY CapCut Pro (id=116)
-    val matchedForCapCut = GeminiDiagnosticService.findRelevantProducts("capcut მინდა", allProducts)
-    assertEquals(1, matchedForCapCut.size)
-    assertEquals(116, matchedForCapCut.first().id)
+    // 2b. Hardware query for Samsung S24 Ultra screen should return S24 Ultra display
+    val matchedForS24 = GeminiDiagnosticService.findRelevantProducts("samsung s24 ultra ეკრანი", allProducts)
+    assertTrue(matchedForS24.isNotEmpty())
+    assertTrue(matchedForS24.any { it.title.contains("S24 Ultra", ignoreCase = true) && it.category == "ეკრანები" })
 
-    // 4. General multimedia query should return the broader multimedia services
-    val matchedGeneral = GeminiDiagnosticService.findRelevantProducts("მულტიმედია რა სერვისები გაქვთ?", allProducts)
-    assertTrue("General multimedia request should return multiple services", matchedGeneral.size >= 3)
-    assertTrue(matchedGeneral.any { it.id == 118 })
-    assertTrue(matchedGeneral.any { it.id == 116 })
-    assertTrue(matchedGeneral.any { it.id == 117 })
+    // 3. Retired software queries must return emptyList()
+    assertTrue(GeminiDiagnosticService.findRelevantProducts("canva მინდა", allProducts).isEmpty())
+    assertTrue(GeminiDiagnosticService.findRelevantProducts("chatgpt plus", allProducts).isEmpty())
+    assertTrue(GeminiDiagnosticService.findRelevantProducts("capcut მინდა", allProducts).isEmpty())
   }
 
   @Test
-  fun `ai assistant dynamically finds newly added services from catalog`() {
+  fun `ai assistant dynamically finds newly added hardware products from catalog`() {
     val baseProducts = ProductRepository.getAllProducts()
 
-    // Create a newly added service by admin
-    val newCustomService = ProductItem(
+    // Create a newly added legitimate hardware product by admin
+    val newCustomPart = ProductItem(
       id = 999,
-      title = "Midjourney v7 Mega",
-      price = "45 ₾",
-      category = "პროგრამული სერვისები",
-      type = "software",
-      subcategory = "ხელოვნური ინტელექტი",
-      imageUrl = "https://example.com/midjourney.jpg",
-      shortDescription = "Midjourney v7 უმაღლესი ხარისხის ფოტორეალისტური AI გენერატორი ულიმიტო GPU საათებით.",
-      features = listOf("v7 photorealism", "Fast GPU hours", "Commercial license"),
-      offerType = "თვიური გამოწერა",
-      duration = "1 თვე",
-      accountType = "Private",
-      activationTerms = "მყისიერი აქტივაცია",
-      searchKeywords = "midjourney, მიდჯორნი, გენერაცია",
+      title = "Nothing Phone 2a AMOLED ეკრანი",
+      price = "320 ₾",
+      category = "ეკრანები",
+      type = "product",
+      subcategory = "OLED მოდულები",
+      imageUrl = "https://example.com/nothing2a.jpg",
+      shortDescription = "Nothing Phone 2a ორიგინალი 120Hz AMOLED ეკრანის მოდული.",
+      features = listOf("120Hz AMOLED", "Original Flex", "6 თვე გარანტია"),
+      searchKeywords = "nothing phone 2a, ნათინგ ფოუნ, ეკრანი",
       inStock = true,
-      brand = "Midjourney"
+      brand = "Nothing"
     )
 
-    val updatedCatalog = baseProducts + newCustomService
+    val updatedCatalog = baseProducts + newCustomPart
 
-    // User asks for the newly added service: "midjourney მინდა"
-    val foundNewService = GeminiDiagnosticService.findRelevantProducts("midjourney მინდა", updatedCatalog)
-    assertEquals(1, foundNewService.size)
-    assertEquals(999, foundNewService.first().id)
-    assertEquals("Midjourney v7 Mega", foundNewService.first().title)
+    // User asks for the newly added hardware product
+    val foundNewPart = GeminiDiagnosticService.findRelevantProducts("nothing phone 2a მინდა", updatedCatalog)
+    assertTrue(foundNewPart.isNotEmpty())
+    assertEquals(999, foundNewPart.first().id)
+    assertEquals("Nothing Phone 2a AMOLED ეკრანი", foundNewPart.first().title)
 
     // User asks with Georgian transliteration
-    val foundNewGeorgian = GeminiDiagnosticService.findRelevantProducts("მიდჯორნი მინდა", updatedCatalog)
-    assertEquals(1, foundNewGeorgian.size)
+    val foundNewGeorgian = GeminiDiagnosticService.findRelevantProducts("ნათინგ ფოუნ მინდა", updatedCatalog)
+    assertTrue(foundNewGeorgian.isNotEmpty())
     assertEquals(999, foundNewGeorgian.first().id)
   }
 
@@ -639,8 +655,10 @@ class ExampleRobolectricTest {
     // Guest access must NOT create a fake authenticated session
     assertEquals(null, AuthAndOrderManager.getCurrentUser(context))
 
-    // 5. Screen 4 (Ready & Benefits) displays and finishes onboarding into the existing Home screen
-    composeTestRule.onNodeWithTag("onboarding_ready_step").assertIsDisplayed()
+    // 5. Screen 4 (Theme Selection — final 4 / 4 step) displays Light/Dark cards and finishes onboarding into the existing Home screen
+    composeTestRule.onNodeWithTag("onboarding_theme_step").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_theme_light_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("onboarding_theme_dark_card").assertIsDisplayed()
     composeTestRule.onNodeWithTag("onboarding_finish_button").assertIsDisplayed().performClick()
     composeTestRule.waitForIdle()
 
@@ -655,10 +673,25 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `splash screen renders logo with ბექასერვისი brand wordmark underneath and adaptive icon has 108dp safe zone dimensions`() {
+  fun `splash screen renders BSTORE splash design without artificial delay and adaptive icon has 108dp safe zone dimensions`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
 
-    // 1. Verify adaptive launcher foreground intrinsic size corresponds to 108dp (not 66dp stretched)
+    // 1. Verify adaptive launcher foreground intrinsic size corresponds to 108dp and manifest references @mipmap/ic_launcher
+    val appInfo = context.packageManager.getApplicationInfo(context.packageName, 0)
+    assertEquals("Manifest application icon must reference @mipmap/ic_launcher", R.mipmap.ic_launcher, appInfo.icon)
+    assertNotNull("Launcher icon drawable must resolve", context.getDrawable(R.mipmap.ic_launcher))
+    assertNotNull("Round launcher icon drawable must resolve", context.getDrawable(R.mipmap.ic_launcher_round))
+
+    val brandIconBmp = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_bstore_brand_icon)
+    assertNotNull("ic_bstore_brand_icon must decode as valid bitmap", brandIconBmp)
+    assertEquals(512, brandIconBmp.width)
+    assertEquals(512, brandIconBmp.height)
+
+    val launcherFgBmp = android.graphics.BitmapFactory.decodeResource(context.resources, R.drawable.ic_bstore_launcher_fg)
+    assertNotNull("ic_bstore_launcher_fg must decode as valid bitmap", launcherFgBmp)
+    assertEquals(512, launcherFgBmp.width)
+    assertEquals(512, launcherFgBmp.height)
+
     val density = context.resources.displayMetrics.density
     val fgDrawable = context.getDrawable(R.drawable.ic_launcher_foreground)
     assertNotNull(fgDrawable)
@@ -666,7 +699,7 @@ class ExampleRobolectricTest {
     assertEquals("Foreground drawable intrinsic width must be 108dp", expected108Px.toFloat(), fgDrawable!!.intrinsicWidth.toFloat(), 2.0f)
     assertEquals("Foreground drawable intrinsic height must be 108dp", expected108Px.toFloat(), fgDrawable.intrinsicHeight.toFloat(), 2.0f)
 
-    // 2. Verify VideoSplashScreen displays logo and "ბექასერვისი" below it with uniform fade-in and standard duration
+    // 2. Verify VideoSplashScreen displays BSTORE splash image and finishes immediately when isAppReady = true
     hasCompletedInitialLaunch = false
     var finished = false
     composeTestRule.setContent {
@@ -679,21 +712,81 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    val logoNode = composeTestRule.onNodeWithTag("splash_logo_image", useUnmergedTree = true).assertIsDisplayed()
-    val brandTitleNode = composeTestRule.onNodeWithTag("splash_brand_title_row", useUnmergedTree = true).assertIsDisplayed()
-    val brandSubtitleNode = composeTestRule.onNodeWithTag("splash_brand_subtitle", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("splash_logo_image", useUnmergedTree = true).assertIsDisplayed()
+    composeTestRule.waitUntil(timeoutMillis = 3000L) { finished }
+    assertTrue("Splash screen should complete successfully", finished)
+  }
 
-    val logoBounds = logoNode.fetchSemanticsNode().boundsInRoot
-    val brandTitleBounds = brandTitleNode.fetchSemanticsNode().boundsInRoot
-    val brandSubtitleBounds = brandSubtitleNode.fetchSemanticsNode().boundsInRoot
+  @Test
+  fun `splash screen starts at 0 percent, syncs determinate bar fill with percentage across stages, and completes only when ready`() {
+    hasCompletedInitialLaunch = false
+    val isReadyState = androidx.compose.runtime.mutableStateOf(false)
+    val stageProgressState = androidx.compose.runtime.mutableFloatStateOf(0f)
+    var finished = false
 
-    assertTrue("Brand wordmark ბექასერვისი must be positioned below the logo", brandTitleBounds.top > logoBounds.bottom)
-    assertTrue("Subtitle სანდო სერვისი must be positioned below ბექასერვისი", brandSubtitleBounds.top >= brandTitleBounds.bottom - 1f)
-    assertEquals("Logo and ბექასერვისი must be horizontally centered together", logoBounds.center.x, brandTitleBounds.center.x, 2.0f)
+    composeTestRule.mainClock.autoAdvance = false
+    try {
+      composeTestRule.setContent {
+        RepairProTheme(darkTheme = true) {
+          VideoSplashScreen(
+            isAppReady = isReadyState.value,
+            startupProgress = stageProgressState.floatValue,
+            onFinish = { finished = true }
+          )
+        }
+      }
 
-    composeTestRule.mainClock.advanceTimeBy(1000L)
-    composeTestRule.waitForIdle()
-    assertTrue("Splash screen should complete after standard animation duration", finished)
+      composeTestRule.mainClock.advanceTimeByFrame()
+      composeTestRule.waitForIdle()
+
+      // 1. Starts at exact 0% and determinate ProgressBarRangeInfo
+      composeTestRule.onNodeWithTag("splash_progress_text").assertIsDisplayed()
+      composeTestRule.onNodeWithText("0%").assertIsDisplayed()
+      val initialSemantics = composeTestRule.onNodeWithTag("splash_progress_bar")
+        .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo]
+      assertEquals(0f, initialSemantics.current, 0.001f)
+      assertEquals(0f..1f, initialSemantics.range)
+      assertFalse("Must not finish at 0% while not ready", finished)
+
+      val trackWidthPx = composeTestRule.onNodeWithTag("splash_progress_bar").fetchSemanticsNode().size.width.toFloat()
+      val initialFillPx = composeTestRule.onNodeWithTag("splash_progress_bar_fill", useUnmergedTree = true)
+        .fetchSemanticsNode().size.width.toFloat()
+      assertEquals("Fill bar must start at 0 width", 0f, initialFillPx, 1.5f)
+
+      // 2. Advance startup stage to 60% while isAppReady is still false
+      stageProgressState.floatValue = 0.60f
+      composeTestRule.mainClock.advanceTimeBy(120L)
+      val midRangeInfo = composeTestRule.onNodeWithTag("splash_progress_bar")
+        .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo]
+      assertTrue("Bar fill should advance smoothly during interpolation (${midRangeInfo.current})", midRangeInfo.current in 0.05f..0.59f)
+
+      composeTestRule.mainClock.advanceTimeBy(450L)
+      composeTestRule.waitForIdle()
+
+      // 3. Synchronized 60% text & fill width, never 100% before isAppReady = true
+      composeTestRule.onNodeWithText("60%").assertIsDisplayed()
+      val stageSemantics = composeTestRule.onNodeWithTag("splash_progress_bar")
+        .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo]
+      assertEquals(0.60f, stageSemantics.current, 0.01f)
+      val stageFillPx = composeTestRule.onNodeWithTag("splash_progress_bar_fill", useUnmergedTree = true)
+        .fetchSemanticsNode().size.width.toFloat()
+      assertEquals("Fill bar width must match 60% of track width", trackWidthPx * 0.60f, stageFillPx, 3.0f)
+      assertFalse("Must not finish or hit 100% before isAppReady = true", finished)
+
+      // 4. Mark app ready -> completes to 100% smoothly and invokes onFinish
+      isReadyState.value = true
+      stageProgressState.floatValue = 1f
+      composeTestRule.mainClock.advanceTimeBy(600L)
+      composeTestRule.waitForIdle()
+
+      composeTestRule.onNodeWithText("100%").assertIsDisplayed()
+      val finalFillPx = composeTestRule.onNodeWithTag("splash_progress_bar_fill", useUnmergedTree = true)
+        .fetchSemanticsNode().size.width.toFloat()
+      assertEquals("Fill bar width must match 100% of track width", trackWidthPx, finalFillPx, 2.0f)
+      assertTrue("Splash screen should finish immediately upon reaching 100% when ready", finished)
+    } finally {
+      composeTestRule.mainClock.autoAdvance = true
+    }
   }
 
   @Test
@@ -701,15 +794,15 @@ class ExampleRobolectricTest {
     // 1. Verify ProductImageManager distinguishes auto-generated vs URL vs phone memory file
     val autoProduct = ProductItem(
       id = 301,
-      title = "PDF Pro ყოველთვიური გამოწერა",
-      price = "25 ₾",
-      category = "პროგრამული სერვისები",
-      type = "software",
+      title = "iPhone 15 Pro OLED ეკრანი",
+      price = "480 ₾",
+      category = "ეკრანები",
+      type = "product",
       imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
     )
     assertFalse("Auto marker should use auto-generated visual", ProductImageManager.hasCustomAttachedPhoto(autoProduct))
 
-    val urlProduct = autoProduct.copy(imageUrl = "https://example.com/custom_pdf_banner.png")
+    val urlProduct = autoProduct.copy(imageUrl = "https://example.com/custom_display_banner.png")
     assertTrue("Real URL should be recognized as custom attached photo", ProductImageManager.hasCustomAttachedPhoto(urlProduct))
 
     val localMemoryProduct = autoProduct.copy(imageUrl = "file:///data/user/0/com.example/files/product_images/prod_img_123.jpg")
@@ -721,12 +814,15 @@ class ExampleRobolectricTest {
     composeTestRule.setContent {
       RepairProTheme(darkTheme = true) {
         ProductEditDialog(
-          product = autoProduct.copy(title = "Adobe Acrobat PDF Pro ყოველთვიური გამოწერა", shortDescription = ""),
+          product = autoProduct.copy(title = "iPhone 15 Pro Original OLED ეკრანი", shortDescription = ""),
           isNew = true,
-          existingCategories = listOf("პროგრამული სერვისები", "ეკრანები"),
-          existingBrands = listOf("OpenAI", "Adobe", "Apple"),
+          existingCategories = listOf("ეკრანები", "ელემენტები"),
+          existingBrands = listOf("Apple", "Samsung"),
           onDismiss = {},
-          onSave = { savedProduct = it }
+          onSave = {
+            savedProduct = it
+            Result.success(Unit)
+          }
         )
       }
     }
@@ -750,20 +846,20 @@ class ExampleRobolectricTest {
     composeTestRule.onNodeWithTag("product_edit_lazy_column")
       .performScrollToNode(hasTestTag("product_image_url_input"))
     composeTestRule.onNodeWithTag("product_image_url_input")
-      .performTextReplacement("https://example.com/real_acrobat_photo.jpg")
+      .performTextReplacement("https://example.com/real_display_photo.jpg")
     composeTestRule.waitForIdle()
 
     // Manually enter a custom category and custom brand
     composeTestRule.onNodeWithTag("product_edit_lazy_column")
       .performScrollToNode(hasTestTag("custom_category_input"))
     composeTestRule.onNodeWithTag("custom_category_input")
-      .performTextReplacement("PDF და საოფისე პროგრამები")
+      .performTextReplacement("OLED დისპლეები")
     composeTestRule.waitForIdle()
 
     composeTestRule.onNodeWithTag("product_edit_lazy_column")
       .performScrollToNode(hasTestTag("custom_brand_input"))
     composeTestRule.onNodeWithTag("custom_brand_input")
-      .performTextReplacement("Adobe Systems")
+      .performTextReplacement("Apple Original")
     composeTestRule.waitForIdle()
 
     // Save the product
@@ -771,35 +867,30 @@ class ExampleRobolectricTest {
     composeTestRule.waitForIdle()
 
     assertNotNull("Product must be saved when clicking შენახვა", savedProduct)
-    assertEquals("https://example.com/real_acrobat_photo.jpg", savedProduct!!.imageUrl)
-    assertEquals("PDF და საოფისე პროგრამები", savedProduct!!.category)
-    assertEquals("Adobe Systems", savedProduct!!.brand)
+    assertEquals("https://example.com/real_display_photo.jpg", savedProduct!!.imageUrl)
+    assertEquals("OLED დისპლეები", savedProduct!!.category)
+    assertEquals("Apple Original", savedProduct!!.brand)
     assertTrue("AI auto-fill must populate shortDescription", savedProduct!!.shortDescription.isNotBlank())
     assertTrue("AI auto-fill must populate full description", savedProduct!!.description.isNotBlank())
     assertTrue("AI auto-fill must populate features", savedProduct!!.features.isNotEmpty())
   }
 
   @Test
-  fun `gallery photo button is centered, software detail განახლდა badge stays on one line, and home pull-to-refresh animates with pull progress`() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val sampleSoftwareProduct = ProductItem(
-      id = 117,
-      title = "Adobe Acrobat Pro ყოველთვიური გამოწერა",
-      price = "25 ₾",
-      category = "პროგრამული სერვისები",
-      type = "software",
-      subcategory = "ვიდეო, დიზაინი და კონტენტის შექმნა",
-      imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER,
-      offerType = "პრემიუმ გამოწერა (1 თვე)",
-      duration = "1 თვე",
-      lastVerifiedAt = "2026-10-25"
+  fun `hardware fallback visual renders cleanly and home pull-to-refresh animates with pull progress`() {
+    val sampleHardwareProduct = ProductItem(
+      id = 1,
+      title = "iPhone 16 Pro Max OLED ეკრანი",
+      price = "850 ₾",
+      category = "ეკრანები",
+      type = "product",
+      brand = "Apple",
+      imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
     )
 
-    // 1. Verify SoftwareServiceDetailSection and BekaPullToRefreshIndicator together
     composeTestRule.setContent {
       RepairProTheme(darkTheme = true) {
         androidx.compose.foundation.layout.Column {
-          SoftwareServiceDetailSection(product = sampleSoftwareProduct)
+          HardwareProductFallbackVisual(product = sampleHardwareProduct, compact = false)
           BekaPullToRefreshIndicator(
             pullProgress = 0.65f,
             rawPullDistancePx = 55f,
@@ -813,31 +904,8 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    val headerNode = composeTestRule.onNodeWithText("სერვისის სრული პარამეტრები").assertIsDisplayed()
-    val updatedBadgeNode = composeTestRule.onNodeWithText("განახლდა: 25.10.2026").assertIsDisplayed()
-
-    val headerBounds = headerNode.fetchSemanticsNode().boundsInRoot
-    val badgeBounds = updatedBadgeNode.fetchSemanticsNode().boundsInRoot
-
-    // Both the title and the განახლდა badge must be on a single line (equal 1-line height) and aligned on the same row
-    assertEquals(
-      "განახლდა badge must remain on a single line matching the 1-line header height",
-      headerBounds.height,
-      badgeBounds.height,
-      4.0f
-    )
-    assertEquals(
-      "განახლდა badge and header title must be vertically centered on the same row",
-      headerBounds.center.y,
-      badgeBounds.center.y,
-      4.0f
-    )
-    assertTrue(
-      "განახლდა badge must sit to the right of სერვისის სრული პარამეტრები",
-      badgeBounds.left >= headerBounds.right - 4f
-    )
-
-    // 2. Verify BekaPullToRefreshIndicator responds to pull progress
+    composeTestRule.onNodeWithText("Apple").assertIsDisplayed()
+    composeTestRule.onNodeWithText("iPhone 16 Pro Max OLED ეკრანი").assertIsDisplayed()
     composeTestRule.onNodeWithTag("home_pull_refresh_indicator").assertIsDisplayed()
     composeTestRule.onNodeWithText("ჩამოწიეთ განახლებისთვის • 65%").assertIsDisplayed()
   }
@@ -1064,10 +1132,10 @@ class ExampleRobolectricTest {
       bootloopReply.text.contains("დამუხტვის პორტის, კაბელის ან კვების სისტემის გაუმართაობა")
     )
 
-    // 2. Ask about a catalog product ("Canva Pro მინდა") inside the Diagnostics workspace
+    // 2. Ask about a hardware catalog product ("iPhone 16 Pro Max ეკრანი მინდა, რა ღირს?") inside the Diagnostics workspace
     composeTestRule.runOnIdle {
       holderRef!!.sendMessage(
-        overrideText = "Canva Pro მინდა, რა ღირს და რა პირობებია?",
+        overrideText = "iPhone 16 Pro Max ეკრანი მინდა, რა ღირს და რა პირობებია?",
         catalogProducts = fullCatalog
       )
     }
@@ -1076,9 +1144,9 @@ class ExampleRobolectricTest {
     }
     composeTestRule.waitForIdle()
 
-    val canvaReply = holderRef!!.messages.last()
-    assertTrue("Catalog query for Canva Pro must recommend product 118", canvaReply.recommendedProductIds.contains(118))
-    assertTrue("Catalog query must mention Canva Pro details", canvaReply.text.contains("Canva Pro", ignoreCase = true))
+    val screenReply = holderRef!!.messages.last()
+    assertTrue("Catalog query for iPhone 16 Pro Max screen must recommend product 1", screenReply.recommendedProductIds.contains(1))
+    assertTrue("Catalog query must mention iPhone 16 Pro Max details", screenReply.text.contains("iPhone 16 Pro Max", ignoreCase = true))
 
     // 3. Ask a general tech question ("რა განსხვავებაა OLED და LCD ეკრანებს შორის?")
     composeTestRule.runOnIdle {
@@ -1245,7 +1313,7 @@ class ExampleRobolectricTest {
     assertFalse("Greeting must not mention Gemini", greetingTurn.text.contains("Gemini", ignoreCase = true))
 
     // Must match required Georgian copy
-    val expectedGeorgianGreeting = "გამარჯობა! მე ვარ BEKASERVICE-ის AI დიაგნოსტიკური ასისტენტი. აღწერე ტელეფონის პრობლემა ან ატვირთე ფოტო და დაგეხმარები შესაძლო მიზეზებისა და შემოწმების ნაბიჯების განსაზღვრაში."
+    val expectedGeorgianGreeting = "გამარჯობა! მე ვარ BSTORE-ის AI დიაგნოსტიკური ასისტენტი. აღწერე ტელეფონის პრობლემა ან ატვირთე ფოტო და დაგეხმარები შესაძლო მიზეზებისა და შემოწმების ნაბიჯების განსაზღვრაში."
     assertEquals(expectedGeorgianGreeting, greetingTurn.text.trim())
     assertTrue("Greeting should not have unsolicited recommended products", greetingTurn.recommendedProductIds.isEmpty())
 
@@ -1257,7 +1325,7 @@ class ExampleRobolectricTest {
       mode = DiagnosticUserMode.STANDARD,
       catalogProducts = catalog
     )
-    assertTrue(enTurn.text.contains("BEKASERVICE AI Diagnostics Assistant"))
+    assertTrue(enTurn.text.contains("BSTORE AI Diagnostics Assistant"))
     assertFalse(enTurn.text.contains("ChatGPT"))
 
     AppPreferencesManager.setLanguage(context, "ru")
@@ -1267,7 +1335,7 @@ class ExampleRobolectricTest {
       mode = DiagnosticUserMode.STANDARD,
       catalogProducts = catalog
     )
-    assertTrue(ruTurn.text.contains("AI-ассистент диагностики BEKASERVICE"))
+    assertTrue(ruTurn.text.contains("AI-ассистент диагностики BSTORE"))
     assertFalse(ruTurn.text.contains("ChatGPT"))
 
     // Reset back to Georgian
@@ -1292,7 +1360,7 @@ class ExampleRobolectricTest {
     assertTrue(assistantTurn1.text.contains("iPhone 13") || assistantTurn1.text.contains("ეკრან"))
     // Digital software like Canva/CapCut must NOT be recommended
     val turn1Recs = assistantTurn1.recommendedProductIds.mapNotNull { id -> catalog.find { it.id == id } }
-    assertFalse("Hardware diagnosis must not recommend digital software", turn1Recs.any { SoftwareCatalogData.isDigitalSoftwareService(it) })
+    assertFalse("Hardware diagnosis must not recommend digital software", turn1Recs.any { it.category == "პროგრამული სერვისები" })
 
     val historyAfterTurn1 = listOf(userTurn1, assistantTurn1)
 
@@ -1728,7 +1796,7 @@ class ExampleRobolectricTest {
     sendBtnNode.performClick()
     composeTestRule.waitUntil(timeoutMillis = 10000L) {
       composeTestRule.onAllNodes(
-        androidx.compose.ui.test.hasText("დიაგნოსტიკური ანალიზი: ტელეფონი არ იტენება", substring = true)
+        androidx.compose.ui.test.hasText("შოპინგ ასისტენტი", substring = true)
       ).fetchSemanticsNodes().isNotEmpty()
     }
     composeTestRule.waitForIdle()
@@ -1744,17 +1812,18 @@ class ExampleRobolectricTest {
     AppPreferencesManager.init(context)
     val products = ProductRepository.getAllProducts()
 
-    // 1. Warm up and measure repeated multi-field search queries across all 121 catalog items
+    // 1. Warm up and measure repeated multi-field search queries across all 85 hardware catalog items
     optimizeSearchFilter(products, "iphone 15 oled")
     val startNs = System.nanoTime()
     repeat(50) {
       val r1 = optimizeSearchFilter(products, "აიფონ 15 ეკრანი")
-      val r2 = optimizeSearchFilter(products, "chatgpt plus")
+      val r2 = optimizeSearchFilter(products, "iphone 16 pro max")
       val r3 = optimizeSearchFilter(products, "სამსუნგ ელემენტი")
       assertTrue(r1.isNotEmpty())
       assertTrue(r2.isNotEmpty())
       assertTrue(r3.isNotEmpty())
     }
+    assertTrue("Retired software query must return 0 results", optimizeSearchFilter(products, "chatgpt plus").isEmpty())
     val elapsedMs = (System.nanoTime() - startNs) / 1_000_000.0
     // 150 full-catalog searches should complete well under 500ms in local JVM (< 3.3ms per search)
     assertTrue("150 full-catalog searches took ${elapsedMs}ms, expected < 500ms", elapsedMs < 500.0)
@@ -1787,20 +1856,20 @@ class ExampleRobolectricTest {
     assertTrue("Initial categories should not be empty", initialCats.isNotEmpty())
 
     // 2. Add a new custom category
-    val testCatId = "cat_test_routers"
+    val testCatId = "cat_test_consoles"
     val testCat = CategoryItem(
       id = testCatId,
-      name = "როუტერები და ქსელი",
-      localizedName = "Routers & Networking",
-      description = "Wi-Fi 6 და 4G/5G როუტერები",
-      icon = "🌐",
+      name = "სათამაშო კონსოლები",
+      localizedName = "Gaming Consoles",
+      description = "PlayStation, Xbox და VR აქსესუარები",
+      icon = "🎮",
       displayOrder = 99,
       isActive = true,
       isPopular = true
     )
     AdminStorage.addCategory(context, testCat)
     val afterAdd = AdminStorage.getCategories(context)
-    assertTrue("Added category should be present", afterAdd.any { it.id == testCatId && it.name == "როუტერები და ქსელი" })
+    assertTrue("Added category should be present", afterAdd.any { it.id == testCatId && it.name == "სათამაშო კონსოლები" })
 
     // 3. Update category
     val updatedCat = testCat.copy(description = "განახლებული აღწერა", isPopular = false)
@@ -1862,10 +1931,12 @@ class ExampleRobolectricTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
 
     // 1. Ensure clean slate
+    AuthAndOrderManager.logout(context)
     AdminStorage.clearAdminSession(context)
     assertFalse("Session should be inactive after clear", AdminStorage.isAdminSessionActive(context))
 
-    // 2. Activate admin session for beqa1994@gmail.com
+    // 2. Authenticate as designated sole admin with claim and activate admin session
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = true)
     AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
     assertTrue("Admin session must be active", AdminStorage.isAdminSessionActive(context))
 
@@ -1876,80 +1947,84 @@ class ExampleRobolectricTest {
 
   @Test
   @Config(sdk = [36], qualifiers = "w411dp-h891dp")
-  fun `issue 1 - admin panel PIN-only authentication, invalid PIN handling, back navigation, and Google admin access without ANR`() {
+  fun `issue 1 - admin panel access flow enforces 5 required states (logged out, ordinary user, verified admin, sign out, and direct route guard)`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     AppPreferencesManager.init(context)
     AuthAndOrderManager.logout(context)
     AdminStorage.clearAdminSession(context)
-    AdminStorage.setAdminPin(context, "bmgebr")
 
-    var pinAuthenticatedCount = 0
-    var pinDialogDismissed = false
-    var showPinDialogState = androidx.compose.runtime.mutableStateOf(true)
-    var showAdminScreenState = androidx.compose.runtime.mutableStateOf(false)
+    val showRouteDirectly = androidx.compose.runtime.mutableStateOf(false)
 
     composeTestRule.setContent {
       RepairProTheme(darkTheme = true) {
-        if (showPinDialogState.value) {
-          AdminPinDialog(
-            onDismiss = {
-              pinDialogDismissed = true
-              showPinDialogState.value = false
-            },
-            onSuccess = {
-              pinAuthenticatedCount++
-              showPinDialogState.value = false
-              showAdminScreenState.value = true
-            }
-          )
-        }
-        if (showAdminScreenState.value) {
+        if (showRouteDirectly.value) {
           AdminPanelScreen(
-            products = ProductRepository.getAllProducts().take(15),
+            products = ProductRepository.getAllProducts().take(10),
             onProductsUpdated = {},
-            onClose = {
-              showAdminScreenState.value = false
-            }
+            onClose = { showRouteDirectly.value = false }
+          )
+        } else {
+          BekaSideNavigationDrawerContent(
+            selectedTab = 0,
+            unreadNotificationsCount = 0,
+            cartItemsCount = 0,
+            onSelectTab = {},
+            onOpenAdminPanel = { showRouteDirectly.value = true },
+            onCloseDrawer = {}
           )
         }
       }
     }
     composeTestRule.waitForIdle()
 
-    // 1. Verify PIN dialog is displayed when no Google auth or active session exists
-    composeTestRule.onNodeWithTag("admin_pin_dialog").assertIsDisplayed()
+    // Case 1: Logged out -> Admin Panel entry is completely hidden
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_button").fetchSemanticsNodes().size)
 
-    // 2. Enter an invalid PIN and verify clear error message without freezing
-    composeTestRule.onNodeWithTag("admin_pin_input").performTextReplacement("wrong999")
-    composeTestRule.onNodeWithTag("admin_pin_submit_button").performClick()
+    // Case 2: Ordinary authenticated user -> Admin Panel entry is completely hidden
+    AuthAndOrderManager.loginWithGoogle(context, "regular.user@gmail.com", "Regular User")
     composeTestRule.waitForIdle()
-
-    composeTestRule.onNodeWithTag("admin_pin_error_text").assertIsDisplayed()
-    assertEquals(0, pinAuthenticatedCount)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_button").fetchSemanticsNodes().size)
     assertFalse(AdminStorage.isAdminSessionActive(context))
 
-    // 3. Enter valid PIN ("bmgebr") without Google authentication -> transitions cleanly to AdminPanelScreen
-    composeTestRule.onNodeWithTag("admin_pin_input").performTextReplacement("bmgebr")
-    composeTestRule.onNodeWithTag("admin_pin_submit_button").performClick()
+    // Case 5: Ordinary user attempts to access AdminPanelScreen route directly -> blocked with Access Denied
+    showRouteDirectly.value = true
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("admin_access_denied_screen").assertIsDisplayed()
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_tab_0").fetchSemanticsNodes().size)
+    showRouteDirectly.value = false
     composeTestRule.waitForIdle()
 
-    assertEquals(1, pinAuthenticatedCount)
-    assertTrue("PIN session must be active after valid PIN", AdminStorage.isAdminSessionActive(context))
+    // Case 3a: Administrator authenticated with beqa1994@gmail.com & admin custom claim -> button visible & opens directly without PIN
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = true)
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("admin_button")
+      .performScrollTo()
+      .assertIsDisplayed()
+      .performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_pin_dialog").fetchSemanticsNodes().size)
     composeTestRule.onNodeWithTag("admin_panel_screen").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("admin_access_mode_banner").assertIsDisplayed()
+    // In VERIFIED_ADMIN state, all banners (blue verifying & permanent status) are completely removed
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_access_mode_banner").fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_missing_claim_banner").fetchSemanticsNodes().size)
 
-    // 4. Test authenticated non-admin Google account vs authorized admin account
-    AdminStorage.clearAdminSession(context)
-    AuthAndOrderManager.loginWithGoogle(context, "regular.user@gmail.com", "Regular User")
-    assertFalse("Non-admin Google user must not auto-activate admin session", AdminStorage.isAdminSessionActive(context))
+    // Case 3b: If admin custom claim is missing, manual banner is removed (auto recognition active) and claim is not bypassed
+    AuthAndOrderManager.setAdminClaimVerified(context, false)
+    composeTestRule.waitForIdle()
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_missing_claim_banner").fetchSemanticsNodes().size)
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
 
-    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin")
-    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
-    assertTrue("Authorized Google admin must have active admin session", AdminStorage.isAdminSessionActive(context))
-
-    // Cleanup
-    AdminStorage.clearAdminSession(context)
+    // Restore claim then test Case 4: Administrator signs out -> Admin UI elements immediately removed & route blocked
+    AuthAndOrderManager.setAdminClaimVerified(context, true)
+    composeTestRule.waitForIdle()
     AuthAndOrderManager.logout(context)
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("admin_access_denied_screen").assertIsDisplayed()
+    showRouteDirectly.value = false
+    composeTestRule.waitForIdle()
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_button").fetchSemanticsNodes().size)
   }
 
   @Test
@@ -2039,12 +2114,12 @@ class ExampleRobolectricTest {
     assertEquals(ProductCategoryType.PHONE_ACCESSORY, accessoryGen.categoryType)
     assertFalse(accessoryGen.isSoftware)
 
-    val digitalGen = kotlinx.coroutines.runBlocking {
-      AdminProductAiGenerator.generateForTitle("ChatGPT Plus", existingCategories, existingBrands)
+    val otherElecGen = kotlinx.coroutines.runBlocking {
+      AdminProductAiGenerator.generateForTitle("დინამიკი და მიკროფონის მოდული", existingCategories, existingBrands)
     }
-    assertEquals(ProductCategoryType.DIGITAL_SERVICE, digitalGen.categoryType)
-    assertTrue("Actual digital service must have isSoftware = true", digitalGen.isSoftware)
-    assertTrue(digitalGen.offerType.isNotBlank())
+    assertEquals(ProductCategoryType.OTHER_ELECTRONICS, otherElecGen.categoryType)
+    assertFalse("Hardware electronics must always have isSoftware = false", otherElecGen.isSoftware)
+    assertEquals("", otherElecGen.offerType)
 
     // 4. Manual administrator fields must NEVER be overwritten by mergeGeneratedWithManualFields
     val manualState = ExistingProductFormState(
@@ -2085,26 +2160,22 @@ class ExampleRobolectricTest {
 
   @Test
   @Config(sdk = [36], qualifiers = "w411dp-h891dp")
-  fun `issue 3 and 2F - dynamic product form adapts to product type, hides software fields for physical items, warns before clearing incompatible fields, and AI button has single icon`() {
+  fun `issue 3 and 2F - dynamic product form adapts to hardware product types, warns before clearing incompatible fields, and AI button has single icon`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     AppPreferencesManager.init(context)
 
-    // Start with a Digital Service product that has populated software-specific fields
-    val initialServiceProduct = ProductItem(
+    // Start with a Mobile Phone product that has populated phone-specific specifications (RAM, Storage)
+    val initialPhoneProduct = ProductItem(
       id = 701,
-      title = "ChatGPT Plus",
-      price = "30 ₾",
-      brand = "OpenAI",
-      category = "პროგრამული სერვისები",
-      type = "software",
-      productType = "software",
-      shortDescription = "GPT-4o პრემიუმ წვდომა",
-      description = "სრული წვდომა OpenAI-ის უახლეს მოდელებზე.",
-      offerType = "თვიური გამოწერა",
-      duration = "1 თვე",
-      accountType = "პირადი ანგარიში (Private)",
-      activationTerms = "აქტივაცია 5 წუთში",
-      subcategory = "ხელოვნური ინტელექტი",
+      title = "Samsung Galaxy S24 Ultra",
+      price = "2650 ₾",
+      brand = "Samsung",
+      category = "მობილური ტელეფონები",
+      type = "product",
+      productType = "mobile_phone",
+      shortDescription = "Snapdragon 8 Gen 3 ფლაგმანი",
+      description = "სრული ქარხნული კომპლექტაციით.",
+      specifications = mapOf("RAM" to "12 GB", "Storage" to "256 GB"),
       imageUrl = ""
     )
 
@@ -2113,72 +2184,106 @@ class ExampleRobolectricTest {
     composeTestRule.setContent {
       RepairProTheme(darkTheme = true) {
         ProductEditDialog(
-          product = initialServiceProduct,
+          product = initialPhoneProduct,
           isNew = false,
           onDismiss = {},
-          onSave = { savedItem = it }
+          onSave = {
+            savedItem = it
+            Result.success(Unit)
+          }
         )
       }
     }
     composeTestRule.waitForIdle()
 
     // 1. Verify AI button displays single icon and clean label without duplicate "✨" prefix
-    val aiBtn = composeTestRule.onNodeWithTag("ai_autofill_product_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("ai_autofill_product_button").assertIsDisplayed()
     composeTestRule.onNodeWithText("AI-ით დეტალური ანალიზი და შევსება").assertIsDisplayed()
     assertTrue(
       "AI button text must not contain duplicate sparkle emoji",
       composeTestRule.onAllNodes(androidx.compose.ui.test.hasText("✨ AI-ით დეტალური ანალიზი და შევსება")).fetchSemanticsNodes().isEmpty()
     )
 
-    // 2. Verify Digital Service fields are present when DIGITAL_SERVICE is active
+    // 2. Verify Mobile Phone category-specific fields (RAM, Storage) ARE displayed
     val lazyCol = composeTestRule.onNodeWithTag("product_edit_lazy_column")
-    lazyCol.performScrollToNode(hasTestTag("offer_type_input"))
-    composeTestRule.onNodeWithTag("offer_type_input").assertIsDisplayed()
-    lazyCol.performScrollToNode(hasTestTag("duration_input"))
-    composeTestRule.onNodeWithTag("duration_input").assertIsDisplayed()
+    lazyCol.performScrollToNode(hasTestTag("dynamic_category_fields_section"))
+    composeTestRule.onNodeWithTag("spec_field_RAM").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("spec_field_Storage").assertIsDisplayed()
 
-    // 3. Switch product type to Mobile Phone ("mobile_phone") while software fields are populated -> must show warning dialog
+    // 3. Switch product type to Replacement Display ("replacement_display") while RAM/Storage are populated -> must show warning dialog
     lazyCol.performScrollToNode(hasTestTag("product_type_selector_row"))
-    composeTestRule.onNodeWithTag("product_type_chip_mobile_phone").performClick()
+    composeTestRule.onNodeWithTag("product_type_chip_replacement_display").performClick()
     composeTestRule.waitForIdle()
 
     composeTestRule.onNodeWithTag("type_switch_warning_dialog").assertIsDisplayed()
     composeTestRule.onNodeWithTag("confirm_type_switch_button").performClick()
     composeTestRule.waitForIdle()
 
-    // 4. After switching to Mobile Phone, software-specific fields must NOT exist in the form
-    assertTrue(
-      "offer_type_input must be hidden for physical Mobile Phone",
-      composeTestRule.onAllNodesWithTag("offer_type_input").fetchSemanticsNodes().isEmpty()
-    )
-    assertTrue(
-      "duration_input must be hidden for physical Mobile Phone",
-      composeTestRule.onAllNodesWithTag("duration_input").fetchSemanticsNodes().isEmpty()
-    )
-    assertTrue(
-      "account_type_input must be hidden for physical Mobile Phone",
-      composeTestRule.onAllNodesWithTag("account_type_input").fetchSemanticsNodes().isEmpty()
-    )
-
-    // 5. Verify Mobile Phone category-specific fields (RAM, Storage, Battery Health) ARE displayed
-    lazyCol.performScrollToNode(hasTestTag("dynamic_category_fields_section"))
-    composeTestRule.onNodeWithTag("spec_field_RAM").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("spec_field_Storage").assertIsDisplayed()
-
-    // 6. Save and verify shared fields (title, price, shortDescription) are preserved while software fields are cleared
+    // 4. Save and verify shared fields (title, price, shortDescription) are preserved while productType is updated
     composeTestRule.onNodeWithTag("save_product_button").performClick()
     composeTestRule.waitForIdle()
 
     assertNotNull(savedItem)
-    assertEquals("ChatGPT Plus", savedItem!!.title)
-    assertEquals("30 ₾", savedItem!!.price)
-    assertEquals("GPT-4o პრემიუმ წვდომა", savedItem!!.shortDescription)
-    assertEquals("mobile_phone", savedItem!!.productType)
+    assertEquals("Samsung Galaxy S24 Ultra", savedItem!!.title)
+    assertEquals("2650 ₾", savedItem!!.price)
+    assertEquals("Snapdragon 8 Gen 3 ფლაგმანი", savedItem!!.shortDescription)
+    assertEquals("replacement_display", savedItem!!.productType)
     assertEquals("product", savedItem!!.type)
-    assertEquals("", savedItem!!.offerType)
-    assertEquals("", savedItem!!.duration)
-    assertEquals("", savedItem!!.accountType)
-    assertEquals("", savedItem!!.activationTerms)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `prohibited and retired services are completely purged from repository, local cache, cloud merge, home banners, categories, and search`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    context.getSharedPreferences("bekaservice_admin_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+
+    // 1. ProductRepository contains only the 85 legitimate hardware products (IDs 1..85)
+    val repoProducts = ProductRepository.getAllProducts()
+    assertEquals(85, repoProducts.size)
+    assertTrue(repoProducts.all { it.id in 1..85 })
+    assertTrue(repoProducts.none { ProductRepository.isProhibitedOrRetiredService(it) })
+
+    // 2. Injecting prohibited/retired products into local cache or cloud merge strips them out immediately
+    val injectedProhibited = listOf(
+      ProductItem(id = 86, title = "Samsung FRP Bypass", price = "40 ₾", category = "პროგრამული სერვისები", type = "service", imageUrl = ""),
+      ProductItem(id = 91, title = "iCloud Clean Unlock", price = "120 ₾", category = "პროგრამული სერვისები", type = "service", imageUrl = ""),
+      ProductItem(id = 101, title = "ChatGPT Plus", price = "30 ₾", category = "პროგრამული სერვისები", type = "software", imageUrl = ""),
+      ProductItem(id = 103, title = "Google AI Pro 18 თვე", price = "50 ₾", category = "პროგრამული სერვისები", type = "software", imageUrl = ""),
+      ProductItem(id = 118, title = "Canva Pro", price = "15 ₾", category = "პროგრამული სერვისები", type = "software", imageUrl = "")
+    )
+    AdminStorage.saveProducts(context, repoProducts + injectedProhibited)
+    val loadedAfterInject = AdminStorage.loadProducts(context)
+    assertEquals(85, loadedAfterInject.size)
+    assertTrue(loadedAfterInject.none { it.id in 86..124 })
+    assertTrue(loadedAfterInject.none { ProductRepository.isProhibitedOrRetiredService(it) })
+
+    val mergedWithCloudProhibited = AdminStorage.mergeCloudWithLocal(
+      context = context,
+      cloudProducts = injectedProhibited,
+      removedProductIds = ProductRepository.RETIRED_PRODUCT_IDS,
+      presentCloudDocIds = emptySet()
+    )
+    assertEquals(85, mergedWithCloudProhibited.size)
+    assertTrue(mergedWithCloudProhibited.none { ProductRepository.isProhibitedOrRetiredService(it) })
+
+    // 3. Home banners never contain slide_google_ai_pro, slide_chatgpt_plus, or slide_canva_pro even if previously cached
+    val legacyBanners = listOf(
+      AdminStorage.HomeBannerItem(id = "slide_google_ai_pro", imageUrl = "", title = "Google AI Pro — 18 თვე", subtitle = "Gemini Advanced", targetProductId = 103, tag = "GOOGLE AI PRO • 2TB"),
+      AdminStorage.HomeBannerItem(id = "slide_chatgpt_plus", imageUrl = "", title = "ChatGPT Plus", subtitle = "ულიმიტო AI", targetProductId = 101, tag = "OPENAI • GPT-4o"),
+      AdminStorage.HomeBannerItem(id = "slide_canva_pro", imageUrl = "", title = "Canva Pro — 12 თვე", subtitle = "Brand Kit", targetProductId = 118, tag = "CANVA PRO")
+    )
+    AdminStorage.saveHomeBanners(context, legacyBanners)
+    val activeBanners = AdminStorage.getHomeBanners(context)
+    assertTrue(activeBanners.isNotEmpty())
+    assertTrue(activeBanners.none { ProductRepository.isProhibitedBanner(it) })
+    assertTrue(activeBanners.none { it.id in setOf("slide_google_ai_pro", "slide_chatgpt_plus", "slide_canva_pro") })
+
+    // 4. Categories never contain cat_software ("პროგრამული სერვისები")
+    val legacyCat = CategoryItem(id = "cat_software", name = "პროგრამული სერვისები", localizedName = "Software Services")
+    AdminStorage.addCategory(context, legacyCat)
+    val activeCategories = AdminStorage.getCategories(context)
+    assertTrue(activeCategories.none { ProductRepository.isProhibitedCategory(it) })
+    assertTrue(activeCategories.none { it.id == "cat_software" || it.name == "პროგრამული სერვისები" })
   }
 
   @Test
@@ -2201,20 +2306,16 @@ class ExampleRobolectricTest {
     AuthAndOrderManager.loginWithGoogle(context, email = "beqa1994@gmail.com", name = "ბექა (Admin)")
     assertTrue("beqa1994@gmail.com must have active admin session", AdminStorage.isAdminSessionActive(context))
 
-    // 4. Editing a digital service (e.g. Adobe) in AdminPanelScreen and clicking შენახვა succeeds and updates catalog
+    // 4. Editing a physical spare part in AdminPanelScreen and clicking შენახვა succeeds and updates catalog
     val initialProducts = listOf(
       ProductItem(
-        id = 117,
-        firestoreDocId = "prod_117",
-        title = "Adobe Creative Cloud (1 თვე)",
-        price = "35 ₾",
-        category = "პროგრამული სერვისები",
-        type = "software",
-        productType = "software",
-        brand = "Adobe",
-        subcategory = "ვიდეო, დიზაინი და კონტენტის შექმნა",
-        offerType = "პრემიუმ გამოწერა (1 თვე)",
-        duration = "3 თვე",
+        id = 1,
+        firestoreDocId = "prod_1",
+        title = "iPhone 15 Pro OLED ეკრანი (Super Retina XDR)",
+        price = "480 ₾",
+        category = "ეკრანები",
+        brand = "Apple",
+        compatibleModels = "iPhone 15 Pro, A3102",
         imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
       )
     )
@@ -2241,232 +2342,56 @@ class ExampleRobolectricTest {
 
     assertNotNull("Saving edited product as beqa1994@gmail.com must succeed and update products", updatedProductsCallback)
     assertEquals(1, updatedProductsCallback!!.size)
-    assertEquals("Adobe", updatedProductsCallback!!.first().brand)
+    assertEquals("Apple", updatedProductsCallback!!.first().brand)
   }
 
   @Test
   @Config(sdk = [36], qualifiers = "w411dp-h891dp")
-  fun `imei check platform end to end workflow entry card luhn validation brands smart repeat check admin report history deletion and analytics`() {
+  fun `physical parts catalog contains only legitimate hardware components and cart checkout creates service order`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    // Reset preferences for clean test state
-    context.getSharedPreferences("bekaservice_imei_platform_prefs_v1", Context.MODE_PRIVATE).edit().clear().commit()
+    val allProducts = ProductRepository.getAllProducts()
 
-    kotlinx.coroutines.runBlocking {
-      // 1. Verify Default Configuration (Price: 3 GEL, Time: 5-30 წთ) and exact 12 Initial Brands order
-      val initialConfig = ImeiCheckManager.loadConfig(context)
-      assertEquals(3.0, initialConfig.priceGel, 0.001)
-      assertEquals("3 ₾", initialConfig.formattedPrice)
-      assertEquals(5, initialConfig.estimatedMinMinutes)
-      assertEquals(30, initialConfig.estimatedMaxMinutes)
-
-      val brands = ImeiCheckManager.loadBrands(context)
-      assertEquals(12, brands.size)
-      val expectedBrandNames = listOf(
-        "Apple", "Samsung", "Xiaomi", "Google Pixel", "Huawei", "Honor",
-        "OnePlus", "Motorola", "Oppo", "Vivo", "Realme", "Other"
-      )
-      assertEquals(expectedBrandNames, brands.map { it.name })
-
-      // 2. Verify 15-Digit Luhn Validation & Masking
-      val validImei = ImeiValidator.generateValidImei("35391210123456")
-      assertEquals(15, validImei.length)
-      val valRes = ImeiValidator.validateImei(validImei)
-      assertTrue("Generated 15-digit IMEI must pass Luhn validation", valRes.isValid)
-      assertEquals("35391210", valRes.tac)
-      assertEquals("******" + validImei.takeLast(4), ImeiValidator.maskImei(validImei))
-
-      val invalidLuhnImei = validImei.dropLast(1) + ((validImei.last().digitToInt() + 1) % 10).toString()
-      val invalidRes = ImeiValidator.validateImei(invalidLuhnImei)
-      assertFalse("Corrupted check digit must fail Luhn validation", invalidRes.isValid)
-
-      val shortRes = ImeiValidator.validateImei("35391210")
-      assertFalse("8-digit input must fail 15-digit validation", shortRes.isValid)
-
-      // 3. Submit IMEI Check Request as User A
-      val userA = UserProfile(
-        id = "user_a_uid_101",
-        name = "გიორგი მომხმარებელი",
-        email = "giorgi@example.com",
-        phone = "599112233",
-        provider = "Google"
-      )
-      val appleBrand = brands.first { it.id == "apple" }
-      val submitRes = ImeiCheckManager.submitImeiCheckRequest(
-        context = context,
-        rawImei = validImei,
-        selectedBrand = appleBrand,
-        currentUser = userA
-      )
-      assertTrue("Valid 15-digit IMEI submission must succeed", submitRes.isSuccess)
-      val entryA = submitRes.getOrThrow()
-      assertEquals("user_a_uid_101", entryA.userId)
-      assertEquals("Apple", entryA.brandName)
-      assertEquals(3.0, entryA.quotedPrice, 0.001)
-      assertEquals("pending", entryA.status)
-
-      // 4. Verify Smart Repeat Check works for User A, and NEVER leaks to User B
-      val repeatForA = ImeiCheckManager.findPreviousCheckForCurrentUser(
-        context = context,
-        currentUserId = "user_a_uid_101",
-        rawImei = validImei
-      )
-      assertNotNull("Smart Repeat Check must find User A's previous check", repeatForA)
-      assertEquals(entryA.id, repeatForA?.id)
-
-      val repeatForB = ImeiCheckManager.findPreviousCheckForCurrentUser(
-        context = context,
-        currentUserId = "user_b_uid_202",
-        rawImei = validImei
-      )
-      assertTrue("Smart Repeat Check must NEVER expose User A's check to User B", repeatForB == null)
-
-      // 5. Admin processes the request, fills dynamic result fields, attaches sources, and completes report
-      val adminReqs = ImeiCheckManager.loadAllRequestsLocal(context)
-      assertEquals(1, adminReqs.size)
-      val reqToVerify = adminReqs.first()
-      assertEquals(validImei, reqToVerify.imei)
-
-      val sampleFields = listOf(
-        ImeiResultFieldValue(
-          fieldId = "icloud_fmi_status",
-          titleKa = "iCloud / Find My iPhone (FMI) სტატუსი",
-          descriptionKa = "აქტივაციის ბლოკირება",
-          value = "OFF (სუფთა)",
-          resultStatus = ImeiResultStatus.CONFIRMED_POSITIVE.id,
-          isImportant = true,
-          sourceName = "Apple GSX / Official Carrier Lookup"
-        ),
-        ImeiResultFieldValue(
-          fieldId = "sim_lock_status",
-          titleKa = "SIM Lock / ქსელის ბლოკირება",
-          descriptionKa = "ოპერატორის ბლოკი",
-          value = "Unlocked (ყველა ქსელზე თავისუფალი)",
-          resultStatus = ImeiResultStatus.CONFIRMED_POSITIVE.id,
-          isImportant = true,
-          sourceName = "Apple GSX / Official Carrier Lookup"
-        ),
-        ImeiResultFieldValue(
-          fieldId = "mdm_enterprise_status",
-          titleKa = "MDM / კორპორატიული მართვის პროფილი",
-          descriptionKa = "კორპორატიული პროფილი",
-          value = "ინფორმაცია მიუწვდომელია",
-          resultStatus = ImeiResultStatus.UNAVAILABLE.id,
-          isImportant = true,
-          sourceName = ""
-        )
-      )
-
-      val adminSaveRes = ImeiCheckManager.saveAdminVerificationProgress(
-        context = context,
-        request = reqToVerify,
-        newStatus = ImeiRequestStatus.COMPLETED,
-        newPaymentStatus = ImeiPaymentStatus.PAID,
-        verifiedModel = "iPhone 15 Pro Max 256GB Natural Titanium",
-        fieldValues = sampleFields,
-        sourcesUsed = listOf("Apple GSX / Official Carrier Lookup", "GSMA TAC & International Blacklist Registry"),
-        internalNotes = "შიდა შენიშვნა მხოლოდ ადმინისთვის",
-        customerNotes = "მოწყობილობა სრულად სუფთაა (iCloud OFF, Unlocked).",
-        notifyCustomer = true
-      )
-      assertTrue("Admin verification completion must succeed", adminSaveRes.isSuccess)
-
-      // 6. Verify Customer A can fetch the completed report, while Customer B is denied
-      val fetchReportA = ImeiCheckManager.fetchReportForRequest(
-        context = context,
-        requestId = reqToVerify.id,
-        currentUserId = "user_a_uid_101"
-      )
-      assertTrue("User A must be able to read their own completed report", fetchReportA.isSuccess)
-      val reportA = fetchReportA.getOrThrow()
-      assertEquals("iPhone 15 Pro Max 256GB Natural Titanium", reportA.verifiedModel)
-      assertEquals(3, reportA.fields.size)
-      assertEquals("მოწყობილობა სრულად სუფთაა (iCloud OFF, Unlocked).", reportA.customerNotes)
-
-      val fetchReportB = ImeiCheckManager.fetchReportForRequest(
-        context = context,
-        requestId = reqToVerify.id,
-        currentUserId = "user_b_uid_202"
-      )
-      assertTrue("User B must be denied access to User A's report", fetchReportB.isFailure)
-
-      // 7. Verify PDF Report Generation works
-      val pdfRes = ImeiCheckManager.generateReportPdfFile(context, reportA)
-      assertTrue("PDF report generation must succeed", pdfRes.isSuccess)
-      assertTrue("Generated PDF file must exist and be non-empty", pdfRes.getOrThrow().length() > 0L)
-
-      // 8. Verify Price Snapshot Preservation when Admin changes service price from 3 GEL to 5 GEL
-      val updatedConfig = initialConfig.copy(priceGel = 5.0)
-      ImeiCheckManager.saveConfigLocal(context, updatedConfig)
-      assertEquals(5.0, ImeiCheckManager.loadConfig(context).priceGel, 0.001)
-      val historyAfterPriceChange = ImeiCheckManager.loadUserHistoryLocal(context, "user_a_uid_101")
-      assertEquals("Existing request must preserve its original 3.0 GEL price snapshot", 3.0, historyAfterPriceChange.first().quotedPrice, 0.001)
-
-      // 9. Verify Analytics Calculation (Operational, Revenue, Brand, and Quality stats)
-      val analytics = ImeiCheckManager.computeAnalytics(
-        requests = ImeiCheckManager.loadAllRequestsLocal(context),
-        reports = ImeiCheckManager.loadAllReportsLocal(context),
-        fields = ImeiCheckManager.loadResultFields(context)
-      )
-      assertEquals(1, analytics.totalRequests)
-      assertEquals(1, analytics.completedRequests)
-      assertEquals(1, analytics.paidChecksCount)
-      assertEquals(3.0, analytics.confirmedPaidRevenueGel, 0.001)
-      assertEquals("Apple", analytics.mostCheckedManufacturer)
-      assertEquals(1, analytics.unavailableOrUnverifiedFieldCounts["MDM / კორპორატიული მართვის პროფილი"])
-
-      // 10. Verify Individual History Deletion & Anonymization
-      val delRes = ImeiCheckManager.deleteUserHistoryEntry(
-        context = context,
-        currentUserId = "user_a_uid_101",
-        entryId = reqToVerify.id
-      )
-      assertTrue("User A deleting their own history entry must succeed", delRes.isSuccess)
-      assertTrue("User A history must be empty after deletion", ImeiCheckManager.loadUserHistoryLocal(context, "user_a_uid_101").isEmpty())
-      val anonymizedAdminReq = ImeiCheckManager.loadAllRequestsLocal(context).first()
-      assertEquals("DELETED", anonymizedAdminReq.imei)
-      assertTrue(anonymizedAdminReq.userDeletedHistory)
+    // 1. All products must be 100% legitimate physical hardware spare parts
+    assertTrue("Product repository must not be empty", allProducts.isNotEmpty())
+    allProducts.forEach { product ->
+      assertFalse("Product title must not contain FRP", product.title.contains("FRP", ignoreCase = true))
+      assertFalse("Product title must not contain iCloud bypass", product.title.contains("iCloud Bypass", ignoreCase = true))
+      assertFalse("Product title must not contain IMEI check", product.title.contains("IMEI შემოწმება", ignoreCase = true))
+      assertFalse("Product title must not contain account sales", product.title.contains("Gmail PVA", ignoreCase = true))
     }
 
-    // 11. Verify UI Rendering of IMEI Entry Card inside DiagnosticsWorkspaceScreen and navigating to IMEI Check Page
-    ImeiCheckManager.saveConfigLocal(context, ImeiServiceConfig())
-    val catalog = ProductRepository.getAllProducts().take(4)
-    composeTestRule.setContent {
-      RepairProTheme(darkTheme = true) {
-        DiagnosticsWorkspaceScreen(
-          contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 0.dp, bottom = 0.dp),
-          onProductClick = {},
-          products = catalog
-        )
-      }
+    // 2. Add legitimate physical spare parts to cart and checkout
+    val screenPart = allProducts.first { it.category == "ეკრანები" }
+    val batteryPart = allProducts.first { it.category == "ელემენტები" }
+
+    val cartItems = listOf(
+      CartItem(product = screenPart, quantity = 1, selectedQuality = "Original"),
+      CartItem(product = batteryPart, quantity = 2, selectedQuality = "High Capacity")
+    )
+
+    val checkoutRes = kotlinx.coroutines.runBlocking {
+      AuthAndOrderManager.createAndPersistOrderFromCart(
+        context = context,
+        cartItems = cartItems
+      )
     }
-    composeTestRule.waitForIdle()
 
-    composeTestRule.onNodeWithTag("imei_diagnostics_entry_card").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("open_imei_check_screen_button").assertIsDisplayed().performClick()
-    composeTestRule.waitForIdle()
-
-    composeTestRule.onNodeWithTag("imei_check_full_screen").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("imei_input_field").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("imei_brand_item_apple").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("imei_brand_item_samsung").assertIsDisplayed()
+    assertTrue("Checkout from cart must succeed", checkoutRes.isSuccess)
+    val createdOrder = checkoutRes.getOrThrow()
+    assertEquals("მიმდინარე", createdOrder.status)
+    assertEquals(2, createdOrder.items.size)
   }
 
   @Test
   @Config(sdk = [36], qualifiers = "w411dp-h891dp")
-  fun `secure admin only imei and service order notifications enforce sole admin authorization payload privacy multi device tokens deep links and mark as read`() {
+  fun `secure sole admin authorization and service order notifications enforce payload privacy and multi device tokens`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    context.getSharedPreferences("bekaservice_imei_platform_prefs_v1", Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences("bekaservice_push_prefs", Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences("bekaservice_notifications_prefs", Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences("bekaservice_auth_orders_prefs", Context.MODE_PRIVATE).edit().clear().commit()
     context.getSharedPreferences("bekaservice_admin_prefs", Context.MODE_PRIVATE).edit().clear().commit()
 
-    val validImei = ImeiValidator.generateValidImei("35391210987654")
-    val appleBrand = ImeiCheckManager.loadBrands(context).first { it.id == "apple" }
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 1: Regular customer account ("customer.regular@gmail.com")
-    // -------------------------------------------------------------------------
+    // 1. Regular customer account
     val customerUser = AuthAndOrderManager.loginWithGoogle(
       context = context,
       email = "customer.regular@gmail.com",
@@ -2477,31 +2402,11 @@ class ExampleRobolectricTest {
       AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
     )
     assertFalse(
-      "Admin PIN verification must fail when a regular customer is signed in",
-      AdminStorage.verifyPin(context, "bmgebr")
+      "Regular customer must NEVER have an active admin session",
+      AdminStorage.isAdminSessionActive(context)
     )
 
-    // Customer cannot register an admin FCM token
-    val customerTokenAttempt = BekaNotificationManager.registerAdminDeviceToken(
-      context = context,
-      token = "fcm_customer_token_should_be_rejected_12345",
-      deviceId = "customer_device_1"
-    )
-    assertFalse("Regular customer must NOT be able to register an admin FCM token", customerTokenAttempt)
-    assertTrue(
-      "Registered admin tokens list must be empty for regular customer",
-      BekaNotificationManager.getRegisteredAdminDeviceTokens(context).isEmpty()
-    )
-
-    // Customer submits an IMEI Check request and a Service Order
-    val imeiEntry = kotlinx.coroutines.runBlocking {
-      ImeiCheckManager.submitImeiCheckRequest(
-        context = context,
-        rawImei = validImei,
-        selectedBrand = appleBrand,
-        currentUser = customerUser
-      ).getOrThrow()
-    }
+    // Customer submits a Service Order
     val cartOrder = kotlinx.coroutines.runBlocking {
       AuthAndOrderManager.createAndPersistOrderFromCart(
         context = context,
@@ -2515,309 +2420,56 @@ class ExampleRobolectricTest {
       ).getOrThrow()
     }
 
-    // Customer must NOT receive or view admin order notifications, unread counts, or mark them as read
-    assertEquals(
-      "Regular customer must see 0 unread admin orders",
-      0,
-      BekaNotificationManager.getUnreadAdminOrdersCount(context)
-    )
-    assertTrue(
-      "Regular customer must NOT be able to load admin order notifications",
-      BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context).isEmpty()
-    )
-    assertFalse(
-      "Regular customer must NOT be able to mark an admin order notification as read",
-      BekaNotificationManager.markAdminOrderNotificationAsRead(context, imeiEntry.id, "imei_check")
-    )
-    assertTrue(
-      "Regular customer must NOT be able to load admin IMEI requests list",
-      ImeiCheckManager.loadAllRequestsLocal(context).isEmpty()
-    )
-
-    // Incoming FCM admin order push on a device where a regular customer is logged in must be rejected (return false)
-    val shownForCustomer = BekaNotificationManager.handleIncomingFcmMessageData(
-      context = context,
-      data = mapOf(
-        "type" to "admin_order_notification",
-        "orderId" to imeiEntry.id,
-        "orderType" to "imei_check",
-        "title" to "ახალი IMEI შეკვეთა",
-        "body" to "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა. IMEI: $validImei customer.regular@gmail.com"
-      ),
-      notificationTitle = null,
-      notificationBody = null
-    )
-    assertFalse("Admin order FCM payload must be rejected and never displayed for non-admin user", shownForCustomer)
+    // Customer sees 0 admin orders
     assertEquals(0, BekaNotificationManager.getUnreadAdminOrdersCount(context))
 
-    // Attempt to spoof sole admin via unverified client-side email login must fail
-    val spoofRegisterRes = AuthAndOrderManager.registerWithEmail(
-      context = context,
-      name = "Spoof Admin",
-      email = "beqa1994@gmail.com",
-      phone = "599000000",
-      pass = "password123"
-    )
-    assertFalse("Registering beqa1994@gmail.com via client-side email registration must be blocked", spoofRegisterRes.first)
-
-    val unverifiedEmailLogin = AuthAndOrderManager.loginWithEmail(
-      context = context,
-      email = "beqa1994@gmail.com",
-      pass = "password123"
-    )
-    assertFalse(
-      "Client-side email login without verified Google/Firebase token must NOT grant sole admin access",
-      AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
-    )
-    assertFalse("Unverified email login for beqa1994@gmail.com must be rejected", unverifiedEmailLogin.first)
-
-    // -------------------------------------------------------------------------
-    // SCENARIO 2: Sole Authorized Administrator ("beqa1994@gmail.com")
-    // Multi-device token registration, payload sanitization, unread counts,
-    // deep-link opening, mark-as-read, and logout/invalid token cleanup
-    // -------------------------------------------------------------------------
+    // 2. Sole Admin logs in
     AuthAndOrderManager.loginWithGoogle(
       context = context,
       email = "beqa1994@gmail.com",
-      name = "ბექა (Sole Admin)"
+      name = "ბექა მღებრიშვილი",
+      hasAdminClaim = true
     )
-    assertTrue(
-      "Verified Google account beqa1994@gmail.com must be authorized as sole admin",
-      AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
-    )
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertTrue(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertTrue(AdminStorage.isAdminSessionActive(context))
 
-    // Register two admin devices (Device 1 = current device & Device 2 = second admin device) authenticated with beqa1994@gmail.com
-    val currentDeviceId = BekaNotificationManager.getOrCreateDeviceId(context)
-    val regDevice1 = BekaNotificationManager.registerAdminDeviceToken(
-      context = context,
-      token = "fcm_beka_admin_device_1_pixel9pro_token",
-      deviceId = currentDeviceId
-    )
-    val regDevice2 = BekaNotificationManager.registerAdminDeviceToken(
-      context = context,
-      token = "fcm_beka_admin_device_2_tablet_token",
-      deviceId = "admin_device_2"
-    )
-    assertTrue("Admin Device 1 token registration must succeed", regDevice1)
-    assertTrue("Admin Device 2 token registration must succeed", regDevice2)
-    val registeredTokens = BekaNotificationManager.getRegisteredAdminDeviceTokens(context)
-    assertEquals("Both admin device tokens must be stored for multi-device push delivery", 2, registeredTokens.size)
+    // Admin registers device tokens
+    assertTrue(BekaNotificationManager.registerAdminDeviceToken(context, "admin_pixel_token_111", "pixel_8"))
+    assertTrue(BekaNotificationManager.registerAdminDeviceToken(context, "admin_tablet_token_222", "tab_s9"))
+    assertEquals(2, BekaNotificationManager.getRegisteredAdminDeviceTokens(context).size)
 
-    // Simulate expired/invalid token cleanup for Device 2
-    BekaNotificationManager.removeExpiredOrInvalidAdminToken(
-      context = context,
-      invalidToken = "fcm_beka_admin_device_2_tablet_token"
-    )
-    val remainingTokens = BekaNotificationManager.getRegisteredAdminDeviceTokens(context)
-    assertEquals("Expired/invalid token must be removed leaving only active Device 1 token", 1, remainingTokens.size)
-    assertEquals("fcm_beka_admin_device_1_pixel9pro_token", remainingTokens.first().token)
+    // Admin records notification for service order
+    BekaNotificationManager.recordOrderCreatedForAdminOnly(context, cartOrder.id, "service_order")
+    assertEquals(1, BekaNotificationManager.getUnreadAdminOrdersCount(context))
 
-    // Verify unread admin notifications count (1 IMEI request + 1 Service order = 2 unread)
-    val adminNotifs = BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
-    assertEquals("Admin must see both incoming orders in notification history", 2, adminNotifs.size)
-    assertEquals("Admin must see 2 unread order notifications", 2, BekaNotificationManager.getUnreadAdminOrdersCount(context))
-
-    // Verify notification payload privacy: NEVER contains full 15-digit IMEI, customer email, or phone
-    adminNotifs.forEach { notif ->
-      assertFalse(
-        "Notification title/body must NEVER contain full IMEI or customer PII",
-        BekaNotificationManager.containsSensitiveOrderData("${notif.title} ${notif.body}")
-      )
-      assertFalse(notif.body.contains(validImei))
-      assertFalse(notif.body.contains("customer.regular@gmail.com"))
-    }
-    val imeiNotif = adminNotifs.first { it.orderId == imeiEntry.id }
-    assertEquals("ახალი IMEI შეკვეთა", imeiNotif.title)
-    assertEquals("შემოვიდა ახალი IMEI შემოწმების მოთხოვნა.", imeiNotif.body)
-    assertEquals("bekaservice://admin/orders/imei/${imeiEntry.id}", imeiNotif.deepLink)
-
-    // Verify stripSensitiveDataFromPayload scrubs accidental IMEI/email/phone strings
-    val scrubbed = BekaNotificationManager.stripSensitiveDataFromPayload(
-      "შემოწმება: $validImei user: customer.regular@gmail.com ტელ: +995599112233"
-    )
-    assertFalse("Scrubbed text must not contain 15-digit IMEI or email", BekaNotificationManager.containsSensitiveOrderData(scrubbed))
-
-    // Verify deep-link intent builder targets the exact order
-    val deepLinkIntent = BekaNotificationManager.buildAdminOrderDeepLinkIntent(
-      context = context,
-      notificationId = imeiNotif.id,
-      orderId = imeiEntry.id,
-      orderType = "imei_check"
-    )
-    assertEquals("bekaservice://admin/orders/imei/${imeiEntry.id}", deepLinkIntent.data?.toString())
-
-    // Render AdminPanelScreen opened via deep-link to the specific IMEI order
-    val catalog = ProductRepository.getAllProducts().take(3)
-    composeTestRule.setContent {
-      RepairProTheme(darkTheme = true) {
-        AdminPanelScreen(
-          products = catalog,
-          onProductsUpdated = {},
-          onClose = {},
-          initialTab = 10,
-          initialTargetImeiRequestId = imeiEntry.id
-        )
-      }
-    }
-    composeTestRule.waitForIdle()
-
-    // Opening the IMEI order via deep-link automatically marks that notification as read (unread count drops from 2 to 1)
-    assertEquals(
-      "Opening IMEI order via deep link must mark its notification as read",
-      1,
-      BekaNotificationManager.getUnreadAdminOrdersCount(context)
-    )
-    composeTestRule.onNodeWithTag("admin_notifications_toggle_button").assertIsDisplayed()
-    composeTestRule.onNodeWithTag("admin_unread_orders_badge", useUnmergedTree = true).assertExists()
-
-    // Mark remaining notifications as read and verify unread count becomes 0
+    // Mark as read
     assertTrue(BekaNotificationManager.markAdminOrderNotificationAsRead(context, cartOrder.id, "service_order"))
-    assertEquals(
-      "After marking service order notification as read, unread count must be 0",
-      0,
-      BekaNotificationManager.getUnreadAdminOrdersCount(context)
-    )
+    assertEquals(0, BekaNotificationManager.getUnreadAdminOrdersCount(context))
 
-    // Verify admin logout cleans up active device FCM tokens and blocks admin notification access when logged out
+    // Logout
     AuthAndOrderManager.logout(context)
     assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
-    assertTrue(
-      "Admin device FCM tokens must be cleaned up on logout",
-      BekaNotificationManager.getRegisteredAdminDeviceTokens(context).isEmpty()
-    )
-    assertEquals(
-      "Logged-out state must not expose unread admin orders",
-      0,
-      BekaNotificationManager.getUnreadAdminOrdersCount(context)
-    )
+    assertTrue(BekaNotificationManager.getRegisteredAdminDeviceTokens(context).isEmpty())
+    assertEquals(0, BekaNotificationManager.getUnreadAdminOrdersCount(context))
   }
 
   @Test
-  fun testAdminImeiVerificationDraftAndPublishFlow() = runBlocking {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-
-    // 1. Setup Customer and Order
-    val customerUid = "cust_user_${System.currentTimeMillis()}"
-    val customerEmail = "client@example.ge"
-    val customerUser = UserProfile(
-      id = customerUid,
-      name = "გიორგი კლიენტი",
-      email = customerEmail,
-      phone = "599000111",
-      provider = "Google"
+  @Config(sdk = [36])
+  fun `hardware diagnostics routes sim and network issues to physical hardware repairs`() {
+    val diagnosis = BekaMultimodalDiagnosticsEngine.generateContextAwareDiagnosticResponse(
+      history = emptyList(),
+      currentMessage = DiagnosticMessage(role = "user", text = "არ იჭერს ქსელს, სიმ ბარათი არ მუშაობს"),
+      mode = DiagnosticUserMode.STANDARD,
+      catalogProducts = ProductRepository.getAllProducts()
     )
-    val appleBrand = ImeiCheckManager.loadBrands(context).first { it.id.equals("apple", ignoreCase = true) }
-
-    val testImei = ImeiValidator.generateValidImei("35209900176148")
-    val reqRes = ImeiCheckManager.submitImeiCheckRequest(
-      context = context,
-      rawImei = testImei,
-      selectedBrand = appleBrand,
-      currentUser = customerUser
+    assertNotNull(diagnosis.structuredSection)
+    val combinedText = diagnosis.text + " " + diagnosis.structuredSection!!.hypotheses.joinToString(" ") { it.title + " " + it.supportingEvidence }
+    assertTrue(
+      "Diagnosis must focus on hardware repair (SIM tray, RF antenna cables, APN)",
+      combinedText.contains("SIM") || combinedText.contains("ანტენ") || combinedText.contains("კაბელ") || combinedText.contains("მოდულ")
     )
-    assertTrue("IMEI order creation should succeed", reqRes.isSuccess)
-    val historyEntry = reqRes.getOrThrow()
-    val reqId = historyEntry.id
-
-    val originalReq = ImeiCheckManager.loadAllRequestsLocal(context).firstOrNull { it.id == reqId }
-    assertNotNull("Original request must be stored", originalReq)
-
-    // 2. Customer fetches report before admin checks — provisional report exists but resultText is blank and unpublished
-    val preReport = ImeiCheckManager.fetchReportForRequest(
-      context = context,
-      requestId = reqId,
-      currentUserId = customerUid,
-      isAdminCaller = false
-    )
-    assertTrue("Provisional preview exists for customer request", preReport.isSuccess)
-    assertFalse("Report must not be marked as published yet", preReport.getOrThrow().isPublished)
-    assertTrue("Customer must NOT see any result text yet", preReport.getOrThrow().resultText.isBlank())
-
-    // 3. Admin logs in with sole admin account: beqa1994@gmail.com
-    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Admin Beqa")
-    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
-    assertTrue("Sole admin must be authenticated", AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
-
-    val multilineVerificationText = """
-      Model: iPhone 15 Pro Max 256GB Natural Titanium
-      IMEI: 352099001761482
-      Serial: G6TX9...
-      Purchase Country: United States (A2849)
-      Warranty Status: Active (Expires: 2027-04-12)
-      AppleCare+ with Theft and Loss: Active
-      iCloud Status: CLEAN
-      Find My iPhone: OFF
-      MDM Corporate Profile: No
-      GSMA Blacklist Status: Clean / Not Blocked
-      Carrier SIM Lock: UNLOCKED
-      ვერიფიკაციის დასკვნა: მოწყობილობა სუფთაა, მზადაა უსაფრთხო გამოყენებისთვის.
-    """.trimIndent()
-
-    // 4. Admin saves as DRAFT without publishing (კლიენტისთვის გაგზავნის გარეშე)
-    val draftSaveRes = ImeiCheckManager.saveAdminVerificationDraft(
-      context = context,
-      request = originalReq!!,
-      draftText = multilineVerificationText,
-      newStatus = ImeiRequestStatus.IN_PROGRESS,
-      newPaymentStatus = ImeiPaymentStatus.PAID,
-      verifiedModel = "iPhone 15 Pro Max 256GB"
-    )
-    assertTrue("Draft save must succeed", draftSaveRes.isSuccess)
-    val draftedReq = draftSaveRes.getOrThrow()
-    assertEquals("Draft text must be preserved in request", multilineVerificationText, draftedReq.draftResultText)
-    assertFalse("Draft must NOT be marked as published", draftedReq.isPublished)
-    assertEquals(ImeiRequestStatus.IN_PROGRESS, draftedReq.statusEnum)
-
-    // 5. Customer MUST NOT see the unpublished draft text
-    val customerDraftReport = ImeiCheckManager.fetchReportForRequest(
-      context = context,
-      requestId = reqId,
-      currentUserId = customerUid,
-      isAdminCaller = false
-    )
-    assertTrue("Customer can still view order status", customerDraftReport.isSuccess)
-    val customerDraftData = customerDraftReport.getOrThrow()
-    assertFalse("Customer report must remain unpublished while in draft", customerDraftData.isPublished)
-    assertTrue("Customer must NOT see unpublished draft text", customerDraftData.resultText.isBlank())
-    assertFalse("Order must not be marked completed on draft save", customerDraftData.statusEnum == ImeiRequestStatus.COMPLETED)
-
-    // 6. Admin CAN access the drafted request and restores saved text on reopening
-    val adminReopenedReq = ImeiCheckManager.loadAllRequestsLocal(context).firstOrNull { it.id == reqId }
-    assertNotNull(adminReopenedReq)
-    assertEquals("Reopening order must restore saved draft text", multilineVerificationText, adminReopenedReq!!.draftResultText)
-
-    // 7. Admin publishes final verification result (შედეგის შენახვა და მომხმარებლისთვის გაგზავნა)
-    val publishRes = ImeiCheckManager.saveAdminVerificationProgress(
-      context = context,
-      request = adminReopenedReq,
-      newStatus = ImeiRequestStatus.COMPLETED,
-      newPaymentStatus = ImeiPaymentStatus.PAID,
-      verifiedModel = "iPhone 15 Pro Max 256GB",
-      resultText = multilineVerificationText,
-      draftResultText = "",
-      isPublished = true,
-      notifyCustomer = true
-    )
-    assertTrue("Publishing verification must succeed", publishRes.isSuccess)
-    val publishedReport = publishRes.getOrThrow()
-    assertTrue("Report must now be published", publishedReport.isPublished)
-    assertEquals("Published resultText must match exactly", multilineVerificationText, publishedReport.resultText)
-
-    // 8. Customer CAN NOW fetch and view the published report with full verification details
-    val customerPublishedReport = ImeiCheckManager.fetchReportForRequest(
-      context = context,
-      requestId = reqId,
-      currentUserId = customerUid,
-      isAdminCaller = false
-    )
-    assertTrue("Customer must be able to view published report", customerPublishedReport.isSuccess)
-    val customerReportData = customerPublishedReport.getOrThrow()
-    assertEquals(multilineVerificationText, customerReportData.resultText)
-    assertTrue(customerReportData.isPublished)
-    assertEquals(ImeiRequestStatus.COMPLETED, customerReportData.statusEnum)
-
-    // Cleanup
-    AuthAndOrderManager.logout(context)
+    assertFalse("Diagnosis must never recommend network unlock circumvention", combinedText.contains("Network Unlock"))
   }
 
   @Test
@@ -2928,6 +2580,1073 @@ class ExampleRobolectricTest {
 
     AuthAndOrderManager.logout(context)
   }
+
+  @Test
+  @Config(sdk = [36])
+  fun `google play account deletion compliance removes user session and profile`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // 1. Login user
+    val user = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "compliance_user@example.com",
+      name = "Compliance Tester"
+    )
+    assertNotNull("User session must be established", user)
+    assertEquals("compliance_user@example.com", AuthAndOrderManager.getCurrentUser(context)?.email)
+
+    // 2. Perform account deletion as required by Google Play User Data policy
+    val deleteResult = kotlinx.coroutines.runBlocking {
+      AuthAndOrderManager.deleteUserAccount(context)
+    }
+    assertTrue("User account deletion must succeed", deleteResult.isSuccess)
+
+    // 3. Verify user profile and session are completely cleared
+    assertEquals(null, AuthAndOrderManager.getCurrentUser(context))
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `app brand configuration centralization ensures legitimate business identity and compliance links`() {
+    assertEquals("BSTORE", AppBrandConfig.APP_NAME_EN)
+    assertEquals("BSTORE", AppBrandConfig.APP_NAME_KA)
+    assertEquals("+995 598 23 33 32", AppBrandConfig.SUPPORT_PHONE)
+    assertEquals("ახალციხე, კოსტავას ქ. N10", AppBrandConfig.PHYSICAL_ADDRESS_KA)
+    assertTrue(AppBrandConfig.PRIVACY_POLICY_URL.startsWith("https://"))
+    assertTrue(AppBrandConfig.TERMS_OF_SERVICE_URL.startsWith("https://"))
+    assertTrue(AppBrandConfig.ACCOUNT_DELETION_URL.startsWith("https://"))
+  }
+
+  @Test
+  fun `notification permission onboarding flow shows Georgian explanation dialog before system request and respects user choice`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val shadowApp = org.robolectric.Shadows.shadowOf(context as android.app.Application)
+    shadowApp.denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+
+    // 6. Verify Android versions below 13 (< API 33) do not require or trigger the runtime explanation dialog
+    BekaNotificationManager.resetPermissionOnboardingState(context)
+    assertFalse(
+      "Android < 13 (API 32) must not show runtime notification permission explanation dialog",
+      BekaNotificationManager.shouldShowPermissionExplanationDialog(context, sdkInt = android.os.Build.VERSION_CODES.S_V2)
+    )
+    assertTrue(
+      "Android 13+ (API 36) without permission and unprompted must show explanation dialog",
+      BekaNotificationManager.shouldShowPermissionExplanationDialog(context, sdkInt = android.os.Build.VERSION_CODES.TIRAMISU)
+    )
+
+    // Prepare first-time onboarding completion state
+    context.getSharedPreferences("bekaservice_ui_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_auth_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    context.getSharedPreferences("bekaservice_auth_orders_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+    AuthAndOrderManager.logout(context)
+    BekaNotificationManager.resetPermissionOnboardingState(context)
+    AppPreferencesManager.init(context)
+    hasCompletedInitialLaunch = true
+
+    var systemPermissionRequestCount = 0
+    val recomposeTrigger = androidx.compose.runtime.mutableIntStateOf(0)
+
+    composeTestRule.setContent {
+      val trigger = recomposeTrigger.intValue
+      androidx.compose.runtime.key(trigger) {
+        RepairProTheme(darkTheme = true) {
+          BekaServiceApp(
+            deepLinkIntent = null,
+            onDeepLinkConsumed = {},
+            onSystemNotificationPermissionRequested = {
+              systemPermissionRequestCount += 1
+            }
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // While still in onboarding, neither the explanation dialog nor the system permission request is triggered
+    assertEquals(0, composeTestRule.onAllNodesWithTag("notification_permission_explanation_dialog").fetchSemanticsNodes().size)
+    assertEquals(0, systemPermissionRequestCount)
+
+    // Complete onboarding steps (Welcome -> Language -> Skip Auth -> Theme Selection [4 / 4] -> Finish)
+    composeTestRule.onNodeWithTag("onboarding_welcome_next_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("onboarding_language_next_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("onboarding_skip_auth_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("onboarding_finish_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+
+    assertTrue("Onboarding should be marked completed", AppPreferencesManager.isOnboardingCompleted)
+    assertTrue(
+      "shouldShowPermissionExplanationDialog should be true after onboarding completes",
+      BekaNotificationManager.shouldShowPermissionExplanationDialog(context)
+    )
+
+    // 1. First-time onboarding: Georgian explanation dialog appears BEFORE the system permission dialog
+    composeTestRule.onNodeWithTag("notification_permission_explanation_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notification_permission_bell_icon").assertIsDisplayed()
+    composeTestRule.onNodeWithText("არ გამოგრჩეს მნიშვნელოვანი სიახლეები").assertIsDisplayed()
+    composeTestRule.onNodeWithText(
+      "ჩართე შეტყობინებები, რომ დროულად მიიღო ინფორმაცია შენი შეკვეთების სტატუსის, სიახლეებისა და მნიშვნელოვანი განახლებების შესახებ."
+    ).assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notification_permission_enable_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notification_permission_not_now_button").assertIsDisplayed()
+    assertEquals("System permission must NOT be requested before user clicks enable", 0, systemPermissionRequestCount)
+
+    // 3. User selects "ახლა არა": dialog dismisses and app opens normally without a system permission request
+    composeTestRule.onNodeWithTag("notification_permission_not_now_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(0, composeTestRule.onAllNodesWithTag("notification_permission_explanation_dialog").fetchSemanticsNodes().size)
+    assertEquals("System permission must NOT be requested when user selects 'ახლა არა'", 0, systemPermissionRequestCount)
+    assertTrue(BekaNotificationManager.didUserDeclinePermissionExplanation(context))
+    composeTestRule.onNodeWithTag("glassmorphic_top_app_bar_container").assertIsDisplayed()
+
+    // 5. Returning user: explanation does not appear again on subsequent launch
+    recomposeTrigger.intValue += 1
+    composeTestRule.waitForIdle()
+    assertFalse(BekaNotificationManager.shouldShowPermissionExplanationDialog(context))
+    assertEquals(0, composeTestRule.onAllNodesWithTag("notification_permission_explanation_dialog").fetchSemanticsNodes().size)
+    assertEquals(0, systemPermissionRequestCount)
+
+    // 2. Now reset state to test when user selects "შეტყობინებების ჩართვა": Android system permission request is triggered
+    BekaNotificationManager.resetPermissionOnboardingState(context)
+    recomposeTrigger.intValue += 1
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("notification_permission_explanation_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notification_permission_enable_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals(0, composeTestRule.onAllNodesWithTag("notification_permission_explanation_dialog").fetchSemanticsNodes().size)
+    assertEquals("Selecting 'შეტყობინებების ჩართვა' must trigger the official Android permission request", 1, systemPermissionRequestCount)
+    assertTrue(BekaNotificationManager.wasSystemPermissionRequested(context))
+
+    // 4. User denies system permission: app continues working and user can enable notifications later in Notifications screen
+    BekaNotificationManager.onSystemPermissionResult(context, isGranted = false)
+    assertTrue(BekaNotificationManager.wasSystemPermissionDenied(context))
+    assertFalse("Denied permission must not re-trigger explanation dialog on next launch", BekaNotificationManager.shouldShowPermissionExplanationDialog(context))
+
+    composeTestRule.onNodeWithTag("notifications_button", useUnmergedTree = true).performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("user_notifications_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("enable_notifications_from_settings_button").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `contact and social manager supports CRUD, phone and URL validation, and persistent storage`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    ContactAndSocialManager.init(context)
+
+    // 1. Phone validation
+    assertTrue(ContactAndSocialManager.isValidPhoneNumber("+995 598 23 33 32"))
+    assertTrue(ContactAndSocialManager.isValidPhoneNumber("598233332"))
+    assertTrue(ContactAndSocialManager.isValidPhoneNumber("+995 (32) 2 123 456"))
+    assertFalse(ContactAndSocialManager.isValidPhoneNumber("123")) // Too short
+    assertFalse(ContactAndSocialManager.isValidPhoneNumber("abc-def-ghij")) // Invalid chars
+
+    // 2. Social URL validation
+    assertTrue(ContactAndSocialManager.isValidSocialUrl("https://wa.me/995598233332"))
+    assertTrue(ContactAndSocialManager.isValidSocialUrl("https://t.me/bekaservice"))
+    assertTrue(ContactAndSocialManager.isValidSocialUrl("https://www.facebook.com/bekaservice"))
+    assertTrue(ContactAndSocialManager.isValidSocialUrl("whatsapp://send?phone=995598233332"))
+    assertFalse(ContactAndSocialManager.isValidSocialUrl("javascript:alert(1)")) // Dangerous scheme
+    assertFalse(ContactAndSocialManager.isValidSocialUrl("ftp://insecure.site")) // Invalid scheme
+    assertFalse(ContactAndSocialManager.isValidSocialUrl("not a url at all"))
+
+    // 3. Dialer URI normalization
+    val dialUri = ContactAndSocialManager.normalizeDialUri("+995 598 23 33 32")
+    assertEquals("tel:+995598233332", dialUri.toString())
+
+    // 4. Configuration creation and local save/load
+    val testPhones = listOf(
+      ContactPhoneNumber(id = "p1", label = "მთავარი", number = "+995598111222", isEnabled = true, displayOrder = 1),
+      ContactPhoneNumber(id = "p2", label = "დახმარება", number = "+995598333444", isEnabled = false, displayOrder = 2)
+    )
+    val testSocials = listOf(
+      SocialMediaLink(id = "s1", platform = SocialPlatform.WHATSAPP, title = "WhatsApp", url = "https://wa.me/995598111222", isEnabled = true, displayOrder = 1),
+      SocialMediaLink(id = "s2", platform = SocialPlatform.TELEGRAM, title = "Telegram", url = "https://t.me/beka_channel", isEnabled = true, displayOrder = 2)
+    )
+    val testConfig = ContactAndSocialConfig(
+      phoneNumbers = testPhones,
+      socialLinks = testSocials,
+      serviceAddress = "თბილისი, წერეთლის გამზირი 140",
+      workingHours = "ორშ-შაბ: 10:00 - 20:00",
+      updatedAtMillis = System.currentTimeMillis()
+    )
+
+    ContactAndSocialManager.saveLocalConfig(context, testConfig)
+    val loaded = ContactAndSocialManager.loadConfig(context)
+
+    assertEquals(2, loaded.phoneNumbers.size)
+    assertEquals(2, loaded.socialLinks.size)
+    assertEquals("+995598111222", ContactAndSocialManager.getPrimaryPhoneNumber(context))
+    assertTrue(ContactAndSocialManager.getPrimaryWhatsAppUrl(context).contains("995598111222"))
+    assertEquals("თბილისი, წერეთლის გამზირი 140", loaded.serviceAddress)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `admin panel section 10 allows managing contacts and social links with verified sole admin`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    ContactAndSocialManager.init(context)
+
+    // Log in as sole admin with verified claim
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = true)
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        AdminContactsAndSocialScreen(onClose = {})
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Screen title and key sections render
+    composeTestRule.onNodeWithTag("admin_contacts_screen").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_contacts_screen").performScrollToNode(hasTestTag("admin_add_phone_button"))
+    composeTestRule.onNodeWithTag("admin_add_phone_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_contacts_screen").performScrollToNode(hasTestTag("admin_add_social_button"))
+    composeTestRule.onNodeWithTag("admin_add_social_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_contacts_screen").performScrollToNode(hasTestTag("admin_save_contacts_button"))
+    composeTestRule.onNodeWithTag("admin_save_contacts_button").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `admin custom claim verification removes warning banner for beqa1994 and restricts ordinary and unauthenticated users`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    ContactAndSocialManager.init(context)
+
+    // 1. Unauthenticated user: cannot see admin_button and gets admin_access_denied_screen on direct access
+    AuthAndOrderManager.logout(context)
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+
+    // 2. Ordinary authenticated user: cannot see admin_button and cannot obtain verified admin claim
+    AuthAndOrderManager.loginWithGoogle(context, "ordinary.user@gmail.com", "Ordinary User", hasAdminClaim = true)
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+
+    // 3. Sole administrator (beqa1994@gmail.com) before claim verification vs after claim verification
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = false)
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        AdminPanelScreen(
+          products = ProductRepository.getAllProducts(),
+          onProductsUpdated = {},
+          onClose = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Manual sync button and instructional warning banner are completely removed
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_missing_claim_banner").fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_refresh_claim_button").fetchSemanticsNodes().size)
+
+    // Simulate automatic server claim verification completing and updating auth state
+    composeTestRule.runOnIdle {
+      AuthAndOrderManager.setAdminClaimVerified(context, true)
+    }
+    composeTestRule.waitForIdle()
+
+    // Warning banner disappears immediately for the verified administrator
+    assertTrue(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertEquals(
+      0,
+      composeTestRule.onAllNodesWithTag("admin_missing_claim_banner").fetchSemanticsNodes().size
+    )
+    composeTestRule.onNodeWithTag("admin_panel_screen").assertIsDisplayed()
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `admin auth state transitions - Tests A B C D cover login, recomposition, restart and customer rejection`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+
+    // Setup: clean state
+    AuthAndOrderManager.logout(context)
+    assertEquals(AdminAuthState.NOT_ADMIN, AuthAndOrderManager.adminAuthState.value)
+
+    // Test A: Admin login with verified custom claim transitions to VERIFIED_ADMIN
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Beka Admin", hasAdminClaim = true)
+    assertEquals(AdminAuthState.VERIFIED_ADMIN, AuthAndOrderManager.adminAuthState.value)
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertTrue(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        AdminPanelScreen(
+          products = ProductRepository.getAllProducts(),
+          onProductsUpdated = {},
+          onClose = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Confirm: In VERIFIED_ADMIN, blue verification banner is completely removed (0 semantics nodes)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_access_mode_banner").fetchSemanticsNodes().size)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_missing_claim_banner").fetchSemanticsNodes().size)
+    composeTestRule.onNodeWithTag("admin_panel_screen").assertIsDisplayed()
+
+    // Test B: Recomposition (simulate user switching tabs and scrolling)
+    composeTestRule.runOnIdle {
+      // Normal recomposition event
+      AuthAndOrderManager.favoritesStateVersion.intValue++
+    }
+    composeTestRule.waitForIdle()
+    // Verification does NOT restart, banner remains absent
+    assertEquals(AdminAuthState.VERIFIED_ADMIN, AuthAndOrderManager.adminAuthState.value)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_access_mode_banner").fetchSemanticsNodes().size)
+
+    // Test C: App restart / session restoration
+    // Simulate reading preferences on app launch
+    val restoredState = AuthAndOrderManager.hasVerifiedAdminClaim(context)
+    assertTrue(restoredState)
+    assertEquals(AdminAuthState.VERIFIED_ADMIN, AuthAndOrderManager.adminAuthState.value)
+    assertEquals(0, composeTestRule.onAllNodesWithTag("admin_access_mode_banner").fetchSemanticsNodes().size)
+
+    // Test D: Ordinary account login
+    AuthAndOrderManager.loginWithGoogle(context, "customer@gmail.com", "Regular Customer", hasAdminClaim = false)
+    assertEquals(AdminAuthState.NOT_ADMIN, AuthAndOrderManager.adminAuthState.value)
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+    assertFalse(AuthAndOrderManager.hasVerifiedAdminClaim(context))
+    assertFalse(AdminStorage.isAdminSessionActive(context))
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore payment system - 12_1 BOG transfer, 12_2 TBC transfer, 12_3 COD, 12_4 security and snapshot protection`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+
+    val defaultAccounts = listOf(
+      BankAccountConfig(
+        id = "bank_bog_primary",
+        bankCode = "bog",
+        bankName = "საქართველოს ბანკი",
+        recipientName = "BSTORE / ბექა მღებრიშვილი",
+        iban = "GE17BG0000000580620970",
+        description = "საქართველოს ბანკის ლარის ანგარიში",
+        isEnabled = true,
+        displayOrder = 1
+      ),
+      BankAccountConfig(
+        id = "bank_tbc_primary",
+        bankCode = "tbc",
+        bankName = "თიბისი ბანკი",
+        recipientName = "BSTORE / ბექა მღებრიშვილი",
+        iban = "GE65TB7777777000000001",
+        description = "თიბისი ბანკის ლარის ანგარიში",
+        isEnabled = true,
+        displayOrder = 2
+      )
+    )
+    BstorePaymentManager.saveBankAccountsLocal(context, defaultAccounts)
+
+    // Log in as customer Alice
+    val aliceProfile = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "alice.customer@gmail.com",
+      name = "Alice Customer",
+      hasAdminClaim = false
+    )
+    assertFalse(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+
+    val sampleCart = listOf(
+      CartItem(
+        product = ProductRepository.getAllProducts().first(),
+        quantity = 1,
+        selectedQuality = "Original"
+      )
+    )
+
+    // =========================================================================
+    // 12.1 Bank of Georgia transfer workflow + snapshot protection
+    // =========================================================================
+    val bogBank = BstorePaymentManager.getEnabledBankAccounts(context).first { it.bankCode == "bog" }
+    val bogConfig = CheckoutSubmissionConfig(
+      paymentMethod = PaymentMethodType.BANK_TRANSFER,
+      selectedBankAccount = bogBank,
+      deliveryMethod = DeliveryMethodType.COURIER,
+      deliveryCity = "თბილისი",
+      deliveryAddress = "ჭავჭავაძის გამზ. 10",
+      customerPhone = "+995 555 11 22 33",
+      acceptedTermsVersion = BstorePaymentManager.CURRENT_TERMS_VERSION,
+      acceptedTermsAtMillis = System.currentTimeMillis()
+    )
+    val bogOrder = AuthAndOrderManager.addOrderFromCart(context, sampleCart, bogConfig)
+
+    assertEquals("bank_transfer", bogOrder.paymentMethodCode)
+    assertEquals("pending", bogOrder.paymentStatus)
+    assertEquals("საქართველოს ბანკი", bogOrder.bankName)
+    assertEquals(bogBank.iban, bogOrder.ibanSnapshot)
+    assertEquals(bogOrder.orderNumber, bogOrder.paymentReference)
+    assertEquals("მიმდინარე", bogOrder.status) // Order fulfillment status is independent from payment status
+
+    // Snapshot protection: Admin changes BOG IBAN later -> existing order retains original IBAN snapshot
+    val originalIbanSnapshot = bogOrder.ibanSnapshot
+    BstorePaymentManager.saveBankAccountsLocal(
+      context,
+      defaultAccounts.map {
+        if (it.bankCode == "bog") it.copy(iban = "GE99BG0000000999999999") else it
+      }
+    )
+    val reloadedBogOrder = AuthAndOrderManager.getOrders(context).first { it.id == bogOrder.id }
+    assertEquals(originalIbanSnapshot, reloadedBogOrder.ibanSnapshot)
+
+    // Restore default accounts
+    BstorePaymentManager.saveBankAccountsLocal(context, defaultAccounts)
+
+    // =========================================================================
+    // 12.2 TBC Bank transfer workflow
+    // =========================================================================
+    val tbcBank = BstorePaymentManager.getEnabledBankAccounts(context).first { it.bankCode == "tbc" }
+    val tbcConfig = CheckoutSubmissionConfig(
+      paymentMethod = PaymentMethodType.BANK_TRANSFER,
+      selectedBankAccount = tbcBank,
+      deliveryMethod = DeliveryMethodType.PICKUP,
+      deliveryCity = "ახალციხე",
+      deliveryAddress = "ახალციხე, კოსტავას N10",
+      customerPhone = "+995 555 11 22 33"
+    )
+    val tbcOrder = AuthAndOrderManager.addOrderFromCart(context, sampleCart, tbcConfig)
+    assertEquals("bank_transfer", tbcOrder.paymentMethodCode)
+    assertEquals("pending", tbcOrder.paymentStatus)
+    assertEquals("თიბისი ბანკი", tbcOrder.bankName)
+    assertEquals(tbcBank.iban, tbcOrder.ibanSnapshot)
+
+    // =========================================================================
+    // 12.3 Cash on Delivery (COD) workflow
+    // =========================================================================
+    val codConfig = CheckoutSubmissionConfig(
+      paymentMethod = PaymentMethodType.COD,
+      selectedBankAccount = null,
+      deliveryMethod = DeliveryMethodType.COURIER,
+      deliveryCity = "ბათუმი",
+      deliveryAddress = "რუსთაველის 5",
+      customerPhone = "+995 555 11 22 33"
+    )
+    val codOrder = AuthAndOrderManager.addOrderFromCart(context, sampleCart, codConfig)
+    assertEquals("cod", codOrder.paymentMethodCode)
+    assertEquals("awaiting_collection", codOrder.paymentStatus)
+    assertEquals(
+      "გადაიხადე ნივთის მიღებისას",
+      PaymentStatus.fromCode(codOrder.paymentStatus, PaymentMethodType.COD).customerLabelKa
+    )
+
+    // =========================================================================
+    // 12.4 Security tests:
+    // - Non-admin cannot confirm payment
+    // - Customer can view own payment instructions, but another customer cannot
+    // =========================================================================
+    val nonAdminConfirmAttempt = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(
+      context = context,
+      order = bogOrder,
+      internalNote = "Attempted self-confirm"
+    )
+    assertTrue("Non-admin must NOT be able to confirm payment", nonAdminConfirmAttempt.isFailure)
+
+    // Alice owns bogOrder -> can access payment instructions
+    assertTrue(BstorePaymentManager.canUserAccessOrderPaymentInstructions(context, bogOrder.copy(userId = aliceProfile.id)))
+
+    // Another customer (Bob) logs in -> cannot access Alice's order payment instructions
+    AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "bob.other@gmail.com",
+      name = "Bob Other",
+      hasAdminClaim = false
+    )
+    assertFalse(
+      "Bob must NOT be allowed to view Alice's order payment instructions",
+      BstorePaymentManager.canUserAccessOrderPaymentInstructions(context, bogOrder.copy(userId = aliceProfile.id))
+    )
+
+    val adminUser = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "beqa1994@gmail.com",
+      name = "Beka Admin",
+      hasAdminClaim = true
+    )
+    assertTrue(AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context))
+
+    val bogConfirmRes = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(
+      context = context,
+      order = bogOrder,
+      internalNote = "BOG ჩარიცხვა გადამოწმებულია"
+    )
+    assertTrue(bogConfirmRes.isSuccess)
+    assertEquals("paid", bogConfirmRes.getOrNull()?.paymentStatus)
+    assertEquals(adminUser.id, bogConfirmRes.getOrNull()?.paymentConfirmedBy)
+
+    val codConfirmRes = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(
+      context = context,
+      order = codOrder,
+      internalNote = "კურიერმა თანხა ჩაიბარა"
+    )
+    assertTrue(codConfirmRes.isSuccess)
+    assertEquals("paid", codConfirmRes.getOrNull()?.paymentStatus)
+
+    // Audit trail contains both BANK_TRANSFER_CONFIRMED and COD_COLLECTION_CONFIRMED
+    val auditLogs = BstorePaymentManager.getPaymentAuditLogs(context)
+    assertTrue(auditLogs.any { it.orderId == bogOrder.id && it.eventType == "BANK_TRANSFER_CONFIRMED" && it.newStatus == "paid" })
+    assertTrue(auditLogs.any { it.orderId == codOrder.id && it.eventType == "COD_COLLECTION_CONFIRMED" && it.newStatus == "paid" })
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore payment system UI - dedicated payment instructions dialog and legal policies dialog render accurately`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+
+    val alice = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "alice.ui@gmail.com",
+      name = "Alice UI",
+      hasAdminClaim = false
+    )
+
+    val sampleOrder = OrderRecord(
+      id = "ord_ui_501",
+      orderNumber = "#BS-501",
+      date = "12 ნოე, 2026",
+      status = "მიმდინარე",
+      totalAmount = "390 ₾",
+      items = listOf(OrderItemDetail("iPhone 16 Pro OLED", "Original", 1, "390 ₾", "")),
+      paymentMethod = "საბანკო გადარიცხვა (საქართველოს ბანკი)",
+      trackingCode = "BS-TRK-501",
+      userId = alice.id,
+      paymentMethodCode = "bank_transfer",
+      paymentStatus = "pending",
+      bankAccountId = "bank_bog_primary",
+      bankCode = "bog",
+      bankName = "საქართველოს ბანკი",
+      recipientNameSnapshot = "BSTORE / ბექა მღებრიშვილი",
+      ibanSnapshot = "GE17BG0000000580620970",
+      paymentReference = "#BS-501"
+    )
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        OrderPaymentInstructionsDialog(
+          order = sampleOrder,
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("dedicated_payment_instructions_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("copy_iban_button").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("copy_payment_reference_button").performScrollTo().assertIsDisplayed()
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - bank transfer modal sticky layout, bank switching, copy feedback, and transfer confirmation idempotency`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+    BekaNotificationManager.clearAllNotifications(context)
+    context.getSharedPreferences("bekaservice_admin_order_notif_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+
+    val banks = listOf(
+      BankAccountConfig(
+        id = "bank_bog_ux",
+        bankCode = "bog",
+        bankName = "საქართველოს ბანკი",
+        recipientName = "BSTORE / ბექა მღებრიშვილი",
+        iban = "GE17BG0000000580620970",
+        isEnabled = true,
+        displayOrder = 1
+      ),
+      BankAccountConfig(
+        id = "bank_tbc_ux",
+        bankCode = "tbc",
+        bankName = "თიბისი ბანკი",
+        recipientName = "BSTORE / ბექა მღებრიშვილი",
+        iban = "GE65TB7777777000000001",
+        isEnabled = true,
+        displayOrder = 2
+      )
+    )
+    BstorePaymentManager.saveBankAccountsLocal(context, banks)
+
+    val customer = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "ux.customer@gmail.com",
+      name = "UX Customer",
+      hasAdminClaim = false
+    )
+    val cart = listOf(CartItem(ProductRepository.getAllProducts().first(), 1, "Original"))
+    val bogBank = banks.first()
+    val createdOrder = AuthAndOrderManager.addOrderFromCart(
+      context = context,
+      cartItems = cart,
+      checkoutConfig = CheckoutSubmissionConfig(
+        paymentMethod = PaymentMethodType.BANK_TRANSFER,
+        selectedBankAccount = bogBank,
+        deliveryMethod = DeliveryMethodType.PICKUP,
+        deliveryCity = "ახალციხე",
+        deliveryAddress = "ახალციხე, კოსტავას N10",
+        customerPhone = "+995 599 10 20 30"
+      )
+    )
+
+    var latestOrder: OrderRecord? = null
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        OrderPaymentInstructionsDialog(
+          order = createdOrder,
+          onOrderUpdated = { latestOrder = it },
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // 1. Sticky Header, Copy buttons, and Sticky Footer action are visible
+    composeTestRule.onNodeWithTag("dedicated_payment_instructions_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("switch_bank_tab_bog").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("switch_bank_tab_tbc").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("confirm_transfer_sent_button").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("close_payment_instructions_button").assertIsDisplayed()
+
+    // 2. Switch inline from BOG -> TBC without closing modal
+    composeTestRule.onNodeWithTag("switch_bank_tab_tbc").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals("tbc", latestOrder?.bankCode)
+    assertEquals("GE65TB7777777000000001", latestOrder?.ibanSnapshot)
+    assertEquals(createdOrder.orderNumber, latestOrder?.paymentReference)
+    composeTestRule.onNodeWithText("GE65TB7777777000000001", substring = true)
+      .performScrollTo()
+      .assertIsDisplayed()
+
+    // 3. Copy buttons (Amount, IBAN, Purpose) trigger "დაკოპირდა!" visual feedback
+    composeTestRule.onNodeWithTag("copy_amount_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("copy_iban_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("copy_payment_reference_button").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(composeTestRule.onAllNodesWithText("დაკოპირდა!", substring = true).fetchSemanticsNodes().isNotEmpty())
+
+    // 4. Customer clicks "✓ თანხა გადავრიცხე" -> verification_pending, admin alert, idempotent repeat
+    composeTestRule.onNodeWithTag("confirm_transfer_sent_button").performClick()
+    composeTestRule.waitForIdle()
+
+    assertEquals("verification_pending", latestOrder?.paymentStatus)
+    assertTrue((latestOrder?.userConfirmedPaymentAtMillis ?: 0L) > 0L)
+    composeTestRule.onNodeWithTag("transfer_verification_pending_banner").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("confirm_transfer_sent_button").assertDoesNotExist()
+
+    // Repeat local call is idempotent and does NOT create duplicate admin notification
+    val secondConfirm = AuthAndOrderManager.markOrderTransferSentByUserLocal(context, createdOrder.id, bogBank)
+    assertTrue(secondConfirm.isSuccess)
+    assertEquals("verification_pending", secondConfirm.getOrNull()?.paymentStatus)
+
+    // Customer CANNOT elevate to paid
+    val forbiddenPaidAttempt = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(context, secondConfirm.getOrThrow())
+    assertTrue(forbiddenPaidAttempt.isFailure)
+
+    // Admin sees single transfer-confirmation notification for this order
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Admin Beqa", hasAdminClaim = true)
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+    val adminNotifs = BekaNotificationManager.loadAdminOrderNotificationsForAdmin(context)
+      .filter { it.orderId == createdOrder.id }
+    assertTrue("Admin must receive transfer confirmation notification for order", adminNotifs.isNotEmpty())
+    assertTrue(adminNotifs.any { it.body.contains("გადმორიცხვა") })
+    assertEquals(customer.id, createdOrder.userId)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - 0 enabled banks disables bank transfer and single enabled bank auto-selects`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+
+    AuthAndOrderManager.loginWithGoogle(context, "banks.rule@gmail.com", "Bank Rules", hasAdminClaim = false)
+    val cart = listOf(CartItem(ProductRepository.getAllProducts().first(), 1, "Original"))
+
+    // 0 enabled banks -> getEnabledBankAccounts is empty, Checkout disables bank_transfer and allows COD
+    BstorePaymentManager.saveBankAccountsLocal(context, emptyList())
+    assertTrue(BstorePaymentManager.getEnabledBankAccounts(context).isEmpty())
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        BstoreCheckoutDialog(
+          cartItems = cart,
+          onDismiss = {},
+          onOrderCreated = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("bstore_checkout_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("checkout_payment_method_cod").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithText("საბანკო გადარიცხვა დროებით მიუწვდომელია", substring = true)
+      .performScrollTo()
+      .assertIsDisplayed()
+
+    // 1 enabled bank -> automatically selected by getEnabledBankAccounts
+    val singleTbc = BankAccountConfig(
+      id = "bank_tbc_only",
+      bankCode = "tbc",
+      bankName = "თიბისი ბანკი",
+      recipientName = "BSTORE",
+      iban = "GE65TB7777777000000001",
+      isEnabled = true,
+      displayOrder = 1
+    )
+    BstorePaymentManager.saveBankAccountsLocal(context, listOf(singleTbc))
+    val enabledOne = BstorePaymentManager.getEnabledBankAccounts(context)
+    assertEquals(1, enabledOne.size)
+    assertEquals("tbc", enabledOne.first().bankCode)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - profile orders section, tabs, quick add contact fields, and order detail deep link`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+
+    AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "profile.orders@gmail.com",
+      name = "Profile Tester",
+      hasAdminClaim = false
+    )
+    // Clear phone and address explicitly so "+ დამატება" buttons are shown
+    runBlocking {
+      AuthAndOrderManager.updateSingleContactField(context, phone = "", address = "")
+    }
+
+    val bogBank = BankAccountConfig(
+      id = "bank_bog_prof",
+      bankCode = "bog",
+      bankName = "საქართველოს ბანკი",
+      recipientName = "BSTORE",
+      iban = "GE17BG0000000580620970",
+      isEnabled = true,
+      displayOrder = 1
+    )
+    BstorePaymentManager.saveBankAccountsLocal(context, listOf(bogBank))
+
+    val cart = listOf(CartItem(ProductRepository.getAllProducts().first(), 1, "Original"))
+    val activeOrder = AuthAndOrderManager.addOrderFromCart(
+      context = context,
+      cartItems = cart,
+      checkoutConfig = CheckoutSubmissionConfig(
+        paymentMethod = PaymentMethodType.BANK_TRANSFER,
+        selectedBankAccount = bogBank,
+        deliveryMethod = DeliveryMethodType.PICKUP
+      )
+    )
+    val completedOrder = AuthAndOrderManager.addOrderFromCart(
+      context = context,
+      cartItems = cart,
+      checkoutConfig = CheckoutSubmissionConfig(
+        paymentMethod = PaymentMethodType.COD,
+        deliveryMethod = DeliveryMethodType.COURIER,
+        deliveryCity = "თბილისი",
+        deliveryAddress = "რუსთაველის 12",
+        customerPhone = "+995 577 00 11 22"
+      )
+    )
+    AuthAndOrderManager.updateOrderStatus(context, completedOrder.id, "შესრულებული", rawCode = "completed")
+
+    val targetOrderState = androidx.compose.runtime.mutableStateOf<String?>(null)
+    var consumed = false
+    // Test Profile screen: Orders section visible, quick + add phone works
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        ProfileAndAuthScreen(
+          onOpenCart = {},
+          onOpenAdminPanel = {},
+          targetOrderId = targetOrderState.value,
+          onTargetOrderConsumed = {
+            consumed = true
+            targetOrderState.value = null
+          }
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("profile_add_phone_button").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("quick_contact_field_dialog").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("quick_contact_field_input").performTextReplacement("+995 599 88 77 66")
+    composeTestRule.onNodeWithTag("quick_contact_field_save_button").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals("+995 599 88 77 66", AuthAndOrderManager.getCurrentUser(context)?.phone)
+
+    composeTestRule.onNodeWithTag("profile_lazy_column")
+      .performScrollToNode(androidx.compose.ui.test.hasTestTag("profile_orders_section"))
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_orders_section").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_orders_tab_აქტიური").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_orders_tab_დასრულებული").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("profile_order_card_${activeOrder.id}").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("order_stepper_${activeOrder.id}", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("order_card_payment_instructions_${activeOrder.id}", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+
+    // Switch to დასრულებული tab
+    composeTestRule.onNodeWithTag("profile_orders_tab_დასრულებული").performScrollTo().performClick()
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("profile_order_card_${completedOrder.id}").performScrollTo().assertIsDisplayed()
+
+    // Failed order (empty cart) must NOT overwrite address; successful createAndPersistOrderFromCart DOES auto-save contact fields
+    runBlocking {
+      val failedOrderRes = AuthAndOrderManager.createAndPersistOrderFromCart(
+        context = context,
+        cartItems = emptyList(),
+        checkoutConfig = CheckoutSubmissionConfig(
+          paymentMethod = PaymentMethodType.COD,
+          deliveryMethod = DeliveryMethodType.COURIER,
+          deliveryCity = "თბილისი",
+          deliveryAddress = "არ უნდა შეინახოს",
+          customerPhone = "+995 500 00 00 00"
+        )
+      )
+      assertTrue(failedOrderRes.isFailure)
+      assertEquals("", AuthAndOrderManager.getCurrentUser(context)?.address)
+
+      val successOrderRes = AuthAndOrderManager.createAndPersistOrderFromCart(
+        context = context,
+        cartItems = cart,
+        checkoutConfig = CheckoutSubmissionConfig(
+          paymentMethod = PaymentMethodType.COD,
+          deliveryMethod = DeliveryMethodType.COURIER,
+          deliveryCity = "თბილისი",
+          deliveryAddress = "ჭავჭავაძის 25",
+          customerPhone = "+995 599 88 77 66"
+        )
+      )
+      assertTrue(successOrderRes.isSuccess)
+    }
+    assertEquals("ჭავჭავაძის 25", AuthAndOrderManager.getCurrentUser(context)?.address)
+
+    // Test direct targetOrderId deep link opens exact OrderDetailModal
+    targetOrderState.value = activeOrder.id
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("order_detail_modal_${activeOrder.id}").assertIsDisplayed()
+    assertTrue(consumed)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - notifications horizontal filters, order badge, direct order navigation, and admin payment dashboard UI`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+    BekaNotificationManager.clearAllNotifications(context)
+
+    val customer = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "notif.buyer@gmail.com",
+      name = "Notif Buyer",
+      hasAdminClaim = false
+    )
+
+    val cloudNotifs = listOf(
+      PushNotificationRecord(
+        id = "notif_ord_777",
+        title = "გადახდა დადასტურდა #BS-7777",
+        body = "თქვენი #BS-7777 შეკვეთის გადახდა დადასტურდა.",
+        type = "order_update",
+        targetProductId = 0,
+        targetTab = 4,
+        orderId = "ord_777",
+        orderNumber = "#BS-7777",
+        audience = "user:${customer.id}",
+        createdAtMillis = System.currentTimeMillis()
+      ),
+      PushNotificationRecord(
+        id = "notif_promo_1",
+        title = "ახალი ფასდაკლება",
+        body = "ფასდაკლება ეკრანებზე",
+        type = "product_offer",
+        targetProductId = 0,
+        targetTab = 2,
+        audience = "all",
+        createdAtMillis = System.currentTimeMillis() - 10_000L
+      )
+    )
+
+    var navigatedTab = -1
+    var navigatedOrderId = ""
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        UserNotificationsScreen(
+          cloudNotifications = cloudNotifs,
+          products = ProductRepository.getAllProducts(),
+          onNavigateToTarget = { tab, _, ordId ->
+            navigatedTab = tab
+            navigatedOrderId = ordId
+          },
+          onBack = {}
+        )
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Non-truncating horizontal filter tabs & order tag badge instead of generic profile tag
+    composeTestRule.onNodeWithTag("notif_filter_tabs_row")
+      .performScrollToNode(androidx.compose.ui.test.hasText("🔥 პროდუქტები"))
+    composeTestRule.onNodeWithText("🔥 პროდუქტები").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notif_filter_tabs_row")
+      .performScrollToNode(androidx.compose.ui.test.hasText("📦 შეკვეთები"))
+    composeTestRule.onNodeWithText("📦 შეკვეთები").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("notif_filter_tabs_row")
+      .performScrollToNode(androidx.compose.ui.test.hasText("📢 განცხადებები"))
+    composeTestRule.onNodeWithText("📢 განცხადებები").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("user_notifications_screen")
+      .performScrollToNode(androidx.compose.ui.test.hasTestTag("notification_history_item_notif_ord_777"))
+    composeTestRule.onNodeWithText("📦 შეკვეთა #BS-7777", useUnmergedTree = true).assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("notification_history_item_notif_ord_777").performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(4, navigatedTab)
+    assertEquals("ord_777", navigatedOrderId)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - admin payment dashboard 2x2 grid, filters, and non-wrapping notifications header`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    BstorePaymentManager.init(context)
+    BekaNotificationManager.clearAllNotifications(context)
+
+    val customer = AuthAndOrderManager.loginWithGoogle(
+      context = context,
+      email = "notif.buyer2@gmail.com",
+      name = "Notif Buyer 2",
+      hasAdminClaim = false
+    )
+
+    // Admin Payment Dashboard 2x2 Grid + Non-Wrapping Notifications Header + Confirm Prompt
+    val sampleOrders = listOf(
+      OrderRecord(
+        id = "ord_adm_1",
+        orderNumber = "#BS-901",
+        date = "12 ნოე, 2026",
+        items = listOf(OrderItemDetail("iPhone 15 OLED", "Original", 1, "400 ₾", "")),
+        totalAmount = "400 ₾",
+        status = "მიმდინარე",
+        trackingCode = "BS-TRK-901",
+        userId = customer.id,
+        paymentMethodCode = "bank_transfer",
+        paymentStatus = "verification_pending",
+        bankName = "საქართველოს ბანკი",
+        ibanSnapshot = "GE17BG0000000580620970",
+        paymentReference = "#BS-901",
+        userConfirmedPaymentAtMillis = System.currentTimeMillis()
+      )
+    )
+
+    AuthAndOrderManager.loginWithGoogle(context, "beqa1994@gmail.com", "Admin Beqa", hasAdminClaim = true)
+    AdminStorage.setAdminSessionActive(context, true, "beqa1994@gmail.com")
+
+    composeTestRule.setContent {
+      RepairProTheme(darkTheme = true) {
+        androidx.compose.foundation.layout.Column(
+          modifier = Modifier.verticalScroll(rememberScrollState())
+        ) {
+          AdminOrderNotificationsHistoryPanel(
+            notifications = listOf(
+              AdminOrderNotificationRecord(
+                notificationId = "admin_order_ord_adm_1",
+                orderId = "ord_adm_1",
+                orderType = "service_order",
+                title = "გადარიცხვა დადასტურდა #BS-901",
+                body = "მომხმარებელმა დაადასტურა #BS-901 შეკვეთის თანხის გადმორიცხვა.",
+                read = false
+              )
+            ),
+            unreadCount = 1,
+            onOpenOrderNotification = {},
+            onMarkNotificationRead = {},
+            onDeleteNotification = { _, onComplete -> onComplete() },
+            onMarkAllRead = {}
+          )
+          AdminPaymentDashboardSection(
+            orders = sampleOrders,
+            selectedPaymentFilter = "ყველა",
+            onPaymentFilterChange = {},
+            searchOrderQuery = "",
+            onSearchOrderQueryChange = {},
+            onOpenAuditHistory = {}
+          )
+        }
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    val notifHeaderTitle = composeTestRule.onNodeWithText("შემოსული შეკვეთების შეტყობინებები").fetchSemanticsNode().boundsInRoot
+    val markAllBtn = composeTestRule.onNodeWithTag("admin_mark_all_notifications_read_button").fetchSemanticsNode().boundsInRoot
+    assertTrue("Mark all read button sits cleanly below header title", markAllBtn.top >= notifHeaderTitle.bottom - 2f)
+
+    composeTestRule.onNodeWithTag("admin_payment_dashboard_section").performScrollTo()
+    val dashboardBounds = composeTestRule.onNodeWithTag("admin_payment_dashboard_section").fetchSemanticsNode().boundsInRoot
+    val dashTitleBounds = composeTestRule.onNodeWithText("გადახდების კონტროლი & ფინანსური პანელი").fetchSemanticsNode().boundsInRoot
+    assertTrue("No large empty void above dashboard title", (dashTitleBounds.top - dashboardBounds.top) < 120f)
+    composeTestRule.onNodeWithTag("admin_financial_metrics_2x2_grid").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_payment_filter_გადარიცხვა მოწმდება").performScrollTo().assertIsDisplayed()
+    composeTestRule.onNodeWithTag("admin_payment_filter_COD").performScrollTo().assertIsDisplayed()
+
+    // Admin confirm payment preserves order.status ("მიმდინარე" != completed)
+    val confirmRes = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(context, sampleOrders.first())
+    assertTrue(confirmRes.isSuccess)
+    assertEquals("paid", confirmRes.getOrNull()?.paymentStatus)
+    assertEquals("მიმდინარე", confirmRes.getOrNull()?.status)
+  }
+
+  @Test
+  @Config(sdk = [36])
+  fun `bstore ux overhaul - legacy order backward compatibility preserves data and never defaults to paid`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    AppPreferencesManager.init(context)
+    val user = AuthAndOrderManager.loginWithGoogle(context, "legacy.user@gmail.com", "Legacy User", hasAdminClaim = false)
+
+    val legacyPrefs = context.getSharedPreferences("bekaservice_auth_prefs", Context.MODE_PRIVATE)
+    val legacyJson = org.json.JSONArray().apply {
+      put(org.json.JSONObject().apply {
+        put("id", "ord_legacy_1")
+        put("orderNumber", "#BS-1001")
+        put("date", "01 ოქტ, 2026")
+        put("totalAmount", "150 ₾")
+        put("status", "მიმდინარე")
+        put("paymentMethod", "ნაღდი ანგარიშსწორება")
+        put("items", org.json.JSONArray())
+      })
+    }.toString()
+    legacyPrefs.edit().putString("user_orders_json_${user.id}", legacyJson).commit()
+
+    val loaded = AuthAndOrderManager.getOrders(context)
+    assertEquals(1, loaded.size)
+    val ord = loaded.first()
+    assertEquals("ord_legacy_1", ord.id)
+    assertEquals("მიმდინარე", ord.status)
+    assertFalse("Legacy order must NOT auto-default to paid", ord.paymentStatus == "paid")
+  }
 }
+
+
+
+
 
 

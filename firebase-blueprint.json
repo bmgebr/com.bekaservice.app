@@ -46,7 +46,28 @@
         "price": { "type": "string", "description": "Formatted total price in GEL" },
         "totalAmount": { "type": "number", "description": "Numeric total order amount in GEL" },
         "currency": { "type": "string", "description": "Currency code (GEL)" },
-        "paymentMethod": { "type": "string", "description": "Selected payment method" },
+        "deliveryMethodCode": { "type": "string", "enum": ["pickup", "courier"], "description": "Delivery method code" },
+        "deliveryCity": { "type": "string", "description": "Delivery city or region" },
+        "deliveryFeeText": { "type": "string", "description": "Delivery fee description" },
+        "paymentMethod": { "type": "string", "description": "Selected payment method display label" },
+        "paymentMethodCode": { "type": "string", "enum": ["bank_transfer", "cod"], "description": "Selected payment method code" },
+        "paymentStatus": {
+          "type": "string",
+          "enum": ["pending", "awaiting_collection", "paid", "failed", "cancelled", "expired", "refunded"],
+          "description": "Independent payment lifecycle status"
+        },
+        "bankAccountId": { "type": "string", "description": "Selected bank account ID snapshot" },
+        "bankCode": { "type": "string", "description": "Selected bank code snapshot (bog, tbc, etc.)" },
+        "bankName": { "type": "string", "description": "Selected bank display name snapshot" },
+        "recipientNameSnapshot": { "type": "string", "description": "Recipient name snapshot at order creation" },
+        "ibanSnapshot": { "type": "string", "description": "Destination IBAN snapshot at order creation" },
+        "paymentReference": { "type": "string", "description": "Payment reference / order number" },
+        "paymentInstructionsSnapshot": { "type": "string", "description": "Payment instructions snapshot at order creation" },
+        "paymentConfirmedAtMillis": { "type": "number", "description": "Epoch millis when payment was confirmed by admin" },
+        "paymentConfirmedBy": { "type": "string", "description": "Admin email or UID who confirmed payment" },
+        "paymentInternalNote": { "type": "string", "description": "Admin internal payment verification note" },
+        "acceptedTermsVersion": { "type": "string", "description": "Terms and policies version accepted by customer" },
+        "acceptedTermsAtMillis": { "type": "number", "description": "Epoch millis when customer accepted terms" },
         "trackingCode": { "type": "string", "description": "Order tracking code" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when order was submitted" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp when order was last updated" }
@@ -121,23 +142,28 @@
     },
     "Notification": {
       "title": "Notification",
-      "description": "Admin-dispatched broadcast push notification stored in notifications/{notificationId}",
+      "description": "Classified push notification (PUBLIC, PRIVATE_USER, or ADMIN_ONLY) stored in notifications/{notificationId}",
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique notification document ID" },
         "title": { "type": "string", "description": "Notification title" },
         "body": { "type": "string", "description": "Notification message body" },
-        "type": { "type": "string", "description": "Notification category (announcement, product_offer, service_update)" },
+        "type": { "type": "string", "description": "Notification category (announcement, product_offer, promotion, system_info, maintenance, product_restock, service_update, order_update, payment_update, account_update, admin_message, admin_order)" },
+        "visibility": { "type": "string", "enum": ["PUBLIC", "PRIVATE_USER", "ADMIN_ONLY"], "description": "Mandatory authorization visibility category" },
+        "recipientUid": { "type": "string", "description": "Target customer UID for PRIVATE_USER notifications (empty for PUBLIC/ADMIN_ONLY)" },
+        "relatedEntityId": { "type": "string", "description": "Related order/payment/product ID" },
         "targetProductId": { "type": "number", "description": "Optional target product ID for deep-linking (-1 if none)" },
         "targetTab": { "type": "number", "description": "Target navigation tab index (0..7, or -1)" },
         "senderUid": { "type": "string", "description": "Admin Firebase Auth UID" },
         "senderEmail": { "type": "string", "description": "Admin email (beqa1994@gmail.com)" },
-        "audience": { "type": "string", "description": "Target audience identifier (e.g. all)" },
+        "audience": { "type": "string", "description": "Target audience identifier (all, all_users, user:<uid>, or admin_only)" },
         "status": { "type": "string", "description": "Delivery status (e.g. submitted, sent, updated)" },
+        "isRead": { "type": "boolean", "description": "Whether recipient marked private notification as read" },
+        "readAt": { "type": "string", "format": "date-time", "description": "Server timestamp when marked read" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last update server timestamp" }
       },
-      "required": ["id", "title", "body", "createdAt"]
+      "required": ["id", "title", "body", "visibility", "createdAt"]
     },
     "AdminRole": {
       "title": "AdminRole",
@@ -395,6 +421,45 @@
         "updatedAt": { "type": "string", "format": "date-time", "description": "Last token refresh timestamp" }
       },
       "required": ["id", "userId", "email", "token", "deviceId", "platform", "active", "updatedAt"]
+    },
+    "PaymentBankAccount": {
+      "title": "PaymentBankAccount",
+      "description": "Admin-managed destination bank account configuration for BSTORE bank transfer payments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique bank account document ID" },
+        "bankCode": { "type": "string", "description": "Short bank code (bog, tbc, etc.)" },
+        "bankName": { "type": "string", "description": "Display bank name in Georgian" },
+        "recipientName": { "type": "string", "description": "Account recipient full name or company" },
+        "iban": { "type": "string", "description": "Normalized Georgian IBAN (GE00XX0000000000000000)" },
+        "currency": { "type": "string", "description": "Currency code (GEL)" },
+        "enabled": { "type": "boolean", "description": "Whether this bank account is active for customer checkout" },
+        "sortOrder": { "type": "number", "description": "Display sort order" },
+        "paymentInstructions": { "type": "string", "description": "Georgian instructions shown to customer after order creation" },
+        "updatedAtMillis": { "type": "number", "description": "Last update epoch milliseconds" }
+      },
+      "required": ["id", "bankCode", "bankName", "recipientName", "iban", "currency", "enabled", "sortOrder"]
+    },
+    "PaymentAuditLog": {
+      "title": "PaymentAuditLog",
+      "description": "Immutable financial audit log entry for order payment status transitions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audit event ID" },
+        "orderId": { "type": "string", "description": "Target order ID" },
+        "orderNumber": { "type": "string", "description": "Target formatted order number" },
+        "eventType": { "type": "string", "description": "Audit event type (BANK_TRANSFER_CONFIRMED, COD_COLLECTION_CONFIRMED, etc.)" },
+        "previousStatus": { "type": "string", "description": "Previous payment status code" },
+        "newStatus": { "type": "string", "description": "New payment status code" },
+        "amount": { "type": "string", "description": "Order payment amount" },
+        "currency": { "type": "string", "description": "Currency (GEL)" },
+        "actorUid": { "type": "string", "description": "Authenticated admin UID" },
+        "actorEmail": { "type": "string", "description": "Authenticated admin email (beqa1994@gmail.com)" },
+        "actorRole": { "type": "string", "description": "Actor role (sole_admin)" },
+        "timestamp": { "type": "number", "description": "Event timestamp in milliseconds" },
+        "note": { "type": "string", "description": "Optional verification note" }
+      },
+      "required": ["id", "orderId", "eventType", "newStatus", "actorEmail"]
     }
   },
   "firestore": {
@@ -424,7 +489,7 @@
     },
     "/notifications/{notificationId}": {
       "schema": "Notification",
-      "description": "Publicly readable broadcast push notifications history (admin write/delete only)"
+      "description": "Classified notifications (PUBLIC readable by all; PRIVATE_USER readable strictly by recipientUid; ADMIN_ONLY readable strictly by sole admin)"
     },
     "/admin_notifications/{notificationId}": {
       "schema": "AdminOrderNotification",
@@ -469,6 +534,14 @@
     "/imei_audit_logs/{eventId}": {
       "schema": "ImeiAuditLog",
       "description": "Audit logs for IMEI administrative and deletion actions"
+    },
+    "/payment_bank_accounts/{bankAccountId}": {
+      "schema": "PaymentBankAccount",
+      "description": "Authenticated-only readable, Admin-only writable BSTORE destination bank accounts"
+    },
+    "/payment_audit_logs/{auditId}": {
+      "schema": "PaymentAuditLog",
+      "description": "Immutable Admin-only financial payment audit trail"
     }
   }
 }

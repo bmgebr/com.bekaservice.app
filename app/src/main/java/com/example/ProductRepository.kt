@@ -1,6 +1,101 @@
 package com.example
 
 object ProductRepository {
+    val RETIRED_PRODUCT_IDS: Set<Int> = (86..124).toSet()
+
+    private val PROHIBITED_SERVICE_KEYWORDS = listOf(
+        "frp",
+        "icloud",
+        "bypass",
+        "carrier unlock",
+        "sim unlock",
+        "network unlock",
+        "განბლოკვ",
+        "cpid",
+        "imei check",
+        "imei სერვის",
+        "imei აღდგენ",
+        "chatgpt",
+        "openai",
+        "google ai pro",
+        "supergrok",
+        "claude pro",
+        "claude max",
+        "midjourney",
+        "perplexity",
+        "cursor pro",
+        "lovable",
+        "gmail pva",
+        "phone verified",
+        "capcut",
+        "canva",
+        "adobe creative",
+        "youtube premium",
+        "spotify premium",
+        "netflix",
+        "windows 11 pro",
+        "windows 10 pro",
+        "office 2024",
+        "office 2021",
+        "office ltsc",
+        "microsoft 365",
+        "retail ლიცენზი",
+        "retail key"
+    )
+
+    fun isProhibitedOrRetiredService(item: ProductItem): Boolean {
+        if (item.id in RETIRED_PRODUCT_IDS) return true
+        val catClean = item.category.trim()
+        if (catClean.equals("პროგრამული სერვისები", ignoreCase = true) ||
+            catClean.equals("Software Services", ignoreCase = true)
+        ) {
+            return true
+        }
+        val typeClean = item.type.trim().lowercase()
+        val prodTypeClean = item.productType.trim().lowercase()
+        if (typeClean == "software" || prodTypeClean == "software" || prodTypeClean == "digital_service") {
+            return true
+        }
+        val combinedText = buildString {
+            append(item.title).append(' ')
+            append(item.category).append(' ')
+            append(item.subcategory).append(' ')
+            append(item.shortDescription).append(' ')
+            append(item.description).append(' ')
+            append(item.offerType).append(' ')
+            append(item.accountType).append(' ')
+            append(item.searchKeywords)
+        }.lowercase()
+
+        return PROHIBITED_SERVICE_KEYWORDS.any { kw -> combinedText.contains(kw) }
+    }
+
+    fun isProhibitedCategory(category: CategoryItem): Boolean {
+        val idClean = category.id.trim().lowercase()
+        val nameClean = category.name.trim().lowercase()
+        val typeClean = category.categoryType.trim().lowercase()
+        val descClean = category.description.trim().lowercase()
+        if (idClean == "cat_software" || typeClean == "digital" || typeClean == "software") return true
+        if (nameClean.contains("პროგრამული") || nameClean.contains("software") || nameClean.contains("unlock") || nameClean.contains("imei")) return true
+        if (descClean.contains("icloud") || descClean.contains("unlock") || descClean.contains("ლიცენზი") || descClean.contains("გამოწერ")) return true
+        return false
+    }
+
+    fun isProhibitedBanner(banner: AdminStorage.HomeBannerItem): Boolean {
+        if (banner.targetProductId in RETIRED_PRODUCT_IDS) return true
+        val idClean = banner.id.trim().lowercase()
+        if (idClean in setOf("slide_google_ai_pro", "slide_chatgpt_plus", "slide_canva_pro")) return true
+        val combined = "${banner.title} ${banner.subtitle} ${banner.tag}".lowercase()
+        return PROHIBITED_SERVICE_KEYWORDS.any { kw -> combined.contains(kw) } ||
+            combined.contains("google ai") ||
+            combined.contains("canva") ||
+            combined.contains("chatgpt") ||
+            combined.contains("imei") ||
+            combined.contains("icloud") ||
+            combined.contains("frp") ||
+            combined.contains("unlock")
+    }
+
     fun getAllProducts(): List<ProductItem> = cachedAllProducts
 
     private val cachedAllProducts: List<ProductItem> by lazy {
@@ -1152,139 +1247,7 @@ object ProductRepository {
             brand = "Honor",
             compatibleModels = "Honor Magic 6 Pro",
             warranty = "6 თვე"
-        ),
-
-        // =====================================================================
-        // 7. პროგრამული სერვისები (SOFTWARE & UNLOCK SERVICES)
-        // =====================================================================
-        ProductItem(
-            id = 86,
-            title = "FRP ბლოკის მოხსნა (Google Account Bypass)",
-            price = "45 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1563986768609-322da13575f3?w=600",
-            shortDescription = "Google Account (FRP) ბლოკის მოხსნა ნებისმიერ Android სმარტფონზე (Android 9–15) ოფიციალური სერვერული მეთოდით.",
-            description = "Google Account (FRP) ბლოკის მოხსნა ნებისმიერ ბრენდსა და Android ვერსიაზე (Android 9 - Android 15). Samsung (Knox / MTP / EDL), Xiaomi HyperOS / MIUI, Motorola, Huawei, Pixel, Oppo, Vivo, Realme, MTK & Qualcomm ჩიპსეტები. შესრულების დრო: 15-25 წუთი.",
-            rating = 5.0,
-            isFavorite = false,
-            brand = "Samsung",
-            compatibleModels = "Samsung, Xiaomi, Motorola, Huawei, Pixel, MTK, Qualcomm",
-            warranty = "მუდმივი გარანტია"
-        ),
-        ProductItem(
-            id = 87,
-            title = "iCloud Activation Lock & Apple ID მოხსნა",
-            price = "120 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?w=600",
-            shortDescription = "Apple iCloud აქტივაციის ეკრანის (Hello Screen / Passcode / Open Menu) განბლოკვა სრული სიგნალის შენარჩუნებით.",
-            description = "Apple მოწყობილობების iCloud აქტივაციის ეკრანის (Hello Screen / Passcode / Open Menu) ოფიციალური და სერვერული განბლოკვა. მხარდაჭერილია iPhone 6s-დან iPhone 16 Pro Max-მდე, iPad და Apple Watch. სრული სიგნალის და iCloud სერვისების შენარჩუნებით.",
-            rating = 4.9,
-            isFavorite = false,
-            brand = "Apple",
-            compatibleModels = "iPhone 16 Pro Max, iPhone 15/14/13/12/11/X, iPad, Apple Watch",
-            warranty = "სრული გარანტია"
-        ),
-        ProductItem(
-            id = 88,
-            title = "ქსელის განბლოკვა (Network / SIM Unlock ყველა ოპერატორზე)",
-            price = "65 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=600",
-            shortDescription = "უცხოური ოპერატორების (AT&T, T-Mobile, Verizon, Vodafone, Docomo) SIM ბლოკის ოფიციალური Factory Unlock.",
-            description = "ნებისმიერი საზღვარგარეთული ოპერატორის SIM ბარათის ბლოკის (Carrier / Network Lock) მოხსნა: AT&T, T-Mobile, Verizon, Sprint, Docomo, SoftBank, Vodafone, O2, EE. ტელეფონი იმუშავებს საქართველოსა და მსოფლიოს ყველა ქსელში (Magti, Silknet, Cellfie).",
-            rating = 4.9,
-            isFavorite = false,
-            brand = "Apple",
-            compatibleModels = "iPhone, Samsung Galaxy, Google Pixel, Motorola, Sony, OnePlus",
-            warranty = "სამუდამო Factory Unlock"
-        ),
-        ProductItem(
-            id = 89,
-            title = "Auth Flashing (ავტორიზებული სერვერული ფლეშინგი)",
-            price = "55 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600",
-            shortDescription = "ავტორიზებული Xiaomi / Realme / Oppo / OnePlus სერვერული EDL 9008 და MSM აღდგენა (Unbrick).",
-            description = "ავტორიზებული Xiaomi / Realme / Oppo / Vivo სერვერული EDL Firehose და MSM ჩაწერა. აგურებული (Hard-Bricked / 9008 Mode), სისტემურად დაზიანებული ტელეფონების აღდგენა ოფიციალური სერვერული ტოკენით და უსაფრთხოების გასაღებით.",
-            rating = 5.0,
-            isFavorite = false,
-            brand = "Xiaomi",
-            compatibleModels = "Xiaomi 14/13/12, Redmi Note, POCO, Realme, Oppo, OnePlus",
-            warranty = "ოფიციალური სერვერული დამოწმება"
-        ),
-        ProductItem(
-            id = 90,
-            title = "სისტემური პროგრამის ჩაწერა (Stock ROM / Bootloop Unbrick)",
-            price = "35 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600",
-            shortDescription = "ოფიციალური Stock ROM-ის ჩაწერა, Bootloop-ის აღდგენა და სისტემის სტაბილური განახლება.",
-            description = "ოფიციალური Stock ROM-ის ჩაწერა, გაჭედილი ლოგოს (Bootloop / Recovery Loop / Red State / DM-Verity) აღდგენა, ვირუსების სრული გაწმენდა და სისტემის უახლეს სტაბილურ ვერსიამდე განახლება მონაცემების მაქსიმალური შენარჩუნებით.",
-            rating = 4.9,
-            isFavorite = false,
-            brand = "Samsung",
-            compatibleModels = "ყველა Android & iOS მოდელი (Samsung, Xiaomi, Pixel, Motorola, Honor)",
-            warranty = "სტაბილური მუშაობის გარანტია"
-        ),
-        ProductItem(
-            id = 91,
-            title = "MDM / Corporate Lock მოხსნა (Remote Management)",
-            price = "75 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600",
-            shortDescription = "კორპორატიული დისტანციური მართვის (MDM Profile / Knox Manage) სრული დეაქტივაცია.",
-            description = "კორპორატიული დისტანციური მართვის (Remote Management / MDM Profile / Knox Manage) სრული დეაქტივაცია Apple და Samsung მოწყობილობებზე. მოწყობილობა თავისუფლდება ნებისმიერი კომპანიის მონიტორინგისა და შეზღუდვებისგან.",
-            rating = 4.8,
-            isFavorite = false,
-            brand = "Apple",
-            compatibleModels = "iPhone, iPad, MacBook, Samsung Galaxy Knox",
-            warranty = "მუდმივი Bypass გარანტია"
-        ),
-        ProductItem(
-            id = 92,
-            title = "Knox / KG Status განბლოკვა & IMEI / EFS აღდგენა",
-            price = "80 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1580910051074-3eb694886505?w=600",
-            shortDescription = "Samsung Knox Guard (KG Locked) განბლოკვა და დაზიანებული EFS / Baseband სერტიფიკატების აღდგენა.",
-            description = "Samsung Knox Guard (KG Locked: Prenormal / Active / Broken), გაფუჭებული IMEI-ს, EFS და Baseband სერტიფიკატების პროფესიონალური აღდგენა (Cert Write / Patch Cert). ქსელის სიგნალისა და 5G/4G მონაცემების სრული ამუშავება.",
-            rating = 4.9,
-            isFavorite = false,
-            brand = "Samsung",
-            compatibleModels = "Samsung Galaxy S24, S23, S22, Z Fold, Z Flip, A სერია",
-            warranty = "სრული სიგნალის გარანტია"
-        ),
-        ProductItem(
-            id = 93,
-            title = "Bootloader განბლოკვა & რეგიონის შეცვლა (Global ROM / HyperOS)",
-            price = "40 ₾",
-            category = "პროგრამული სერვისები",
-            type = "software",
-            subcategory = SoftwareCatalogData.SUBCAT_MOBILE_UNLOCK,
-            imageUrl = "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=600",
-            shortDescription = "ჩინური ვერსიების Global / European ROM-ზე გადაყვანა Google Play და NFC გადახდების მხარდაჭერით.",
-            description = "ჩინური ვერსიების (China Version) ოფიციალურ Global / European პროგრამაზე გადაყვანა. ქართული ენის, Google სერვისების (Play Store, Gmail) და უკონტაქტო გადახდების (Google Wallet / NFC) სრული გააქტიურება.",
-            rating = 4.9,
-            isFavorite = false,
-            brand = "Xiaomi",
-            compatibleModels = "Xiaomi, Redmi, POCO, OnePlus, Realme",
-            warranty = "OTA განახლებების მხარდაჭერა"
         )
-    ) + SoftwareCatalogData.getDigitalSoftwareProducts()
+    )
     }
 }

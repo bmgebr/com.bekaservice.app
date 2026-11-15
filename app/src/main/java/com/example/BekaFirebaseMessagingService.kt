@@ -18,13 +18,19 @@ class BekaFirebaseMessagingService : FirebaseMessagingService() {
         Log.d("BekaPush", "FCM registration token refreshed")
         BekaNotificationManager.saveLocalFcmToken(applicationContext, token)
         val deviceId = BekaNotificationManager.getOrCreateDeviceId(applicationContext)
-        if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(applicationContext)) {
+        val fbUser = runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull()
+        val isEligibleUser = !AuthAndOrderManager.isLoggingOut &&
+            AuthAndOrderManager.isRegisteredAuthenticatedUser(applicationContext) &&
+            fbUser != null &&
+            !fbUser.isAnonymous
+
+        if (isEligibleUser && AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(applicationContext)) {
             BekaNotificationManager.registerAdminDeviceToken(applicationContext, token, deviceId)
         }
-        if (runCatching { FirebaseAuth.getInstance().currentUser }.getOrNull() != null) {
-            serviceScope.launch {
-                try {
-                    val repo = FirestoreRepository(applicationContext)
+        serviceScope.launch {
+            try {
+                val repo = FirestoreRepository(applicationContext)
+                if (isEligibleUser) {
                     repo.saveCurrentUserFcmToken(
                         token = token,
                         notificationsEnabled = BekaNotificationManager.hasNotificationPermission(applicationContext),
@@ -36,9 +42,11 @@ class BekaFirebaseMessagingService : FirebaseMessagingService() {
                             deviceId = deviceId
                         )
                     }
-                } catch (e: Exception) {
-                    Log.w("BekaPush", "Failed to sync refreshed FCM token to Firestore: ${e.message}")
+                } else {
+                    repo.unbindUnauthenticatedDeviceTokenOnBackend(token, deviceId)
                 }
+            } catch (e: Exception) {
+                Log.w("BekaPush", "Failed to sync/unbind refreshed FCM token: ${e.message}")
             }
         }
     }

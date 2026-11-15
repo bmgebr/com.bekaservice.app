@@ -1,0 +1,790 @@
+# BSTORE — SIDE NAVIGATION REDESIGN + COMPLETE CATEGORY SYSTEM RECONSTRUCTION
+
+## MAIN OBJECTIVE
+
+Implement two major improvements in the existing BSTORE Android application:
+
+1. Completely redesign and properly implement the side navigation drawer according to the attached visual reference.
+2. Audit, unify, and fully repair the product category management system so that the Admin Panel and the customer-facing Catalog always use the same consistent category structure.
+
+This is an existing application, not a new project.
+
+The implementation must preserve the current application architecture, Firebase integration, product data, authentication, navigation, shopping cart, favorites, orders, admin functionality, and release configuration.
+
+Do not create a visual-only prototype. All visible elements must work with real application data.
+
+IMPORTANT: The attached image is the exact visual reference for the new side navigation drawer. Follow its layout, proportions, grouping, colors, icon style, typography, spacing, borders, and overall appearance as closely as possible.
+
+The image is a design reference only. Never copy its example user name, email, or other sample information into the actual application.
+
+---
+
+# PART 1 — SIDE NAVIGATION DRAWER REDESIGN
+
+## 1. Inspect the existing implementation first
+
+Before modifying anything, inspect:
+
+- Existing side drawer Composable.
+- Main screen layout.
+- Navigation architecture and route definitions.
+- Existing top app bar and hamburger menu action.
+- Bottom navigation.
+- Firebase Authentication state.
+- User profile repository and model.
+- Cart repository and cart count.
+- Orders repository and order count.
+- Favorites repository and favorites count.
+- Admin authorization.
+- Existing support, contact, service center, and legal information screens.
+- Existing logout implementation.
+- App version information.
+
+Identify every existing drawer item and its actual destination.
+
+Do not assume that an existing button works simply because it is visible.
+
+Preserve all working destinations and repair broken navigation where necessary.
+
+## 2. Reproduce the attached design
+
+Create a premium dark BSTORE navigation drawer closely matching the attached image.
+
+### Visual identity
+
+- Brand: BSTORE.
+- Background: dark graphite / near-black.
+- Main surfaces: charcoal.
+- Accent color: #FF6B00.
+- Main text: white.
+- Secondary text: muted gray.
+- Destructive action: restrained red.
+- Rounded corners and subtle borders.
+- Premium modern ecommerce appearance.
+
+Avoid:
+- Excessive orange backgrounds.
+- Oversized elements.
+- Unnecessary decoration.
+- Inconsistent icons.
+- Excessive vertical spacing.
+- Different visual styles between menu sections.
+
+The drawer should feel like a polished part of the existing BSTORE application, not a separate template.
+
+### A. Drawer header
+
+At the top, reproduce:
+
+- BSTORE logo/icon.
+- BSTORE brand name.
+- Close button.
+
+Use the actual existing BSTORE logo asset if available.
+
+Do not generate a new logo or replace the current brand identity.
+
+The close button must close the drawer correctly.
+
+### B. User profile block
+
+Below the header, create a compact profile card containing:
+
+- Actual user avatar or neutral default avatar.
+- Actual display name.
+- Actual authenticated email.
+- Authentication provider indicator, only if confirmed by Firebase Authentication.
+- Navigation arrow to the existing profile screen.
+- Profile editing action.
+
+All values must come from the currently authenticated account and existing profile data.
+
+Never hardcode:
+- Names.
+- Email addresses.
+- Profile pictures.
+- Phone numbers.
+- Google authentication status.
+
+If the user is not authenticated, display the existing guest or sign-in state supported by the application.
+
+Do not display fake profile data.
+
+The edit action must open the existing profile editing functionality.
+
+### C. Shopping section — შოპინგი
+
+Reproduce the three grouped menu items from the reference:
+
+1. ჩემი შეკვეთები
+2. რჩეულები
+3. კალათა
+
+Each item must:
+
+- Use a consistent icon.
+- Open its existing screen or navigation destination.
+- Preserve current state.
+- Work correctly with the existing Firebase data architecture.
+
+If the application already has counts for these features, show small badges using actual counts.
+
+Do not invent counts.
+
+The cart badge must reflect the actual current cart state.
+
+Order and favorites data must remain isolated to the authenticated user.
+
+### D. Help section — დახმარება
+
+Include:
+
+1. დახმარება და კონტაქტი
+2. სერვისცენტრი
+
+Connect them to the actual existing screens and configured information.
+
+Contact links must use existing phone numbers, WhatsApp links, Telegram links, or other configured destinations.
+
+Service-center information must come from the existing project configuration or current data source.
+
+Do not invent phone numbers, addresses, or working hours.
+
+If an item has no implemented destination, do not create a fake working button. Identify the missing functionality and report it.
+
+### E. Information section — ინფორმაცია
+
+Include:
+
+1. წესები და პირობები
+2. კონფიდენციალურობა
+3. გადახდა და დაბრუნება
+
+Preserve the existing policy content and navigation destinations.
+
+Do not rewrite legal or payment policies as part of this task.
+
+All three items must open their actual corresponding pages.
+
+### F. Settings
+
+Include a separate compact row:
+
+- პარამეტრები
+
+Connect it to the existing settings screen, if implemented.
+
+Do not create a fake settings page or nonfunctional options.
+
+### G. Administrator panel
+
+Include the administrator row in the style of the reference image.
+
+Requirements:
+
+- Show it only to genuinely authorized administrators.
+- Use the existing Firebase/backend admin authorization mechanism.
+- Preserve the existing admin navigation destination.
+- Never rely solely on hiding the button for security.
+- Never allow a normal user to access administrator functionality by manually navigating to the route.
+
+The admin row should visually stand out using restrained orange accents.
+
+### H. Application information
+
+At the bottom, display:
+
+- BSTORE.
+- Application version.
+
+Read the actual version from the Android application configuration / BuildConfig.
+
+Never hardcode a version that may become outdated.
+
+### I. Logout
+
+Add the separate red logout button at the bottom, matching the reference.
+
+It must use the existing Firebase Authentication sign-out implementation.
+
+Requirements:
+- Clear user-specific in-memory state.
+- Clear user-specific cached data where appropriate.
+- Prevent previous account information from remaining visible.
+- Navigate to the existing authentication or guest destination.
+- Do not delete the account or any user data.
+
+### J. Drawer behavior
+
+Implement correct drawer behavior:
+
+- Opens from the hamburger icon.
+- Closes from the close button.
+- Closes when tapping the appropriate background area.
+- Closes after selecting a navigation destination.
+- Supports Android system back.
+- Does not interfere with the existing bottom navigation.
+- Does not create duplicate navigation destinations.
+- Does not leave multiple copies of the same screen in the back stack.
+- Supports scrolling on smaller screens.
+- Handles system status bar and navigation bar insets.
+- Uses smooth, appropriate animations.
+- Prevents background content from receiving unintended taps while the drawer is open.
+
+The drawer must be responsive and work correctly on different Android screen sizes.
+
+Preserve the existing top app bar and bottom navigation unless a small technical adjustment is required for correct integration.
+
+---
+
+# PART 2 — COMPLETE CATEGORY SYSTEM AUDIT AND REPAIR
+
+## 3. The current problem
+
+There is currently a mismatch between the categories displayed in the Admin Panel and the categories available in the external customer-facing Catalog.
+
+Example:
+
+- The Admin Panel contains a category named "ყურსასმენები".
+- The customer-facing Catalog does not display the same category.
+
+This indicates that category management and catalog display may be using different data sources, different category definitions, inconsistent IDs, or different filtering logic.
+
+Do not simply add "ყურსასმენები" manually to the customer-facing screen.
+
+Investigate and repair the underlying architecture so this mismatch cannot happen again.
+
+## 4. Full category-system inspection
+
+Inspect the actual implementation of:
+
+- Admin category management screen.
+- Customer-facing category screen.
+- Product creation form.
+- Product editing form.
+- Product model.
+- Category model.
+- Firestore category collection.
+- Firestore product collection.
+- Category repository.
+- Product repository.
+- Category IDs and references.
+- Category filtering and visibility logic.
+- Product type fields.
+- Existing category sorting and display order.
+- Active/inactive category handling.
+- Category image/icon handling.
+- Existing product-to-category relationships.
+
+Identify whether the current application uses:
+- Hardcoded category arrays.
+- Separate category lists for Admin Panel and Catalog.
+- Different category names for the same category.
+- Different IDs for equivalent categories.
+- Product category names instead of stable category IDs.
+- Incorrect filtering of categories with zero products.
+- Inconsistent active/visible status handling.
+- Missing or outdated category references.
+
+Inspect actual Firestore documents and code paths where possible.
+
+Do not guess the current category structure.
+
+## 5. Establish one canonical category source
+
+This is the most important architectural requirement.
+
+The entire application must use ONE canonical category data source.
+
+The Admin Panel and customer-facing Catalog must never maintain independent category definitions.
+
+Use the existing Firestore architecture and existing collections where possible.
+
+Do not create duplicate category systems.
+
+Each category must have a stable unique ID.
+
+Recommended logical fields, adapted to the existing model:
+
+- id
+- name
+- slug
+- description (optional)
+- icon or image reference (optional)
+- productType or categoryType (if useful)
+- isActive
+- isVisible
+- sortOrder
+- createdAt
+- updatedAt
+
+Do not add unnecessary fields if equivalent existing fields already exist.
+
+Use stable category IDs instead of relying only on category display names.
+
+The display name may change without breaking product references.
+
+The Admin Panel must manage the canonical category records.
+
+The customer-facing Catalog must load those same records from the same repository/source.
+
+There must not be a separate hardcoded customer-facing category list.
+
+## 6. Synchronize Admin Panel and Catalog
+
+Implement consistent category visibility and status rules.
+
+Requirements:
+
+- Categories created in the Admin Panel must become available to the customer-facing Catalog according to their active/visible status.
+- Category edits must appear in the Catalog without requiring an application update.
+- Category activation/deactivation must be respected.
+- Sorting must be consistent.
+- Category IDs must match between products and category records.
+- The Catalog must not display duplicate categories.
+- The Admin Panel must show the real canonical category list.
+
+Clearly distinguish:
+
+1. All categories managed by the administrator.
+2. Active categories.
+3. Categories visible to customers.
+4. Categories with products.
+5. Categories currently empty.
+
+A category can exist in the Admin Panel without appearing in the customer Catalog if it is intentionally inactive or hidden.
+
+However, this must be an explicit status, not an accidental mismatch.
+
+Show useful category information in the Admin Panel, such as product count, active/hidden status, and display order, when supported by real data.
+
+If a category is active and customer-visible, its customer-facing behavior must be predictable and consistent.
+
+Do not silently hide a category because of an unrelated filtering bug.
+
+If an active visible category has zero products, handle it using a clearly defined rule and show an appropriate empty state if it is displayed.
+
+---
+
+# PART 3 — AUTOMATIC PRODUCT CATEGORY DETECTION
+
+## 7. Automatic category assignment when adding products
+
+I want the application to recognize a product's type and automatically assign it to the appropriate existing category.
+
+Example:
+
+When an administrator adds a headphone product, the system should automatically recognize that it is a headphone and assign it to the existing "ყურსასმენები" category.
+
+The product should then appear in that category in the customer-facing Catalog.
+
+This must work as a real data operation, not just as a visual suggestion.
+
+## 8. Use a structured product type system
+
+Inspect the existing product model and add or improve a structured productType field if necessary.
+
+Do not rely exclusively on a product name string.
+
+The product type should be a stable machine-readable value, for example:
+
+- headphones
+- keyboard
+- mouse
+- charger
+- cable
+- phone_case
+- screen_protector
+- smartphone
+- tablet
+- smartwatch
+- speaker
+- other
+
+IMPORTANT:
+
+This is an illustrative list, not permission to invent a completely new catalog taxonomy.
+
+First inspect the actual existing BSTORE product inventory and categories.
+
+Use the real existing product types and build the final mapping from the actual inventory.
+
+Do not create categories for products that the store does not sell or does not intend to support.
+
+Keep productType values independent from Georgian display names.
+
+## 9. Category mapping rules
+
+Implement a centralized, deterministic mapping between product types and canonical category IDs.
+
+Example:
+
+productType = headphones
+categoryId = the existing canonical ID for "ყურსასმენები"
+
+The mapping must not depend on the category display name alone.
+
+When the product type is selected or recognized:
+
+1. Resolve the product type.
+2. Find its mapped canonical category.
+3. Assign the corresponding categoryId.
+4. Save the product with the correct category reference.
+5. Ensure the customer-facing Catalog can retrieve the product through that category.
+
+Do not create a new category every time a product is added.
+
+Do not generate duplicate categories because of spelling differences.
+
+Do not assign products to unrelated categories.
+
+## 10. Product creation UI
+
+Improve the Admin Panel product creation form.
+
+The workflow should be simple:
+
+- Administrator enters the product name.
+- Administrator enters the description and other existing product fields.
+- Administrator selects or confirms the product type.
+- The application automatically selects the corresponding existing category.
+- The selected category is visibly shown in the form.
+- The administrator can review the selection before saving.
+
+If the product type is unambiguous based on the existing structured product type, assign its category automatically.
+
+If the product name or description suggests a type but the result is ambiguous, show a suggested category and require administrator confirmation.
+
+Do not silently guess an uncertain category.
+
+Allow manual category correction by an authorized administrator where appropriate.
+
+A manual override must still reference a valid canonical category ID.
+
+If no suitable category exists:
+- Do not silently create a duplicate.
+- Show a clear message.
+- Allow an authorized administrator to create or select an appropriate category through the existing category-management workflow.
+
+Do not save a product with a broken or nonexistent category reference.
+
+## 11. Product editing
+
+Apply the same category logic when editing existing products.
+
+Requirements:
+
+- Load the current product type and category.
+- Display the correct current category.
+- If product type changes, recalculate the suggested category.
+- Preserve an intentional manual category override where appropriate.
+- Validate the category before saving.
+- Update the customer-facing catalog correctly.
+
+Do not accidentally reset existing product fields when only changing the category.
+
+Preserve existing image references, descriptions, prices, stock, discount data, product IDs, and other product information.
+
+---
+
+# PART 4 — EXISTING DATA MIGRATION AND CONSISTENCY
+
+## 12. Audit existing categories and products
+
+Do not assume that all existing Firestore records are correct.
+
+Perform a safe audit of the current category and product data.
+
+Identify:
+
+- Duplicate categories.
+- Equivalent categories with different names.
+- Products with missing category IDs.
+- Products referencing nonexistent category IDs.
+- Products with incorrect category references.
+- Products with inconsistent productType values.
+- Categories that exist only in the Admin Panel.
+- Categories missing from the customer-facing Catalog.
+- Categories that are inactive or hidden.
+- Products that belong to inactive categories.
+
+Prepare a clear mapping from old category references to canonical category IDs.
+
+## 13. Safe migration
+
+If data migration is necessary:
+
+- Preserve every existing product.
+- Preserve product IDs.
+- Preserve prices.
+- Preserve stock.
+- Preserve images.
+- Preserve descriptions.
+- Preserve discounts.
+- Preserve product status.
+- Preserve order history.
+- Preserve historical order snapshots.
+
+Never delete or overwrite products simply to normalize categories.
+
+Do not rename or delete category records until all affected product references have been safely handled.
+
+Use a safe migration strategy:
+1. Inspect existing data.
+2. Build a mapping.
+3. Identify conflicts.
+4. Update references carefully.
+5. Verify all migrated products.
+6. Retain backward compatibility where needed.
+7. Remove obsolete duplicate definitions only after confirming that nothing references them.
+
+If the environment does not permit a real Firestore migration, implement the safe code changes and provide a clear migration script or exact manual steps.
+
+Do not claim that remote Firestore data was migrated if it was not.
+
+---
+
+# PART 5 — FIREBASE AND DATA INTEGRITY
+
+## 14. Firestore architecture
+
+Keep Firebase as the backend.
+
+Do not replace Firebase with Supabase or another database.
+
+Use the existing Firestore repository and architecture.
+
+Requirements:
+
+- One canonical category repository.
+- One consistent category model.
+- Stable category IDs.
+- Valid product-to-category references.
+- Consistent category sorting.
+- Correct active/visible filtering.
+- Real-time updates or the existing appropriate refresh strategy.
+- Correct loading, empty, and error states.
+
+The Admin Panel and customer Catalog must use the same canonical category source.
+
+Do not duplicate category arrays inside Composables.
+
+Do not hardcode category names in separate screens.
+
+## 15. Security
+
+Preserve existing administrator authorization.
+
+Only authorized administrators may:
+- Create categories.
+- Edit categories.
+- Activate/deactivate categories.
+- Change category visibility.
+- Change category sorting.
+- Assign or override product categories.
+- Create or edit products.
+
+Do not treat UI hiding as security.
+
+Inspect Firestore Security Rules and any existing trusted backend functions.
+
+Users must not be able to modify product categories or administrative fields through unauthorized client requests.
+
+Do not expose Firebase service account credentials or secrets in the Android client.
+
+Do not claim that security rules or backend functions were deployed unless deployment actually succeeded.
+
+If deployment requires additional permissions, billing, indexes, or manual action, explain that clearly.
+
+---
+
+# PART 6 — CUSTOMER-FACING CATALOG
+
+## 16. Catalog behavior
+
+The customer-facing Catalog must reflect the canonical category system.
+
+Requirements:
+
+- Load actual customer-visible categories.
+- Use the same category IDs managed by the Admin Panel.
+- Display correct category names and images/icons.
+- Sort categories according to the configured sortOrder.
+- Display products belonging to the selected category.
+- Use valid category references.
+- Prevent duplicate products.
+- Prevent products from appearing in unrelated categories.
+- Handle categories with zero products correctly.
+- Show useful empty states.
+- Preserve existing product cards and product detail navigation.
+- Preserve cart and favorites actions.
+- Preserve current search and filtering functionality.
+
+When a new headphone is added and saved with the headphones product type, it must appear in the headphones category automatically, without manually editing another category list or releasing a new application version.
+
+The same principle must work for all supported product types.
+
+---
+
+# PART 7 — TESTING
+
+## 17. Side drawer tests
+
+Verify:
+
+1. Drawer opens from the hamburger button.
+2. Drawer closes from the close button.
+3. Drawer closes using Android back.
+4. Drawer closes after selecting an item.
+5. User profile displays actual authenticated information.
+6. Guest state works correctly, if supported.
+7. Orders navigation works.
+8. Favorites navigation works.
+9. Cart navigation works.
+10. Help/contact navigation works.
+11. Service-center navigation works.
+12. Legal information navigation works.
+13. Settings navigation works.
+14. Admin panel appears only for authorized administrators.
+15. Logout works correctly.
+16. Application version is accurate.
+17. Scrolling works on small screens.
+18. Bottom navigation and system insets do not overlap drawer content.
+19. No duplicate navigation destinations are created.
+
+## 18. Category system tests
+
+Verify:
+
+1. Admin Panel and customer Catalog load categories from the same canonical source.
+2. The category "ყურსასმენები", if present in the actual canonical category data, is correctly represented in both places according to its visibility status.
+3. No duplicate categories appear.
+4. Category sorting is consistent.
+5. Active/inactive behavior works.
+6. Visible/hidden behavior works.
+7. Empty categories are handled correctly.
+8. Product category references are valid.
+9. Existing products remain intact.
+10. Existing product IDs do not change.
+
+## 19. Automatic category assignment tests
+
+At minimum, test:
+
+- Adding a headphone.
+- Adding a keyboard.
+- Adding a mouse.
+- Adding a charger.
+- Adding a cable.
+- Adding another actual product type from the existing BSTORE inventory.
+- Editing a product and changing its type.
+- Editing a product and manually correcting its category.
+- Adding a product whose type is ambiguous.
+- Attempting to save a product without a valid category reference.
+
+Use the actual existing BSTORE taxonomy and inventory during testing.
+
+Verify that every successfully saved product appears in the correct customer-facing category.
+
+Verify that the product is not duplicated in another category unless the existing application explicitly supports multiple category assignments.
+
+---
+
+# PART 8 — IMPLEMENTATION SAFETY
+
+This is an existing BSTORE project.
+
+Do not:
+
+- Rebuild the application.
+- Change the package name.
+- Change the application ID.
+- Replace Firebase.
+- Replace Firebase Authentication.
+- Replace Firestore.
+- Delete existing product records.
+- Delete existing orders.
+- Delete user accounts.
+- Break the shopping cart.
+- Break favorites.
+- Break product details.
+- Break checkout.
+- Break order processing.
+- Remove existing Admin Panel functionality.
+- Remove existing Catalog functionality.
+- Change the release signing configuration.
+- Change the keystore.
+- Modify unrelated screens.
+- Add unnecessary dependencies.
+- Insert demo products or sample categories into production.
+
+Preserve existing architecture and backward compatibility.
+
+Make focused changes and verify them.
+
+---
+
+# PART 9 — FINAL ACCEPTANCE CRITERIA
+
+The task is complete only when all of the following are true:
+
+### Side drawer
+- It closely matches the attached design reference.
+- All existing supported menu items are preserved.
+- All visible actions work.
+- User information is real.
+- Admin access is protected.
+- Logout works.
+- The drawer behaves correctly on different screen sizes.
+
+### Category system
+- Admin Panel and customer Catalog use one canonical category source.
+- The mismatch between category lists is resolved.
+- Duplicate and invalid category references are handled.
+- Existing product data is preserved.
+- Product types are structured and consistent.
+- Adding a headphone automatically assigns the correct existing headphones category.
+- The same automatic assignment works for other supported product types.
+- Products appear in the correct customer-facing category after saving.
+- Category updates do not require an application update.
+
+Do not mark the task complete based only on visual changes.
+
+Do not claim a migration or deployment succeeded unless it actually happened.
+
+---
+
+# PART 10 — FINAL REPORT IN GEORGIAN
+
+After completing the work, provide a detailed but understandable report in Georgian.
+
+Include:
+
+1. Files modified.
+2. Side drawer components redesigned.
+3. Existing navigation destinations preserved.
+4. Real data sources used in the drawer.
+5. Original cause of the Admin Panel / Catalog category mismatch.
+6. The canonical category architecture implemented.
+7. How product type detection and automatic category assignment work.
+8. How the headphones example was tested.
+9. How other product types were tested.
+10. Whether existing Firestore data was migrated.
+11. Whether Firebase Security Rules or backend changes were needed.
+12. Whether the application builds successfully.
+13. Any remaining issues or manual configuration steps.
+
+Separate the results into:
+
+- Implemented and tested.
+- Implemented but not fully tested.
+- Requires Firestore migration or deployment.
+- Not implemented.
+
+Be honest about what was actually completed.
+
+FINAL GOAL:
+
+A premium, fully functional BSTORE side navigation drawer matching the attached image, combined with a unified and reliable category system where the Admin Panel and customer Catalog always remain consistent, and products are automatically assigned to the correct category according to their actual product type.
+
+Start by inspecting the existing project and its real Firebase data structures. Then implement both improvements carefully without damaging existing functionality.

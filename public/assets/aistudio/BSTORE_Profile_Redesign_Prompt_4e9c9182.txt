@@ -1,0 +1,532 @@
+# BSTORE — COMPLETE PROFILE SCREEN REDESIGN & FUNCTIONALITY PRESERVATION
+
+## PRIMARY OBJECTIVE
+
+Redesign the existing BSTORE Android application's Profile screen using the provided new visual reference image as the primary UI/UX direction.
+
+You must also inspect the provided original screen recording (214.mp4) to understand the current Profile screen, its complete scrollable content, existing functionality, navigation destinations, and current behavior.
+
+This is NOT a request to create a new profile screen from scratch.
+
+This is a careful redesign and integration task:
+- Preserve every existing working feature.
+- Preserve real account and application data.
+- Improve visual hierarchy, compactness, usability, and consistency.
+- Reorganize existing elements into the new premium design.
+- Do not invent, fabricate, or hardcode user information, products, orders, counts, addresses, contact details, or other dynamic content.
+
+The final result must look close to the supplied design reference while remaining fully connected to the existing BSTORE application architecture and real data.
+
+---
+
+## 1. MANDATORY PROJECT INSPECTION — BEFORE CODING
+
+First inspect the entire existing implementation related to the Profile screen.
+
+Identify and document internally:
+
+1. Profile screen Composable and its child components.
+2. Navigation routes and destinations opened from the Profile screen.
+3. Firebase Authentication integration.
+4. Firestore collections and documents used for profile data.
+5. Existing user profile model and data repository.
+6. Order repository, order models, statuses, and user ownership logic.
+7. Favorites repository, storage mechanism, and product references.
+8. Admin authentication and authorization mechanism.
+9. Account editing functionality.
+10. Password change functionality, if implemented.
+11. Sign-out functionality.
+12. Account deletion and associated data deletion flow.
+13. Privacy policy, payment/refund policy, and terms pages.
+14. Contact and service-center information sources.
+15. Any local storage, preferences, or device-information functionality currently used by the profile.
+
+Inspect actual implementations and event handlers, not just UI labels.
+
+Create a clear mapping between every existing Profile screen element and its corresponding implementation, data source, and navigation destination.
+
+Do not assume a feature works just because a button exists.
+
+If an existing feature is broken, identify the cause and repair it without replacing the entire architecture.
+
+Do not begin implementation until you understand the existing structure.
+
+---
+
+## 2. VISUAL DESIGN DIRECTION
+
+Use the supplied new BSTORE profile mockup as the visual reference.
+
+Brand:
+- Name: BSTORE
+- Primary background: very dark graphite / near-black.
+- Surface colors: slightly lighter charcoal.
+- Primary accent: orange (#FF6B00).
+- Main text: white.
+- Secondary text: muted gray.
+- Destructive actions: restrained red.
+- Success states: green only when supported by actual application state.
+
+Design characteristics:
+
+- Premium, modern ecommerce account interface.
+- Compact and well-organized layout.
+- Consistent spacing and alignment.
+- Rounded corners, but avoid excessive card nesting.
+- Restrained orange accents.
+- Clear typography hierarchy.
+- Small, consistent icons.
+- Subtle borders and elevation.
+- No unnecessary decorative elements.
+- Avoid oversized headings and oversized empty cards.
+- Avoid excessive vertical spacing.
+- Avoid making every individual row a separate large card.
+
+Use the existing project's design system and Material 3 implementation where appropriate.
+
+Do not change the overall BSTORE branding, app header, or bottom navigation unnecessarily.
+
+The existing fixed header and bottom navigation must remain correctly positioned.
+
+The screen must scroll smoothly without content being hidden behind the bottom navigation or system navigation bar.
+
+Use appropriate window insets and safe drawing behavior.
+
+---
+
+## 3. PROFILE SCREEN STRUCTURE
+
+Reorganize the existing features into the following compact structure.
+
+### A. Profile identity card
+
+At the top, create a compact profile card containing:
+
+- Existing profile avatar, if available.
+- Existing user's actual display name.
+- Actual authenticated email address.
+- Authentication provider indicator, only if the provider is known.
+- Compact edit-profile action.
+- Optional navigation to the existing account details page, if currently supported.
+
+Rules:
+
+- Read the user's actual Firebase Authentication and/or Firestore profile data.
+- Do not generate a name from an email address.
+- Do not display a fictional email.
+- Do not invent a Google verification badge.
+- Only show a Google account indicator if the actual authentication provider confirms Google sign-in.
+- If the user has no profile photo, use the existing default avatar or a neutral initials/avatar placeholder.
+- Never use a fabricated person's photo or identity.
+
+### B. Personal information
+
+Integrate the existing personal information in a compact and readable area.
+
+Potential fields, only when they already exist in the application:
+
+- Phone number.
+- Saved delivery address.
+- Device information, if currently supported.
+- Other existing profile fields.
+
+Important:
+
+- Inspect the actual data model before displaying any field.
+- Do not invent a phone number, city, address, device model, or any other information.
+- If a value is missing, show an appropriate neutral state or an action such as "დამატება".
+- Do not display an empty field as if it contains verified information.
+- Do not automatically treat the device running the app as a saved user profile field unless the existing application intentionally uses that information.
+
+If editing these fields is already supported, preserve the existing edit functionality.
+
+### C. Account actions
+
+Preserve the existing actions:
+
+- რედაქტირება
+- პაროლის შეცვლა
+- გასვლა
+
+Place them in a compact, visually balanced layout.
+
+Each action must retain its original behavior and navigation.
+
+For password changes:
+- Inspect the existing authentication implementation.
+- Preserve the actual Firebase Authentication flow.
+- Do not create a fake password-change action.
+- If the current authentication provider does not support password changes in the expected way, show the appropriate existing authentication flow.
+
+For sign-out:
+- Preserve the existing logout implementation.
+- Clear user-specific in-memory and cached state where required.
+- Do not accidentally delete the user's account or data.
+
+### D. My orders
+
+Create a compact "ჩემი შეკვეთები" section.
+
+Preserve the existing order functionality.
+
+The section should include:
+
+- Active orders tab.
+- Completed orders tab.
+- Real counts for each category.
+- A compact preview of relevant orders.
+- A "ყველას ნახვა" action that opens the existing complete orders screen.
+- Navigation to the correct existing order details screen when an order is selected.
+
+Data requirements:
+
+- Load orders belonging to the currently authenticated user only.
+- Use the existing Firestore order repository and actual order model.
+- Determine active/completed status using the existing order-status logic.
+- Do not invent order numbers, dates, products, prices, or statuses.
+- Do not use mock orders.
+- Do not use sample AirPods, iPhones, or any other sample products from the design image.
+- Product thumbnails must come from the real order/product data or existing image storage.
+- Use actual product names and order information.
+
+If there are no orders:
+- Show a compact, visually attractive empty state.
+- Display a truthful Georgian message.
+- Provide a useful action to return to shopping if an existing navigation destination supports it.
+- Do not display fake order cards.
+
+Loading, empty, and error states must be visually distinct.
+
+### E. Favorites
+
+Create a compact "რჩეულები" section.
+
+Preserve the existing favorites functionality.
+
+Display:
+- Real favorites count.
+- A small horizontal preview of actual favorite products.
+- A "ყველას ნახვა" action.
+- Navigation to the existing favorites screen.
+- Correct product-detail navigation when a favorite product is selected.
+
+Data requirements:
+
+- Use the existing favorites repository and actual product IDs.
+- Load real product details from the existing product data source.
+- Never create sample favorite products.
+- Do not use placeholder product thumbnails as real items.
+- Do not display a count that is different from the actual favorites collection.
+
+If there are no favorites:
+- Show a compact empty state.
+- Display an appropriate Georgian message.
+- Offer navigation to the product catalog, if available.
+
+### F. Security, settings, and account management
+
+Organize existing settings in a compact list rather than large separate cards.
+
+Preserve all currently implemented destinations and actions, including the existing options related to:
+
+- უსაფრთხოება და პარამეტრები
+- პირადი მონაცემები / მონაცემების მართვა, if implemented
+- კონფიდენციალურობა
+- ანგარიშისა და მონაცემების წაშლა
+
+Do not add fake settings or nonfunctional toggles.
+
+Account deletion must remain a separate destructive action with:
+- Clear warning.
+- Confirmation step.
+- Existing secure deletion workflow.
+- Appropriate reauthentication if required by Firebase.
+- Correct handling of related user data according to the existing backend implementation.
+
+Never make account deletion a one-tap accidental action.
+
+### G. Help and contact
+
+Preserve the existing contact and support functionality.
+
+Use the actual contact information already configured in the project.
+
+Possible existing elements include:
+- Contact phone number.
+- WhatsApp.
+- Telegram.
+- Facebook.
+- Other currently configured contact channels.
+
+Do not invent or replace phone numbers, usernames, or social URLs.
+
+Each contact option must open its actual configured destination.
+
+If a contact method has no configured destination, hide it or display an appropriate unavailable state. Do not create a fictional link.
+
+### H. Administrator panel
+
+Preserve the existing administrator panel entry.
+
+Requirements:
+
+- Show it only to users who are actually authorized administrators.
+- Use the existing admin authorization mechanism.
+- Do not rely only on a locally stored Boolean or a hidden UI element for security.
+- Preserve the existing admin navigation route.
+- Never expose administrative functionality to ordinary users.
+
+The visual style should match the new design reference: compact, premium, and clearly distinguishable from ordinary account settings.
+
+### I. Policies and legal information
+
+The original screen recording shows additional sections that must not be lost.
+
+Preserve the existing pages and navigation for:
+
+- გადახდისა და თანხის დაბრუნების პოლიტიკა
+- კონფიდენციალურობის პოლიტიკა
+- წესები და პირობები
+- კონტაქტი
+
+These can be grouped into a compact "ინფორმაცია და პირობები" section.
+
+Do not rewrite legal content or invent policy statements as part of this visual redesign.
+
+Use the existing content and destinations.
+
+### J. Service center information
+
+The original screen recording also shows a separate service-center information section.
+
+Preserve it.
+
+Use the exact existing source of information for:
+- Service-center address.
+- Working hours.
+- Contact phone number.
+- Other existing location information.
+
+Do not copy demo values from the new design reference.
+
+If these details are hardcoded in the current application, identify the existing source and reuse it consistently rather than introducing duplicate values.
+
+If a value is unavailable, do not invent one.
+
+Make the contact and location actions functional only where the project already supports them.
+
+---
+
+## 4. CRITICAL DATA INTEGRITY RULES
+
+This section is mandatory.
+
+The provided design image is a visual reference only. Its sample data must NEVER become application data.
+
+Do not hardcode or fabricate:
+
+- User names.
+- Email addresses.
+- Phone numbers.
+- Addresses.
+- Device models.
+- Order counts.
+- Order numbers.
+- Product names.
+- Product prices.
+- Product images.
+- Favorite counts.
+- Order dates.
+- Order statuses.
+- Admin status.
+- Contact details.
+- Working hours.
+- Any other dynamic information.
+
+Every dynamic value must come from its actual source.
+
+Use:
+- Firebase Authentication for authenticated identity and provider information.
+- Existing Firestore profile documents for profile fields.
+- Existing order repository for orders.
+- Existing favorites repository for favorites.
+- Existing product repository for product information.
+- Existing admin authorization for administrator access.
+- Existing configuration or content source for contact, service-center, and policy information.
+
+Do not create duplicate collections or a new data model unless there is a demonstrated technical requirement.
+
+Do not replace Firebase with Supabase or another backend.
+
+Do not introduce mock repositories, sample data, or demo mode into production UI.
+
+If data is missing, show a truthful empty or unavailable state.
+
+If data is loading, show a loading state.
+
+If data retrieval fails, show an appropriate error state and retry action where supported.
+
+Never convert a failed request into a fake successful result.
+
+---
+
+## 5. STATE MANAGEMENT AND USER ISOLATION
+
+The Profile screen must always represent the currently authenticated user.
+
+Requirements:
+
+- Observe authentication state correctly.
+- Load user-specific information using the current authenticated UID.
+- Prevent one user's profile, orders, or favorites from appearing in another user's session.
+- Handle login, logout, and account switching correctly.
+- Clear or refresh user-specific state after authentication changes.
+- Avoid stale profile data after returning to the screen.
+- Prevent duplicate requests and unnecessary recompositions.
+- Preserve the existing architecture and state-management approach.
+- Do not introduce a second competing source of truth.
+
+If the app supports guest users, preserve guest behavior and show only the features actually available to guests.
+
+Use appropriate lifecycle-aware state collection.
+
+---
+
+## 6. RESPONSIVE AND COMPACT UI REQUIREMENTS
+
+The new design should be visually close to the supplied reference, but must accommodate real application content.
+
+Requirements:
+
+- Use a vertically scrollable layout.
+- Keep the profile identity section compact.
+- Keep order and favorites previews compact.
+- Use horizontal product previews only when actual data exists.
+- Avoid large empty containers.
+- Avoid excessive vertical gaps.
+- Keep section headings concise.
+- Keep action buttons readable and easy to tap.
+- Preserve accessibility and adequate touch targets.
+- Ensure Georgian text does not clip or overflow.
+- Support different Android screen sizes and font scaling.
+- Ensure long names, email addresses, product names, and addresses wrap or truncate safely.
+- Ensure the bottom navigation does not cover the last section.
+- Avoid nested scrolling conflicts.
+- Use LazyColumn or the appropriate existing Compose scrolling architecture.
+
+Do not make the page so compact that important actions become difficult to use.
+
+---
+
+## 7. IMPLEMENTATION SAFETY
+
+This is an existing production-oriented project.
+
+Do not:
+
+- Rebuild the application.
+- Replace the existing Profile architecture without a strong reason.
+- Change the package name or application ID.
+- Change Firebase project configuration.
+- Replace Firebase Authentication or Firestore.
+- Delete existing collections or documents.
+- Change the existing order schema unnecessarily.
+- Remove existing navigation routes.
+- Break the bottom navigation.
+- Modify unrelated screens.
+- Remove working functionality to simplify the UI.
+- Insert fake data to make the screen look populated.
+- Change the release signing configuration or keystore.
+- Introduce unnecessary dependencies.
+
+Preserve backward compatibility with existing user profiles, orders, and favorites.
+
+If a schema change is genuinely necessary, explain why and implement it safely without destructive migration.
+
+---
+
+## 8. FUNCTIONAL TESTING — REQUIRED
+
+After implementation, test the Profile screen and its existing features.
+
+At minimum, verify:
+
+1. Authenticated user with a complete profile.
+2. Authenticated user with missing optional profile fields.
+3. Google-authenticated user.
+4. User with no orders.
+5. User with active orders.
+6. User with completed orders.
+7. User with both active and completed orders.
+8. User with no favorites.
+9. User with multiple favorites.
+10. Normal user without administrator privileges.
+11. Authorized administrator.
+12. Profile editing.
+13. Password change flow, if supported.
+14. Sign-out.
+15. Account deletion confirmation and existing deletion workflow.
+16. Policy page navigation.
+17. Contact actions.
+18. Service-center information.
+19. Screen scrolling and bottom navigation overlap.
+20. Loading, empty, and error states.
+21. Switching between two authenticated accounts.
+
+Verify that no data from one account remains visible after switching to another account.
+
+Check that all counts match the underlying real data.
+
+Check that every visible button has a real action.
+
+Check that there are no placeholder names, fake order cards, fabricated product images, or hardcoded sample values.
+
+---
+
+## 9. FINAL ACCEPTANCE CRITERIA
+
+The task is complete only when:
+
+- The Profile screen visually follows the new reference design.
+- All existing features from the original screen recording are preserved.
+- All dynamic information is connected to actual application data.
+- No fictional user or shopping data is displayed.
+- Existing navigation and actions work.
+- Admin access remains properly protected.
+- The layout is compact, polished, and responsive.
+- The app builds successfully.
+
+Do not report a feature as completed if it was only visually implemented.
+
+Do not claim that Firebase rules, backend functions, or remote configuration were deployed unless deployment actually succeeded.
+
+If a function cannot be verified, clearly state that it remains unverified.
+
+---
+
+## 10. FINAL REPORT
+
+After implementation, provide a concise but detailed report in Georgian.
+
+Include:
+
+1. Which files were modified.
+2. What visual changes were implemented.
+3. Which existing features were preserved.
+4. Which data sources are connected to each section.
+5. Which actions and navigation destinations were tested.
+6. Whether the build succeeded.
+7. Any remaining bugs or limitations.
+8. Any Firebase configuration, indexes, permissions, or manual steps still required.
+
+Clearly distinguish:
+- Implemented and tested.
+- Implemented but not fully tested.
+- Not implemented.
+- Requires manual configuration.
+
+Do not simply say "Everything is complete."
+
+The goal is a genuinely functional, data-accurate, premium BSTORE Profile screen — not a static visual imitation.
+
+Start by inspecting the existing project and the two supplied references. Then implement the redesign carefully.

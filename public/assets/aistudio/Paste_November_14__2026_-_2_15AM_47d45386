@@ -1,0 +1,1204 @@
+# BSTORE — CRITICAL PRODUCT MANAGEMENT FIX, DYNAMIC BRAND SYSTEM, SEARCH OPTIMIZATION & COMPLETE UI/UX REFINEMENT
+
+## PROJECT CONTEXT
+
+You are working on the existing BSTORE Android application.
+
+Technology:
+- Native Android.
+- Kotlin.
+- Jetpack Compose.
+- Firebase Authentication.
+- Cloud Firestore.
+- Firebase Storage.
+- Existing application repositories, models, navigation, and admin functionality.
+
+This is an existing application. Do not rebuild it.
+
+Your task is to perform a detailed technical audit, fix critical product-management problems, implement a proper dynamic brand system, optimize product search, and refine several existing UI screens.
+
+The most important requirement: implement actual working functionality, not just visual changes.
+
+Preserve:
+- Existing package name and application ID.
+- Existing Firebase project and configuration.
+- Firebase Authentication.
+- Firestore collections and existing data.
+- Firebase Storage.
+- Product IDs and existing product records.
+- Cart, favorites, checkout, orders, discounts, and product details.
+- Admin authorization and admin functionality.
+- Existing navigation architecture.
+- Release signing configuration and keystore.
+
+Do not introduce Supabase or another backend.
+
+---
+
+# PART 1 — CRITICAL PRODUCT CREATION AND PERSISTENCE BUG
+
+## 1. Current critical problem
+
+The product creation process currently behaves incorrectly.
+
+When I add a new product from the Admin Panel:
+
+1. The interface indicates that the product was successfully added.
+2. I open the customer-facing application to check the Catalog.
+3. The new product is nowhere to be found.
+4. When I reopen the Admin Panel, the product is also missing.
+
+In other words, the interface initially reports success, but the product does not persist.
+
+THIS IS THE HIGHEST PRIORITY ISSUE.
+
+Do not simply modify the product card or refresh the Catalog.
+
+Find the actual technical reason why the product disappears.
+
+## 2. Perform a complete investigation
+
+Inspect the complete product creation and persistence workflow:
+
+- Product creation Composable.
+- Product creation ViewModel.
+- Product model.
+- Product repository.
+- Firestore repository.
+- Firebase Storage upload logic.
+- Firestore collection names and document paths.
+- Product serialization and deserialization.
+- Product ID generation.
+- Admin authorization.
+- Firestore Security Rules.
+- Save button event handler.
+- Coroutine and asynchronous execution.
+- Error handling.
+- Loading and success states.
+- Product list listeners.
+- Customer-facing Catalog query.
+- Admin Panel product list query.
+- Active/inactive filtering.
+- Product status fields.
+- Category and brand references.
+- Any local cache or temporary product state.
+
+Investigate the following possible causes rather than assuming one:
+
+- Firestore write operation is not awaited.
+- The UI displays success before Firestore confirms the write.
+- Firestore write fails because of Security Rules.
+- Incorrect Firebase collection or document path.
+- Product is saved under a different document structure than the readers expect.
+- Serialization drops important fields.
+- Required fields are missing.
+- Product ID changes unexpectedly.
+- Storage upload fails and interrupts the save workflow.
+- A failed image upload prevents the product from being committed.
+- The product is saved but immediately overwritten or deleted.
+- An incorrect merge operation replaces existing data.
+- Product is saved with inactive or hidden status.
+- Catalog and Admin Panel read from different collections or repositories.
+- Local state temporarily displays a product that was never saved remotely.
+- A Firestore listener or synchronization operation removes unsaved local records.
+- An exception is caught and ignored.
+
+Inspect actual code and logs to identify the real cause.
+
+Do not make assumptions or hide errors.
+
+## 3. Correct product creation transaction flow
+
+Implement a reliable product creation workflow.
+
+Expected behavior:
+
+1. Administrator fills in the product information.
+2. The application validates required fields.
+3. Images are uploaded to Firebase Storage when applicable.
+4. The application waits for successful image upload.
+5. The product is saved to the correct Firestore collection.
+6. The Firestore operation is awaited.
+7. The application confirms that the operation succeeded.
+8. The Admin Panel refreshes or receives the updated Firestore snapshot.
+9. The customer-facing Catalog receives the same product according to its visibility and availability rules.
+
+The success message must only appear after the actual Firestore operation succeeds.
+
+If the operation fails:
+- Do not display a success message.
+- Show a clear Georgian error message.
+- Preserve the administrator's entered information.
+- Allow retrying.
+- Log the technical exception appropriately.
+
+Prevent duplicate product creation when the administrator taps the save button repeatedly.
+
+Use an appropriate saving/loading state and disable duplicate submissions while saving.
+
+Do not clear the form before the operation is confirmed successful.
+
+If image upload succeeds but Firestore saving fails, handle the uploaded file safely and avoid creating orphaned files where practical.
+
+If Firestore saving succeeds but a later UI refresh fails, do not report that the product was not saved. Distinguish persistence success from refresh failure.
+
+## 4. One source of truth for products
+
+The Admin Panel and customer-facing Catalog must use the same canonical product repository and Firestore data source.
+
+Inspect whether they currently use different collections or different filtering logic.
+
+Correct inconsistencies.
+
+Define clear product visibility rules:
+
+- Active and customer-visible products appear in the Catalog.
+- Inactive or hidden products remain manageable in the Admin Panel.
+- Deleted products are handled consistently.
+- A product must not disappear because of inconsistent local state.
+- Existing products must remain intact.
+
+Use the current product schema wherever possible.
+
+Do not create a second product collection unnecessarily.
+
+## 5. Product editing and deletion
+
+Audit these operations as well.
+
+Product editing must:
+- Save changes to the correct Firestore document.
+- Preserve fields that were not edited.
+- Preserve images unless intentionally replaced.
+- Preserve product IDs.
+- Correctly update the Catalog.
+
+Product deletion must:
+- Require confirmation.
+- Perform the actual intended deletion or deactivation.
+- Update both Admin Panel and customer Catalog correctly.
+- Handle associated images according to the existing storage architecture.
+- Never silently delete unrelated products.
+
+Do not confuse temporary UI removal with successful database deletion.
+
+---
+
+# PART 2 — COMPLETE DYNAMIC BRAND MANAGEMENT SYSTEM
+
+## 6. Current brand-selection problem
+
+The product creation form currently contains a predefined brand list that mainly includes smartphone manufacturers.
+
+However, BSTORE sells accessories and other electronics.
+
+For example, when adding:
+- Hoco headphones.
+- Borofone headphones.
+- Marshall headphones.
+- Hoco chargers.
+- Borofone cables.
+
+I have to manually type a brand because the existing predefined list is unsuitable.
+
+I want a complete dynamic brand system.
+
+## 7. Important distinction: brands are not product categories
+
+Do not confuse a product brand with a product category or product type.
+
+Examples:
+
+Product categories/types:
+- ყურსასმენები
+- დამტენები
+- კაბელები
+- კლავიატურები
+- მაუსები
+- სმარტფონები
+
+Brands:
+- Hoco
+- Borofone
+- Marshall
+- Samsung
+- Apple
+- Xiaomi
+- JBL
+- Baseus
+- Anker
+
+A brand can contain many different product types.
+
+For example, Hoco can have:
+- Headphones.
+- Chargers.
+- Cables.
+- Speakers.
+- Other accessories.
+
+All Hoco products must be discoverable under the Hoco brand, regardless of their category.
+
+Do not create a new product category called Hoco.
+
+Implement a separate canonical brand system.
+
+## 8. Dynamic brand data source
+
+Inspect the existing brand model and product schema.
+
+If a suitable brand collection already exists, reuse it.
+
+Otherwise, implement a canonical Firestore brand collection using the existing architecture.
+
+Recommended logical fields:
+
+- id
+- name
+- normalizedName
+- slug
+- logoUrl (optional)
+- isActive
+- sortOrder
+- createdAt
+- updatedAt
+
+Adapt these fields to the existing project rather than introducing unnecessary duplication.
+
+Each brand must have a stable unique ID.
+
+Products should reference the brand using a stable brandId.
+
+A brand's display name can change without breaking existing product relationships.
+
+## 9. New brand creation directly from the product form
+
+The product creation brand field must become a searchable dynamic selector.
+
+Expected behavior:
+
+1. Administrator opens the brand field.
+2. The application displays existing brands from Firestore.
+3. The administrator can search for a brand.
+4. If the brand exists, the administrator selects it.
+5. If it does not exist, the interface offers an option such as "ახალი ბრენდის დამატება".
+6. The administrator enters the new brand name.
+7. The application validates the name.
+8. The new brand is created in the canonical brand collection.
+9. The new brand becomes immediately available in the product form.
+10. The administrator selects it for the current product.
+11. The product is saved with the correct brandId and brand name/reference.
+
+Example:
+
+When I enter "Hoco" and it does not exist:
+
+- Create the Hoco brand record.
+- Do not create a duplicate if Hoco already exists under a different letter case or spacing.
+- Make Hoco selectable immediately.
+- Save the product with the Hoco brand reference.
+
+Repeat this behavior for Borofone, Marshall, and any other legitimate brand.
+
+Brand creation must not require manually editing the application code or releasing an app update.
+
+## 10. Brand normalization and duplicate prevention
+
+Implement consistent brand normalization.
+
+Handle:
+- Uppercase/lowercase differences.
+- Extra spaces.
+- Leading/trailing whitespace.
+- Common spelling inconsistencies.
+
+For example:
+- Hoco
+- HOCO
+- hoco
+
+These should not create three different brands.
+
+Use normalizedName or an equivalent unique normalized key.
+
+Prevent duplicate brand creation when multiple administrators attempt to create the same brand.
+
+Use an appropriate transaction or atomic operation where necessary.
+
+Do not automatically create a brand from arbitrary invalid text without validation.
+
+## 11. Dynamic brand browsing and filtering
+
+The customer-facing Catalog must support brand discovery.
+
+When a user selects a brand, show all active, customer-visible products associated with that brand.
+
+Examples:
+
+Selecting Hoco displays all active Hoco products:
+- Hoco headphones.
+- Hoco chargers.
+- Hoco cables.
+- Hoco speakers.
+
+Selecting Borofone displays all active Borofone products.
+
+Selecting Marshall displays all active Marshall products.
+
+This must work across different product categories.
+
+Brand filtering must use actual product brand references, not unreliable substring matching against display names.
+
+If the application already has a brand browsing screen, integrate the functionality there.
+
+Otherwise, implement the appropriate brand filter within the existing Catalog architecture without creating unnecessary duplicate screens.
+
+Keep category filtering and brand filtering independent.
+
+Users should be able to:
+- Browse a category.
+- Filter by brand.
+- Search products.
+- Combine filters where the existing architecture supports it.
+- Clear filters.
+
+The interface should display the actual available brand list.
+
+Brands without active customer-visible products should not be presented as if they contain products, unless there is an intentional reason to show them.
+
+---
+
+# PART 3 — COMPLETE PRODUCT SEARCH OPTIMIZATION
+
+## 12. Current requirement
+
+Rebuild and optimize the existing product search functionality.
+
+The search must work reliably with the real BSTORE catalog and dynamically reflect products added or edited through the Admin Panel.
+
+Do not use hardcoded sample products.
+
+Do not build a separate search catalog that becomes outdated.
+
+## 13. Search fields
+
+Search across all useful real product information:
+
+- Product name.
+- Brand name.
+- Brand ID/reference where relevant.
+- Model.
+- Category name.
+- Product type.
+- Description.
+- Search keywords.
+- SKU or product code, if available.
+- Relevant product attributes.
+
+Support Georgian and English search terms.
+
+Support common informal product names and abbreviations where practical.
+
+Examples:
+
+- Hoco headphones.
+- Hoco ყურსასმენები.
+- Borofone charger.
+- Marshall speaker.
+- Samsung charger.
+- iPhone cable.
+- Type-C კაბელი.
+- ყურსასმენი.
+- დამტენი.
+- მაუსი.
+
+A search for Hoco should find relevant Hoco products even when Hoco is stored as a separate brand reference.
+
+## 14. Search normalization
+
+Implement consistent normalization for:
+
+- Uppercase/lowercase.
+- Extra spaces.
+- Leading/trailing spaces.
+- Georgian and English text.
+- Common punctuation differences.
+- Product model formatting.
+- Common spelling variations where practical.
+
+Do not damage the original display text.
+
+Use normalized values for searching and indexing, while preserving the original product name and brand display name.
+
+## 15. Search relevance and ranking
+
+Results should be ranked sensibly.
+
+Suggested priority:
+
+1. Exact product name match.
+2. Exact brand + product name match.
+3. Exact model match.
+4. Brand match.
+5. Category/product type match.
+6. Description and keyword match.
+
+Do not display unrelated results just because a generic character appears in their description.
+
+Preserve the existing Catalog product cards and navigation.
+
+## 16. Search performance
+
+Inspect the current Firestore queries and indexing strategy.
+
+Use appropriate filtering, pagination, and indexes.
+
+Avoid downloading the entire product database repeatedly for every keystroke.
+
+Use debouncing for search input.
+
+Avoid unnecessary repeated network requests.
+
+Handle loading, empty, and error states.
+
+Do not show stale search results after a new query is submitted.
+
+If Firestore cannot provide the desired full-text search efficiently, implement a realistic solution using the current Firebase architecture.
+
+Do not claim that Firestore supports arbitrary full-text search natively.
+
+Do not introduce an expensive external search service without explaining the need and cost.
+
+For smaller catalogs, an appropriately maintained searchable product index or carefully designed client-side filtering may be sufficient.
+
+Ensure newly added products become searchable after successful persistence.
+
+Ensure edited product names, brands, and descriptions update the searchable data.
+
+---
+
+# PART 4 — SIDE DRAWER FIXES
+
+## 17. Logout button positioning
+
+The logout button at the bottom of the side navigation drawer is currently positioned too low.
+
+The Android system navigation/gesture bar slightly covers it.
+
+Fix the layout.
+
+Requirements:
+- Respect system navigation bar insets.
+- Respect display cutouts and safe drawing areas.
+- Keep the logout button fully visible.
+- Add appropriate bottom padding.
+- Ensure it does not overlap with the system gesture indicator.
+- Preserve the existing drawer design.
+- Test on different screen sizes and navigation modes.
+
+Do not simply move the button upward using an arbitrary fixed offset.
+
+Use proper Compose window inset handling and responsive layout.
+
+---
+
+# PART 5 — HELP AND CONTACT DIALOG
+
+## 18. Current behavior
+
+The side drawer contains the Help / Contact entry.
+
+Currently, opening it immediately displays telephone numbers.
+
+I want a more useful intermediate dialog.
+
+## 19. New Help / Contact dialog
+
+When the user selects "დახმარება და კონტაქტი", open a well-designed dialog or bottom sheet.
+
+It must provide two clear choices:
+
+### Option 1 — AI ასისტენტი
+
+Description:
+"დაგეხმარებით პროდუქტის შერჩევაში და კითხვებზე პასუხის მიღებაში."
+
+Action:
+Open the existing BSTORE AI Assistant screen.
+
+Preserve the existing navigation destination.
+
+Do not create a new AI Assistant implementation.
+
+### Option 2 — კონტაქტი
+
+Description:
+"დაგვიკავშირდით დამატებითი ინფორმაციისა და დახმარებისთვის."
+
+Action:
+Open the existing contact details or display the actual configured contact options.
+
+Use real existing contact information.
+
+Do not hardcode fictional numbers or URLs.
+
+The dialog should:
+- Match BSTORE branding.
+- Use appropriate icons.
+- Have balanced button sizes.
+- Use concise Georgian text.
+- Avoid unnecessary visual clutter.
+- Close correctly.
+- Work with Android back.
+- Avoid duplicate navigation.
+
+Do not display telephone numbers immediately when the user first opens Help / Contact.
+
+---
+
+# PART 6 — SERVICE CENTER DIALOG REDESIGN
+
+## 20. Current problem
+
+The side drawer has a Service Center item.
+
+When opened, the dialog displays:
+- Address.
+- Diagnostic button.
+- Call button.
+
+The diagnostic button should be removed from this dialog.
+
+## 21. New Service Center information window
+
+Create a more attractive, informative BSTORE service-center dialog.
+
+It should present the actual BEKASERVICE service location and services in a clean, professional layout.
+
+Important distinction:
+
+BSTORE is the ecommerce application/brand.
+
+BEKASERVICE is the real service business whose location and services are being presented.
+
+Do not confuse the two brands.
+
+Use the actual existing BEKASERVICE address and configured contact information.
+
+The known business location is:
+კოსტავას N10, ახალციხე.
+
+Before using other details, inspect the existing project configuration and current content.
+
+### Suggested layout
+
+Header:
+- BEKASERVICE name or existing logo.
+- "სერვისცენტრი".
+- Small location icon.
+
+Location:
+- Actual address.
+- City.
+- Optional map/navigation action if the project already supports a valid map destination.
+
+Services section:
+
+Display existing actual service categories in attractive compact rows or icon cards.
+
+Examples of services to include only if supported by the business's actual configured information:
+
+- ტელეფონის აქსესუარები.
+- პროგრამული მომსახურება.
+- ტელეფონის პროგრამული აღდგენა და განახლება.
+- პროგრამირება და განბლოკვა.
+- ტელეფონების შეკეთება.
+- სხვა ტექნიკური მომსახურება.
+
+Do not claim that a service is available if it is not actually offered or configured.
+
+Use concise descriptions, not long paragraphs.
+
+### Buttons
+
+Keep:
+1. დარეკვა
+
+Use the actual configured phone number.
+
+If supported, add:
+2. რუკაზე ნახვა
+
+Remove the diagnostic button completely from this dialog.
+
+The dialog must be visually balanced and compact.
+
+Use a premium dark design with restrained orange accents.
+
+Avoid excessive card nesting and oversized buttons.
+
+---
+
+# PART 7 — ADMINISTRATOR DRAWER LABEL
+
+## 22. Current layout issue
+
+In the side drawer, the administrator panel row currently contains:
+
+- "ადმინისტრატორი"
+- A secondary label "მხოლოდ ადმინი"
+
+Because of the additional text, the main label does not fit properly.
+
+Fix this.
+
+Requirements:
+- Display only "ადმინისტრატორი".
+- Remove the secondary "მხოლოდ ადმინი" text.
+- Preserve the administrator icon.
+- Preserve the existing authorization logic.
+- Keep the row compact and aligned.
+- Ensure the Georgian text fits on different screen sizes.
+
+Do not remove the administrator panel functionality.
+
+---
+
+# PART 8 — AI ASSISTANT HEADER LAYOUT
+
+## 23. Current visual problem
+
+When opening the AI Assistant screen, the upper layout is visually disorganized.
+
+The elements near the "BSTORE AI" heading are not aligned properly.
+
+Inspect the actual AI Assistant screen.
+
+Identify:
+- Header title.
+- Back navigation or menu action.
+- Existing mode selector.
+- Diagnostic mode selector, if present.
+- Other upper controls.
+- Header spacing and alignment.
+- Responsive behavior.
+
+Correct the layout.
+
+Requirements:
+
+- BSTORE AI must be clearly visible.
+- The title must not collide with other controls.
+- Align all elements consistently.
+- Preserve the existing assistant functionality.
+- Preserve existing normal/diagnostic modes and their logic.
+- Keep the upper section compact.
+- Avoid oversized headers.
+- Ensure Georgian text does not overflow.
+- Test on narrow screens.
+
+Do not remove or merge existing assistant modes.
+
+This is a layout refinement, not an assistant functionality replacement.
+
+---
+
+# PART 9 — ADMIN PRODUCT CREATION FORM REDESIGN
+
+## 24. Current visual problem
+
+The new product creation form in the Admin Panel has poorly balanced layouts and inconsistent button sizes.
+
+The form needs a detailed UI/UX inspection.
+
+Do not make superficial spacing changes without understanding the entire form.
+
+## 25. Product creation layout
+
+Reorganize the form into clear, compact sections.
+
+The image selection/upload area must be moved upward, next to the product title and the AI-powered product information generation feature.
+
+The administrator should be able to:
+- Enter product title.
+- Select or upload product image.
+- Use AI to retrieve/generate product information.
+- Review generated information.
+- Edit the fields.
+- Select category.
+- Select or create brand.
+- Complete pricing, stock, and other existing fields.
+- Save the product.
+
+### Suggested top section
+
+Create a visually balanced header area containing:
+
+- Product title input.
+- Image upload/selection control.
+- AI information generation action.
+
+On wider screens, these elements may be aligned horizontally.
+
+On narrow screens, use a clean responsive layout that does not compress the inputs or buttons.
+
+Do not force a horizontal layout on screens where it would make controls difficult to use.
+
+## 26. AI product information generation
+
+Preserve the existing AI functionality.
+
+Do not remove it.
+
+Inspect how the AI currently retrieves or generates product information.
+
+Requirements:
+- Keep the action clearly visible.
+- Use an appropriate loading state.
+- Prevent duplicate requests.
+- Preserve manually entered information.
+- Do not overwrite administrator edits without confirmation.
+- Show errors when generation fails.
+- Allow manual editing before saving.
+- Do not automatically treat AI-generated specifications as verified facts.
+
+The image selection area must be visually close to the title and AI action.
+
+## 27. Form controls and buttons
+
+Normalize:
+- Input heights.
+- Button heights.
+- Corner radii.
+- Icon sizes.
+- Internal padding.
+- Section spacing.
+- Label spacing.
+- Dropdown heights.
+- Image upload control dimensions.
+
+All buttons must have consistent visual proportions.
+
+Primary actions should be visually distinguishable from secondary actions.
+
+The save button should be clear and accessible.
+
+Avoid:
+- Different button heights without reason.
+- Text clipping.
+- Oversized controls.
+- Inconsistent horizontal margins.
+- Unnecessary nested cards.
+- Excessive blank space.
+
+Ensure the entire form works with Georgian labels.
+
+Preserve every existing product field and validation rule.
+
+---
+
+# PART 10 — BANK DETAILS ADMIN PAGE
+
+## 28. Current problem
+
+The bank details management page in the Admin Panel needs visual optimization.
+
+Inspect the entire screen, including:
+- Bank account list.
+- Add account action.
+- Edit account action.
+- Delete/deactivate action.
+- Account fields.
+- Bank selection.
+- Account holder information.
+- IBAN.
+- Instructions.
+- Enabled/disabled state.
+- Display ordering.
+- Save/cancel buttons.
+
+Use the existing bank details data model and Firestore source.
+
+Do not invent bank accounts or IBANs.
+
+Do not change existing payment architecture.
+
+Preserve:
+- Multiple bank accounts.
+- BOG and TBC support, if configured.
+- Existing account records.
+- Existing order payment snapshots.
+- Existing payment instructions.
+- Existing administrator permissions.
+
+Improve visual hierarchy.
+
+### Design requirements
+
+- Compact bank account cards or rows.
+- Clear bank identification.
+- Readable account holder and IBAN.
+- Consistent action buttons.
+- Better form spacing.
+- Clearly distinguish enabled and disabled accounts.
+- Use appropriate bank icons or existing brand assets when available.
+- Keep sensitive account information readable only where the existing access rules allow it.
+
+Do not break customer payment information screens.
+
+---
+
+# PART 11 — CONTACTS AND SOCIAL NETWORKS ADMIN PAGE
+
+## 29. Current problem
+
+The contacts and social networks management page has inconsistent button dimensions and poorly aligned controls.
+
+Inspect the entire page and correct it.
+
+Preserve all existing contact fields and functionality.
+
+Examples of existing configured channels may include:
+- Phone.
+- WhatsApp.
+- Telegram.
+- Facebook.
+- Instagram.
+- TikTok.
+- Other configured social channels.
+
+Do not invent new contact destinations.
+
+Do not replace configured URLs or numbers.
+
+### Visual requirements
+
+- Consistent row heights.
+- Consistent button sizes.
+- Properly aligned icons and text.
+- Clear labels.
+- Compact editable fields.
+- Proper spacing between sections.
+- Responsive behavior.
+- Clear save/cancel actions.
+- Proper loading and error states.
+
+Ensure editing and saving actually persists to the existing data source.
+
+---
+
+# PART 12 — REAL SOCIAL NETWORK ICONS THROUGHOUT THE APP
+
+## 30. Current requirement
+
+Throughout the BSTORE application, social networks must use their appropriate real brand icons.
+
+Do not use generic icons as substitutes when a recognizable official brand icon is available.
+
+Examples:
+
+- Facebook: Facebook brand icon.
+- Instagram: Instagram brand icon.
+- Telegram: Telegram brand icon.
+- WhatsApp: WhatsApp brand icon.
+- TikTok: TikTok brand icon.
+- YouTube: YouTube brand icon.
+
+Use actual recognizable vector/icon assets from an appropriate legitimate icon source or existing project resources.
+
+If a brand icon asset already exists, reuse it.
+
+Do not introduce copyright-inappropriate or unofficial logos.
+
+### Icon sizing and alignment
+
+This is important.
+
+Icons must be:
+- Correctly proportioned.
+- Consistently sized.
+- Visually centered.
+- Properly aligned with text.
+- Displayed without stretching.
+- Suitable for the button or row dimensions.
+
+Use consistent icon containers.
+
+Avoid oversized social logos.
+
+Do not use emoji as substitutes for social network icons.
+
+Use the same visual rules throughout:
+- Contact dialogs.
+- Side navigation.
+- Profile screen.
+- Footer/contact areas.
+- Admin contact management.
+- Any other existing social link area.
+
+Preserve the existing configured destination for each social channel.
+
+If a social destination is missing, do not display a fake working link.
+
+---
+
+# PART 13 — ARCHITECTURE, DATA SAFETY AND SECURITY
+
+## 31. General rules
+
+All new functionality must fit the existing architecture.
+
+Prefer:
+- Existing repositories.
+- Existing ViewModels.
+- Existing models.
+- Existing navigation.
+- Existing Firebase integration.
+- Existing UI components and design tokens.
+
+Do not create duplicate sources of truth.
+
+Do not move critical business logic into Composables.
+
+Do not hardcode dynamic data.
+
+Do not add unnecessary dependencies.
+
+## 32. Firebase security
+
+Inspect Firestore Security Rules for product and brand operations.
+
+Only authorized administrators may:
+- Create products.
+- Edit products.
+- Delete or deactivate products.
+- Create brands.
+- Edit brands.
+- Change brand status.
+- Modify product category or brand references.
+- Manage bank details.
+- Manage contact information.
+
+Do not rely on UI visibility for authorization.
+
+Validate operations using the existing secure architecture.
+
+Do not expose service account credentials or private keys in the Android application.
+
+Do not claim that Firestore Rules or backend functions were deployed unless deployment actually succeeded.
+
+If the fix requires:
+- Firestore index creation.
+- Security Rule changes.
+- Cloud Functions.
+- Firebase billing plan changes.
+- Manual Console configuration.
+
+Explain the exact requirement.
+
+Do not silently leave critical backend requirements unresolved.
+
+## 33. Backward compatibility
+
+Existing products may not contain brandId or normalized search fields.
+
+Handle older records safely.
+
+Do not break product loading because a new optional field is missing.
+
+Implement a safe compatibility strategy.
+
+If a migration is required:
+- Preserve existing product IDs.
+- Preserve prices.
+- Preserve stock.
+- Preserve images.
+- Preserve discounts.
+- Preserve descriptions.
+- Preserve orders.
+- Preserve historical order snapshots.
+
+Do not perform destructive migrations.
+
+---
+
+# PART 14 — REQUIRED TESTING
+
+## 34. Product creation and persistence tests
+
+Test:
+
+1. Add a product with all fields.
+2. Add a product without an optional image, if supported.
+3. Add a product with an uploaded image.
+4. Simulate a Firestore write failure.
+5. Simulate an image upload failure.
+6. Retry after failure.
+7. Tap Save repeatedly.
+8. Reopen Admin Panel.
+9. Open customer Catalog.
+10. Restart the application.
+11. Confirm the product still exists after restart.
+12. Edit the product.
+13. Confirm changes persist.
+14. Deactivate the product.
+15. Confirm the Catalog follows visibility rules.
+
+A product must not be reported as saved unless persistence is confirmed.
+
+## 35. Brand system tests
+
+Test:
+
+1. Select an existing Samsung brand.
+2. Select an existing Xiaomi brand.
+3. Add Hoco.
+4. Add Borofone.
+5. Add Marshall.
+6. Attempt to add HOCO after Hoco already exists.
+7. Confirm no duplicate brand is created.
+8. Add Hoco headphones.
+9. Add Hoco charger.
+10. Add Borofone cable.
+11. Add Marshall headphones.
+12. Search for each brand in the Catalog.
+13. Verify each brand displays all its actual products across categories.
+
+## 36. Search tests
+
+Test:
+- Exact product name.
+- Partial product name.
+- Brand name.
+- Brand + product name.
+- Model number.
+- Georgian search.
+- English search.
+- Mixed Georgian/English search.
+- Case-insensitive search.
+- Search after adding a new product.
+- Search after editing a product.
+- Search with no results.
+- Search with slow network.
+- Clearing search.
+- Combining brand and category filters where supported.
+
+## 37. UI and navigation tests
+
+Verify:
+- Drawer logout button is fully visible.
+- No system navigation overlap.
+- Help dialog opens.
+- AI Assistant action works.
+- Contact action works.
+- Service Center dialog opens.
+- Diagnostic button is removed from that dialog.
+- Real service information is displayed.
+- Call action uses the actual configured phone number.
+- Administrator label displays only "ადმინისტრატორი".
+- AI Assistant header is aligned.
+- Product creation form is responsive.
+- Image upload is next to the title/AI section.
+- Bank details page is visually consistent.
+- Contacts/social page is visually consistent.
+- Social brand icons are correct and proportionate.
+
+Test different screen widths and Android navigation modes.
+
+---
+
+# PART 15 — FINAL ACCEPTANCE CRITERIA
+
+The work is complete only when:
+
+1. Product creation actually persists products to Firestore.
+2. Success is never shown before confirmed persistence.
+3. Products remain visible after reopening the Admin Panel and restarting the app.
+4. Customer Catalog displays the same active, customer-visible products.
+5. The dynamic brand system supports Hoco, Borofone, Marshall, and other brands.
+6. New brands can be created directly from the product form.
+7. Duplicate brand names are prevented.
+8. Brand filtering displays all products associated with that brand.
+9. Product search is optimized and uses real catalog data.
+10. Existing categories and product functionality remain intact.
+11. Drawer logout button no longer overlaps system navigation.
+12. Help opens the two-choice dialog.
+13. Service Center displays actual BEKASERVICE information and services.
+14. Diagnostic button is removed from the Service Center dialog.
+15. Administrator label fits correctly.
+16. AI Assistant header is aligned.
+17. Product creation form is redesigned and functional.
+18. Bank details management is visually optimized without breaking payments.
+19. Contacts/social management is visually optimized.
+20. Real social network icons are consistently used throughout the app.
+21. Existing data and user accounts remain safe.
+22. The project builds successfully.
+
+Do not mark a task complete simply because its UI looks correct.
+
+Do not claim a Firebase operation was tested if it was not actually tested.
+
+---
+
+# PART 16 — FINAL REPORT
+
+After implementation, provide a detailed report in Georgian.
+
+Include:
+
+### A. Critical product bug
+- What was the actual cause of disappearing products?
+- Which files were modified?
+- What exact fix was implemented?
+- Was persistence verified after reopening the app?
+
+### B. Brand system
+- How are brands stored?
+- How does automatic brand creation work?
+- How are duplicate brands prevented?
+- How does brand filtering work?
+
+### C. Search
+- Which fields are searchable?
+- What normalization was implemented?
+- What performance improvements were made?
+- Are indexes required?
+
+### D. UI improvements
+- Drawer fixes.
+- Help dialog.
+- Service Center dialog.
+- AI Assistant header.
+- Product creation form.
+- Bank details page.
+- Contacts/social page.
+- Social icon implementation.
+
+### E. Testing
+- Which scenarios were actually tested?
+- Did the build succeed?
+- Are there any remaining bugs?
+
+### F. Remaining requirements
+Clearly separate:
+- Implemented and tested.
+- Implemented but not fully tested.
+- Requires Firebase Console configuration.
+- Requires Firestore migration.
+- Not implemented.
+
+Be honest and precise.
+
+Do not say "Everything is fixed" without evidence.
+
+FINAL PRIORITY:
+
+First fix the disappearing product persistence bug.
+
+Second implement the dynamic brand system and reliable search.
+
+Then complete all requested UI and navigation refinements.
+
+The final result must be a genuinely functional, stable, professional BSTORE application — not just a visually improved interface.
+
+Start by inspecting the existing code and Firebase data flow. Identify the root causes before making changes. Then implement, build, and test the improvements.

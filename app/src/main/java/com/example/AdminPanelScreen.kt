@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -59,280 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
+import com.example.ui.theme.*
 
 // ==============================================================================
-// 1. PIN კოდის შეყვანის დიალოგი
-// ==============================================================================
-@Composable
-fun AdminPinDialog(
-    onDismiss: () -> Unit,
-    onSuccess: () -> Unit
-) {
-    val context = LocalContext.current
-    val isAlreadyActive = remember { AdminStorage.isAdminSessionActive(context) }
-    var pinInput by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showPin by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isAlreadyActive) {
-        if (isAlreadyActive) {
-            onSuccess()
-        }
-    }
-
-    if (isAlreadyActive) {
-        return
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF16191E),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.5f)),
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .padding(8.dp)
-                .testTag("admin_pin_dialog")
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = Color(0xFFFF6A00).copy(alpha = 0.15f),
-                    modifier = Modifier.size(56.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Default.Lock,
-                            contentDescription = "Lock",
-                            tint = Color(0xFFFF7A00),
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-
-                Text(
-                    text = "ადმინ პანელში შესვლა",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    text = "შეიყვანეთ ადმინისტრატორის PIN კოდი (PIN: bmgebr ან 1234)",
-                    color = Color(0xFFA0A5B0),
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center
-                )
-
-                OutlinedTextField(
-                    value = pinInput,
-                    onValueChange = {
-                        pinInput = it
-                        errorMessage = null
-                    },
-                    label = { Text("PIN კოდი") },
-                    singleLine = true,
-                    visualTransformation = if (showPin) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    trailingIcon = {
-                        IconButton(onClick = { showPin = !showPin }) {
-                            Icon(
-                                if (showPin) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = "Toggle PIN",
-                                tint = Color(0xFFA0A5B0)
-                            )
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFFFF6A00),
-                        unfocusedBorderColor = Color(0xFF2E3440),
-                        focusedLabelColor = Color(0xFFFF6A00),
-                        unfocusedLabelColor = Color(0xFFA0A5B0)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("admin_pin_input")
-                )
-
-                if (errorMessage != null) {
-                    Text(
-                        text = errorMessage!!,
-                        color = Color(0xFFFF4D4F),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.testTag("admin_pin_error_text")
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("admin_pin_cancel_button"),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA0A5B0))
-                    ) {
-                        Text("გაუქმება")
-                    }
-
-                    Button(
-                        onClick = {
-                            val trimmedPin = pinInput.trim()
-                            if (AdminStorage.verifyPin(context, trimmedPin)) {
-                                AdminStorage.setAdminSessionActive(context, true)
-                                Toast.makeText(context, "ავტორიზაცია წარმატებულია!", Toast.LENGTH_SHORT).show()
-                                onSuccess()
-                            } else {
-                                errorMessage = "არასწორი PIN კოდი! სცადეთ ხელახლა."
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("admin_pin_submit_button")
-                    ) {
-                        Text("შესვლა", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ==============================================================================
-// 2. PIN-ის შეცვლის დიალოგი
-// ==============================================================================
-@Composable
-fun ChangePinDialog(
-    onDismiss: () -> Unit,
-    onSuccess: (String) -> Unit
-) {
-    val context = LocalContext.current
-    var currentPin by remember { mutableStateOf("") }
-    var newPin by remember { mutableStateOf("") }
-    var confirmPin by remember { mutableStateOf("") }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = Color(0xFF16191E),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3440)),
-            modifier = Modifier.fillMaxWidth(0.92f).padding(8.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "🔐 PIN კოდის შეცვლა",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                OutlinedTextField(
-                    value = currentPin,
-                    onValueChange = { currentPin = it; errorMsg = null },
-                    label = { Text("მიმდინარე PIN") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFFFF6A00),
-                        unfocusedBorderColor = Color(0xFF2E3440)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = newPin,
-                    onValueChange = { newPin = it; errorMsg = null },
-                    label = { Text("ახალი PIN") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFFFF6A00),
-                        unfocusedBorderColor = Color(0xFF2E3440)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = confirmPin,
-                    onValueChange = { confirmPin = it; errorMsg = null },
-                    label = { Text("გაიმეორეთ ახალი PIN") },
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFFFF6A00),
-                        unfocusedBorderColor = Color(0xFF2E3440)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                if (errorMsg != null) {
-                    Text(errorMsg!!, color = Color(0xFFFF4D4F), fontSize = 12.sp)
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA0A5B0))
-                    ) {
-                        Text("გაუქმება")
-                    }
-
-                    Button(
-                        onClick = {
-                            if (!AdminStorage.verifyPin(context, currentPin)) {
-                                errorMsg = "მიმდინარე PIN არასწორია"
-                            } else if (newPin.trim().length < 4) {
-                                errorMsg = "ახალი PIN უნდა იყოს მინიმუმ 4 სიმბოლო"
-                            } else if (newPin != confirmPin) {
-                                errorMsg = "ახალი PIN-ები არ ემთხვევა ერთმანეთს"
-                            } else {
-                                AdminStorage.setAdminPin(context, newPin.trim())
-                                onSuccess(newPin.trim())
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ==============================================================================
-// 3. ადმინ პანელის სრული ეკრანი
+// 1. ადმინ პანელის სრული ეკრანი (დაცულია Firebase Auth + Custom Claim ვერიფიკაციით)
 // ==============================================================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -342,28 +73,89 @@ fun AdminPanelScreen(
     onClose: () -> Unit,
     initialTab: Int = 0,
     initialTargetOrderId: String? = null,
-    initialTargetImeiRequestId: String? = null,
     onInitialTargetConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val authStateVersion = AuthAndOrderManager.authStateVersion.intValue
+    val isDark = AppPreferencesManager.isDarkMode
 
-    var adminTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 10)) } // 0=პროდუქტები, 2=შეკვეთები, 10=IMEI შემოწმება
-    var showChangePinDialog by remember { mutableStateOf(false) }
+    // Route-level guard: Never allow unauthenticated users or non-admin accounts to access AdminPanelScreen
+    val isSoleAdminAuthenticated = remember(authStateVersion) {
+        AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)
+    }
+
+    if (!isSoleAdminAuthenticated) {
+        BackHandler { onClose() }
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("admin_access_denied_screen"),
+            containerColor = AppThemeColorAdapter.adaptPageBackground(Color(0xFF0D0F12))
+        ) { deniedPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(deniedPadding)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF16191E),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4D4F).copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Access Denied",
+                            tint = Color(0xFFFF4D4F),
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Text(
+                            text = "წვდომა უარყოფილია",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "მართვის პანელზე წვდომა აქვს მხოლოდ ავტორიზებულ ადმინისტრატორს.",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = onClose,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("admin_access_denied_close_button")
+                        ) {
+                            Text("უკან დაბრუნება", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    var adminTab by remember { mutableIntStateOf(initialTab.coerceIn(0, 11)) } // 0=პროდუქტები, 2=შეკვეთები, 10=კონტაქტები, 11=სერვისცენტრის ლოკაცია
     var showAdminNotificationsHistory by remember { mutableStateOf(false) }
     var activeTargetOrderId by remember { mutableStateOf(initialTargetOrderId) }
-    var activeTargetImeiRequestId by remember { mutableStateOf(initialTargetImeiRequestId) }
 
-    LaunchedEffect(initialTab, initialTargetOrderId, initialTargetImeiRequestId) {
-        if (initialTargetImeiRequestId != null) {
-            adminTab = 10
-            activeTargetImeiRequestId = initialTargetImeiRequestId
-            onInitialTargetConsumed()
-        } else if (initialTargetOrderId != null) {
+    LaunchedEffect(initialTab, initialTargetOrderId) {
+        if (initialTargetOrderId != null) {
             adminTab = 2
             activeTargetOrderId = initialTargetOrderId
             onInitialTargetConsumed()
-        } else if (initialTab in 0..10 && initialTab != 0) {
+        } else if (initialTab in 0..11 && initialTab != 0) {
             adminTab = initialTab
         }
     }
@@ -374,9 +166,6 @@ fun AdminPanelScreen(
     }
     val unreadAdminOrdersCount = remember(adminOrderNotifications, notifVersion) {
         BekaNotificationManager.getUnreadAdminOrdersCount(context)
-    }
-    val unreadImeiOrdersCount = remember(adminOrderNotifications, notifVersion) {
-        adminOrderNotifications.count { !it.read && it.orderType == "imei_check" }
     }
     val unreadServiceOrdersCount = remember(adminOrderNotifications, notifVersion) {
         adminOrderNotifications.count { !it.read && it.orderType == "service_order" }
@@ -393,45 +182,28 @@ fun AdminPanelScreen(
             editingProduct != null -> editingProduct = null
             isAddingNewProduct -> isAddingNewProduct = false
             productToDelete != null -> productToDelete = null
-            showChangePinDialog -> showChangePinDialog = false
             showAdminNotificationsHistory -> showAdminNotificationsHistory = false
             else -> onClose()
         }
     }
 
-    // Google Admin vs PIN-only სესიის სტატუსი (მხოლოდ beqa1994@gmail.com არის სრული უფლებების მქონე ადმინი)
-    var firebaseUserEmail by remember {
-        mutableStateOf(
-            AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
-                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else ""
-            }
-        )
-    }
-    var isCloudAdminVerified by remember {
-        mutableStateOf(AuthAndOrderManager.isSoleAdminEmail(firebaseUserEmail))
+    // Single authoritative AdminAuthState from AuthAndOrderManager
+    val adminAuthState by AuthAndOrderManager.adminAuthState.collectAsState()
+    val isCloudAdminVerified = adminAuthState == AdminAuthState.VERIFIED_ADMIN
+    val firebaseUserEmail = remember(authStateVersion) {
+        AuthAndOrderManager.resolveActiveUserEmail(context)
     }
 
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                AuthAndOrderManager.ensureAdminFirebaseSession(context)
-            }
-            val resolvedEmail = AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
-                if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else ""
-            }
-            val verifiedAdmin = if (resolvedEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(resolvedEmail)) {
-                false
-            } else {
-                val repoCheck = kotlinx.coroutines.withTimeoutOrNull(3500L) {
-                    runCatching {
-                        FirestoreRepository(context).checkIsCurrentUserAdmin()
-                    }.getOrDefault(false)
-                } ?: false
-                repoCheck || AuthAndOrderManager.isSoleAdminEmail(resolvedEmail)
-            }
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                firebaseUserEmail = resolvedEmail
-                isCloudAdminVerified = verifiedAdmin
+    val activeAdminUid = remember {
+        AuthAndOrderManager.safeFirebaseUser()?.uid
+            ?: AuthAndOrderManager.getCurrentUser(context)?.id.orEmpty()
+    }
+
+    // Keyed strictly to activeAdminUid (prevents recursive or recomposition-driven restarts)
+    LaunchedEffect(activeAdminUid) {
+        if (adminAuthState != AdminAuthState.VERIFIED_ADMIN) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                AuthAndOrderManager.verifyAdminBackendAuthorization(context)
             }
         }
     }
@@ -442,61 +214,45 @@ fun AdminPanelScreen(
     var selectedSubcategoryFilter by remember { mutableStateOf("ყველა") }
     var selectedBrandFilter by remember { mutableStateOf("ყველა") }
 
-    val baseCategories = listOf(
-        "ყველა",
-        "პროგრამული სერვისები",
-        "მობილური ტელეფონები",
-        "როუტერები და ქსელი",
-        "ეკრანები",
-        "ელემენტები",
-        "დამტენის პორტები",
-        "დამტენები და კაბელები",
-        "ყურსასმენები და აუდიო",
-        "აქსესუარები",
-        "კამერები",
-        "კორპუსები",
-        "დინამიკები"
-    )
-    val allCategories = remember(products) {
-        val dynamicCats = products.map { it.category.trim() }.filter { it.isNotBlank() }
-        (baseCategories + dynamicCats).distinct()
+    val categoriesVersion = AdminStorage.categoriesVersion
+    val storedCategoryNames = remember(context, categoriesVersion) {
+        AdminStorage.getCategories(context)
+            .filter { !ProductRepository.isProhibitedCategory(it) }
+            .sortedBy { it.displayOrder }
+            .map { it.name }
+    }
+    val allCategories = remember(products, storedCategoryNames) {
+        val dynamicCats = products
+            .filter { !ProductRepository.isProhibitedOrRetiredService(it) }
+            .map { AdminStorage.normalizeCategoryName(it.category) }
+            .filter { it.isNotBlank() && !it.equals("პროგრამული სერვისები", ignoreCase = true) }
+        (listOf("ყველა") + storedCategoryNames + dynamicCats).distinct()
     }
     val softwareSubcategories = remember(products) {
-        val dynamicSubcats = products
-            .filter { it.category == "პროგრამული სერვისები" || it.type == "software" }
+        products
             .map { it.subcategory.trim() }
             .filter { it.isNotBlank() }
-        (SoftwareCatalogData.softwareSubcategories + dynamicSubcats).distinct()
+            .distinct()
     }
     val baseBrands = listOf(
         "ყველა",
         "Apple",
         "Samsung",
-        "Huawei",
         "Xiaomi",
+        "Huawei",
         "Google Pixel",
         "OnePlus",
         "Honor",
-        "OpenAI",
-        "Google",
-        "Anthropic",
-        "xAI",
-        "Perplexity",
-        "Cursor",
-        "Lovable",
-        "Canva",
-        "CapCut",
-        "Adobe",
-        "YouTube",
-        "Spotify",
-        "Microsoft"
+        "Motorola",
+        "Sony",
+        "Oppo",
+        "Vivo",
+        "Realme"
     )
     val allBrands = remember(products) {
         val dynamicBrands = products.map { it.brand.trim() }.filter { it.isNotBlank() }
         (baseBrands + dynamicBrands).distinct()
     }
-
-    val isDark = AppPreferencesManager.isDarkMode
 
     Scaffold(
         modifier = Modifier.testTag("admin_panel_screen"),
@@ -528,7 +284,7 @@ fun AdminPanelScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                "BEKASERVICE",
+                                "BSTORE",
                                 color = Color(0xFFFF7A00),
                                 fontSize = 9.sp,
                                 maxLines = 1,
@@ -569,22 +325,6 @@ fun AdminPanelScreen(
                                 modifier = Modifier.testTag("admin_unread_orders_badge")
                             )
                         }
-                    }
-                    IconButton(
-                        onClick = {
-                            AdminStorage.clearAdminSession(context)
-                            Toast.makeText(context, "🔒 ადმინ სესია დაიხურა (დაბლოკილია)", Toast.LENGTH_SHORT).show()
-                            onClose()
-                        },
-                        modifier = Modifier.size(36.dp).testTag("admin_lock_button")
-                    ) {
-                        Icon(Icons.Default.Lock, contentDescription = "Lock Session", tint = Color(0xFFFF4D4F), modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(
-                        onClick = { showChangePinDialog = true },
-                        modifier = Modifier.size(36.dp).testTag("admin_change_pin_button")
-                    ) {
-                        Icon(Icons.Default.VpnKey, contentDescription = "Change PIN", tint = Color(0xFFFF6A00), modifier = Modifier.size(18.dp))
                     }
                     IconButton(
                         onClick = onClose,
@@ -628,13 +368,13 @@ fun AdminPanelScreen(
                         "ბანკის რეკვიზიტები",
                         "Push შეტყობინება",
                         "აპლიკაციის განახლების მართვა",
-                        "IMEI შემოწმება"
+                        "კონტაქტები და სოციალური ქსელები",
+                        "სერვისცენტრის ლოკაცია"
                     )
                     tabs.forEachIndexed { index, title ->
                         val isSelected = adminTab == index
                         val tabBadgeCount = when (index) {
                             2 -> unreadServiceOrdersCount
-                            10 -> unreadImeiOrdersCount
                             else -> 0
                         }
                         Surface(
@@ -679,7 +419,7 @@ fun AdminPanelScreen(
             }
 
             if (showAdminNotificationsHistory) {
-                AdminOrderNotificationsHistoryPanel(
+                AdminAllOrderNotificationsDialog(
                     notifications = adminOrderNotifications,
                     unreadCount = unreadAdminOrdersCount,
                     onOpenOrderNotification = { notif ->
@@ -689,18 +429,48 @@ fun AdminPanelScreen(
                             orderType = notif.orderType
                         )
                         showAdminNotificationsHistory = false
-                        if (notif.orderType == "imei_check") {
-                            activeTargetImeiRequestId = notif.orderId
-                            adminTab = 10
-                        } else {
-                            activeTargetOrderId = notif.orderId
-                            adminTab = 2
+                        activeTargetOrderId = notif.orderId
+                        adminTab = 2
+                    },
+                    onMarkNotificationRead = { notif ->
+                        BekaNotificationManager.markAdminOrderNotificationAsRead(
+                            context = context,
+                            orderIdOrNotificationId = notif.notificationId.ifBlank { notif.orderId },
+                            orderType = notif.orderType
+                        )
+                    },
+                    onDeleteNotification = { notif, onComplete ->
+                        coroutineScope.launch {
+                            val fbUser = runCatching {
+                                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                            }.getOrNull()
+                            val res = if (fbUser != null) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    FirestoreRepository(context).deleteAdminOrderNotification(
+                                        notif.notificationId.ifBlank { notif.orderId }
+                                    )
+                                }
+                            } else {
+                                Result.success(Unit)
+                            }
+                            if (res.isSuccess) {
+                                BekaNotificationManager.deleteAdminOrderNotificationLocalOnly(
+                                    context = context,
+                                    notificationId = notif.notificationId,
+                                    orderId = notif.orderId
+                                )
+                                Toast.makeText(context, "🗑️ შეტყობინება წაიშალა", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val err = res.exceptionOrNull()?.localizedMessage ?: "შეტყობინების წაშლა ვერ მოხერხდა"
+                                Toast.makeText(context, "❌ $err", Toast.LENGTH_LONG).show()
+                            }
+                            onComplete()
                         }
                     },
                     onMarkAllRead = {
                         BekaNotificationManager.markAllAdminOrderNotificationsAsRead(context)
                     },
-                    onClosePanel = { showAdminNotificationsHistory = false }
+                    onDismiss = { showAdminNotificationsHistory = false }
                 )
             }
 
@@ -787,7 +557,7 @@ fun AdminPanelScreen(
                                 }
                                 is FirestoreRepository.MigrationOutcome.AlreadyPopulated -> {
                                     if (outcome.conflicts.isNotEmpty()) {
-                                        cloudSyncStatusMessage = "⚠️ აღმოჩენილია ${outcome.conflicts.size} განსხვავება ლოკალურ და Cloud მონაცემებს შორის. დააჭირეთ „Cloud სინქრონიზაცია“-ს ასატვირთად."
+                                        cloudSyncStatusMessage = "☁️ Cloud მონაცემები სინქრონიზებულია (${outcome.conflicts.size} პოზიცია შემოწმებულია)"
                                     }
                                 }
                                 is FirestoreRepository.MigrationOutcome.SkippedNotAdmin -> Unit
@@ -802,33 +572,55 @@ fun AdminPanelScreen(
                             .fillMaxSize()
                             .imePadding()
                     ) {
-                        // 0. ავტორიზაციის რეჟიმის სტატუსის ბანერი (PIN-only vs Google Admin)
-                        item(key = "admin_access_mode_banner_item") {
-                            val bannerText = when {
-                                isCloudAdminVerified -> "☁️ Google Admin ავტორიზებულია ($firebaseUserEmail) • Cloud სინქრონიზაცია აქტიურია"
-                                firebaseUserEmail.isNotBlank() -> "⚠️ შესული ხართ არა-ადმინისტრატორის ანგარიშით ($firebaseUserEmail). Cloud-ში ჩაწერა შეზღუდულია."
-                                else -> "🔑 PIN-კოდით წვდომის რეჟიმი (Google ავტორიზაციის გარეშე) • ცვლილებები ინახება ლოკალურად"
+                        // 0. ავტორიზაციის სტატუსის ინდიკატორი:
+                        // როდესაც state არის VERIFIED_ADMIN -> ბანერი სრულად იშლება (არ ჩანს არც ლურჯი და არც სხვა ბანერი)
+                        if (adminAuthState == AdminAuthState.VERIFYING) {
+                            item(key = "admin_access_mode_banner_item") {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF60A5FA).copy(alpha = 0.12f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF60A5FA).copy(alpha = 0.4f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_access_mode_banner")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(12.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color(0xFF60A5FA)
+                                        )
+                                        Text(
+                                            text = "ადმინისტრატორის ტოკენის ვერიფიკაცია ($firebaseUserEmail)...",
+                                            color = Color(0xFF60A5FA),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
                             }
-                            val bannerColor = when {
-                                isCloudAdminVerified -> Color(0xFF4ADE80)
-                                firebaseUserEmail.isNotBlank() -> Color(0xFFFF4D4F)
-                                else -> Color(0xFFFF9E40)
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = bannerColor.copy(alpha = 0.12f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, bannerColor.copy(alpha = 0.4f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("admin_access_mode_banner")
-                            ) {
-                                Text(
-                                    text = bannerText,
-                                    color = bannerColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
+                        } else if (adminAuthState == AdminAuthState.ERROR) {
+                            item(key = "admin_access_mode_banner_item") {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFFEF4444).copy(alpha = 0.12f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.4f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_access_mode_banner")
+                                ) {
+                                    Text(
+                                        text = "⚠️ ადმინისტრატორის ავტორიზაცია ვერ დადასტურდა ($firebaseUserEmail)",
+                                        color = Color(0xFFEF4444),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -1037,35 +829,7 @@ fun AdminPanelScreen(
                                     }
                                 }
 
-                                if (cloudSyncStatusMessage != null) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isDark) Color(0xFF1E293B) else Color(0xFFEFF6FF),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF60A5FA).copy(alpha = 0.45f) else Color(0xFF93C5FD)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = cloudSyncStatusMessage ?: "",
-                                                color = if (isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8),
-                                                fontSize = 10.5.sp,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            IconButton(
-                                                onClick = { cloudSyncStatusMessage = null },
-                                                modifier = Modifier.size(20.dp)
-                                            ) {
-                                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = if (isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8), modifier = Modifier.size(14.dp))
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Row(
+                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
@@ -1073,46 +837,9 @@ fun AdminPanelScreen(
                                     Text(
                                         text = "სულ: ${filteredList.size} / ${products.size} პოზიცია",
                                         color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
-                                        fontSize = 11.sp,
-                                        modifier = Modifier.weight(1f)
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isDark) Color(0xFF1F2A38) else Color(0xFFEFF6FF),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isDark) Color(0xFF60A5FA).copy(alpha = 0.5f) else Color(0xFF93C5FD)),
-                                        modifier = Modifier.clickable(enabled = !isCloudOperationInProgress) {
-                                            isCloudOperationInProgress = true
-                                            coroutineScope.launch {
-                                                val res = FirestoreRepository(context).seedCatalogToFirestore(products)
-                                                isCloudOperationInProgress = false
-                                                val count = res.getOrDefault(0)
-                                                if (res.isSuccess && count > 0) {
-                                                    AdminStorage.saveProductsFromCloud(context, products)
-                                                    AdminStorage.markLocalEditsSynced(context)
-                                                    AdminStorage.setInitialCloudMigrationCompleted(context, true)
-                                                    cloudSyncStatusMessage = "☁️ სინქრონიზებულია Cloud-თან ($count პოზიცია)"
-                                                    Toast.makeText(context, "☁️ კატალოგი წარმატებით აიტვირთა Cloud-ში ($count პოზიცია)!", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    val errMsg = FirestoreRepository.formatUserFriendlyFirestoreError(res.exceptionOrNull())
-                                                    Toast.makeText(context, "❌ Cloud სინქრონიზაცია ვერ მოხერხდა: $errMsg", Toast.LENGTH_LONG).show()
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Default.CloudUpload, contentDescription = null, tint = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB), modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = if (isCloudOperationInProgress) "იტვირთება..." else "Cloud სინქრონიზაცია",
-                                                color = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB),
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -1185,11 +912,7 @@ fun AdminPanelScreen(
                     // =========================================================================
                     AdminOrdersManagementView(
                         initialTargetOrderId = activeTargetOrderId,
-                        onTargetOrderConsumed = { activeTargetOrderId = null },
-                        onNavigateToImeiRequest = { reqId ->
-                            activeTargetImeiRequestId = reqId
-                            adminTab = 10
-                        }
+                        onTargetOrderConsumed = { activeTargetOrderId = null }
                     )
                 }
 
@@ -1283,11 +1006,19 @@ fun AdminPanelScreen(
 
                 10 -> {
                     // =========================================================================
-                    // ტაბი 11: IMEI შემოწმების მართვის ცენტრი (IMEI Check Control Center)
+                    // ტაბი 11: კონტაქტები და სოციალური ქსელები (app_config/contacts)
                     // =========================================================================
-                    AdminImeiCheckControlCenter(
-                        initialTargetRequestId = activeTargetImeiRequestId,
-                        onTargetRequestConsumed = { activeTargetImeiRequestId = null }
+                    AdminContactsAndSocialScreen(
+                        onClose = { adminTab = 0 }
+                    )
+                }
+
+                11 -> {
+                    // =========================================================================
+                    // ტაბი 12: სერვისცენტრის ლოკაცია & რუკა (app_config/service_center_location)
+                    // =========================================================================
+                    AdminServiceCenterLocationView(
+                        onClose = { adminTab = 0 }
                     )
                 }
             }
@@ -1304,50 +1035,73 @@ fun AdminPanelScreen(
             existingBrands = allBrands.filter { it != "ყველა" },
             onDismiss = { editingProduct = null },
             onSave = { updatedItem ->
-                coroutineScope.launch {
-                    val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
-                    if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
-                        Toast.makeText(
-                            context,
-                            "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@launch
-                    }
-                    val savedItem = updatedItem.copy(
-                        firestoreDocId = updatedItem.firestoreDocId.ifBlank { "prod_${updatedItem.id}" }
-                    )
-                    val updated = products.map { if (it.id == savedItem.id) savedItem else it }
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                    }
-                    onProductsUpdated(updated)
-                    editingProduct = null
+                val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                    Toast.makeText(
+                        context,
+                        "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@ProductEditDialog Result.failure(Exception("მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!"))
+                }
+                val normalizedCategory = AdminStorage.normalizeCategoryName(updatedItem.category)
+                val canonicalBrand = AdminStorage.formatCanonicalBrandDisplayName(updatedItem.brand)
+                val brandItem = if (canonicalBrand.isNotBlank()) AdminStorage.addOrGetBrand(context, canonicalBrand).first else null
+                val resolvedBrandId = brandItem?.id ?: AdminStorage.resolveCanonicalBrandId(canonicalBrand)
+                val preparedItem = updatedItem.copy(
+                    brand = canonicalBrand,
+                    brandId = resolvedBrandId,
+                    category = normalizedCategory.ifBlank { updatedItem.category.trim() },
+                    firestoreDocId = updatedItem.firestoreDocId.ifBlank { "prod_${updatedItem.id}" }
+                )
+                val updated = products.map { if (it.id == preparedItem.id) preparedItem else it }
+                AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                val ensuredCategory = AdminStorage.ensureCategoryExistsForProduct(context, preparedItem.category)
+                onProductsUpdated(updated)
+                editingProduct = null
 
-                    val writeRes = runCatching {
-                        FirestoreRepository(context).saveOrUpdateProductResult(savedItem)
-                    }.getOrElse { Result.failure(it) }
+                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val finalPersistedItem = runCatching {
+                        ProductImageManager.ensurePersistableProductImages(context, preparedItem)
+                    }.getOrDefault(preparedItem)
+                    val repo = FirestoreRepository(context)
+                    if (brandItem != null) {
+                        runCatching { repo.saveBrand(brandItem) }
+                    }
+                    if (ensuredCategory != null) {
+                        runCatching { repo.saveCategory(ensuredCategory) }
+                    }
+                    val writeRes = repo.saveOrUpdateProductResult(finalPersistedItem)
                     if (writeRes.isSuccess) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            AdminStorage.saveProductsFromCloud(context, updated)
-                            AdminStorage.markLocalEditsSynced(context)
-                        }
+                        val cloudUpdated = products.map { if (it.id == finalPersistedItem.id) finalPersistedItem else it }
+                        AdminStorage.saveProductsFromCloud(context, cloudUpdated)
+                        AdminStorage.markLocalEditsSynced(context)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
                         }
                     } else {
+                        val err = writeRes.exceptionOrNull()?.message ?: ""
+                        val isOfflineOrAuth = err.contains("PERMISSION_DENIED", ignoreCase = true) ||
+                                err.contains("UNAVAILABLE", ignoreCase = true) ||
+                                err.contains("offline", ignoreCase = true) ||
+                                err.contains("network", ignoreCase = true)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            Toast.makeText(context, "✅ ცვლილებები წარმატებით შეინახა!", Toast.LENGTH_SHORT).show()
+                            if (isOfflineOrAuth) {
+                                Toast.makeText(context, "✅ ცვლილებები შენახულია (ლოკალური ქეში)", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "⚠️ შენახულია ლოკალურად: $err", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }
+                Result.success(Unit)
             }
         )
     }
 
     // ახალი პროდუქტის ან პროგრამული სერვისის დამატების დიალოგი
     if (isAddingNewProduct) {
-        val nextId = (products.maxOfOrNull { it.id } ?: 200) + 1
+        val nextId = AdminStorage.allocateNextProductId(products)
         val defaultCat = if (selectedCategoryFilter != "ყველა") selectedCategoryFilter else "მობილური ტელეფონები"
         val isSw = defaultCat == "პროგრამული სერვისები"
         val defaultType = ProductFormSchema.resolveProductCategoryType(
@@ -1367,6 +1121,7 @@ fun AdminPanelScreen(
             shortDescription = "",
             description = "",
             brand = if (selectedBrandFilter != "ყველა") selectedBrandFilter else "",
+            brandId = if (selectedBrandFilter != "ყველა") AdminStorage.resolveCanonicalBrandId(selectedBrandFilter) else "",
             compatibleModels = "",
             warranty = "",
             condition = "",
@@ -1379,54 +1134,85 @@ fun AdminPanelScreen(
             existingBrands = allBrands.filter { it != "ყველა" },
             onDismiss = { isAddingNewProduct = false },
             onSave = { addedItem ->
-                coroutineScope.launch {
-                    val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
-                    if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
-                        Toast.makeText(
-                            context,
-                            "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@launch
-                    }
-                    val itemWithDocId = addedItem.copy(
-                        firestoreDocId = addedItem.firestoreDocId.ifBlank { "prod_${addedItem.id}" }
-                    )
-                    val updated = (listOf(itemWithDocId) + products).distinctBy { it.id }
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
-                    }
-                    onProductsUpdated(updated)
-                    isAddingNewProduct = false
+                val activeEmail = AuthAndOrderManager.resolveActiveUserEmail(context)
+                if (activeEmail.isNotBlank() && !AuthAndOrderManager.isSoleAdminEmail(activeEmail)) {
+                    Toast.makeText(
+                        context,
+                        "❌ წვდომა უარყოფილია: მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@ProductEditDialog Result.failure(Exception("მხოლოდ beqa1994@gmail.com არის ადმინისტრატორი!"))
+                }
+                val safeId = if (addedItem.id <= 0 || ProductRepository.RETIRED_PRODUCT_IDS.contains(addedItem.id)) {
+                    AdminStorage.allocateNextProductId(products)
+                } else addedItem.id
+                val deterministicDocId = "prod_$safeId"
+                val normalizedCategory = AdminStorage.normalizeCategoryName(addedItem.category)
+                val canonicalBrand = AdminStorage.formatCanonicalBrandDisplayName(addedItem.brand)
+                val brandItem = if (canonicalBrand.isNotBlank()) AdminStorage.addOrGetBrand(context, canonicalBrand).first else null
+                val resolvedBrandId = brandItem?.id ?: AdminStorage.resolveCanonicalBrandId(canonicalBrand)
+                val preparedItem = addedItem.copy(
+                    id = safeId,
+                    brand = canonicalBrand,
+                    brandId = resolvedBrandId,
+                    category = normalizedCategory.ifBlank { addedItem.category.trim() },
+                    firestoreDocId = deterministicDocId
+                )
+                AdminStorage.unmarkProductDeleted(context, preparedItem.id)
+                val updated = (listOf(preparedItem) + products).distinctBy { it.id }
+                AdminStorage.saveProducts(context, updated, markUnsyncedLocalEdit = true)
+                val ensuredCategory = AdminStorage.ensureCategoryExistsForProduct(context, preparedItem.category)
+                onProductsUpdated(updated)
+                isAddingNewProduct = false
 
-                    val writeRes = runCatching {
-                        FirestoreRepository(context).saveOrUpdateProductResult(itemWithDocId)
-                    }.getOrElse { Result.failure(it) }
+                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val finalPersistedItem = runCatching {
+                        ProductImageManager.ensurePersistableProductImages(context, preparedItem)
+                    }.getOrDefault(preparedItem)
+                    val repo = FirestoreRepository(context)
+                    if (brandItem != null) {
+                        runCatching { repo.saveBrand(brandItem) }
+                    }
+                    if (ensuredCategory != null) {
+                        runCatching { repo.saveCategory(ensuredCategory) }
+                    }
+                    val writeRes = repo.saveOrUpdateProductResult(finalPersistedItem)
                     if (writeRes.isSuccess) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            AdminStorage.saveProductsFromCloud(context, updated)
-                            AdminStorage.markLocalEditsSynced(context)
-                        }
+                        val cloudUpdated = (listOf(finalPersistedItem) + products).distinctBy { it.id }
+                        AdminStorage.saveProductsFromCloud(context, cloudUpdated)
+                        AdminStorage.markLocalEditsSynced(context)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა და დასინქრონდა ბაზასთან!", Toast.LENGTH_SHORT).show()
                         }
                     } else {
+                        val err = writeRes.exceptionOrNull()?.message ?: ""
+                        val isOfflineOrAuth = err.contains("PERMISSION_DENIED", ignoreCase = true) ||
+                                err.contains("UNAVAILABLE", ignoreCase = true) ||
+                                err.contains("offline", ignoreCase = true) ||
+                                err.contains("network", ignoreCase = true)
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            Toast.makeText(context, "✅ ახალი პოზიცია წარმატებით დაემატა!", Toast.LENGTH_SHORT).show()
+                            if (isOfflineOrAuth) {
+                                Toast.makeText(context, "✅ ახალი პოზიცია დაემატა (ლოკალური ქეში)", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "⚠️ დაემატა ლოკალურად: $err", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 }
+                Result.success(Unit)
             }
         )
     }
 
     // წაშლის დადასტურების დიალოგი
     if (productToDelete != null) {
+        val isDarkDel = AppPreferencesManager.isDarkMode
         AlertDialog(
             onDismissRequest = { productToDelete = null },
-            title = { Text("პროდუქტის წაშლა", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text("ნამდვილად გსურთ წაშალოთ „${productToDelete!!.title}“?", color = Color(0xFFA0A5B0)) },
-            containerColor = Color(0xFF16191E),
+            title = { Text("პროდუქტის წაშლა", color = if (isDarkDel) Color.White else Color(0xFF0F172A), fontWeight = FontWeight.Bold) },
+            text = { Text("ნამდვილად გსურთ წაშალოთ „${productToDelete!!.title}“?", color = if (isDarkDel) Color(0xFFA0A5B0) else Color(0xFF475569)) },
+            containerColor = if (isDarkDel) Color(0xFF16191E) else Color.White,
+            shape = RoundedCornerShape(18.dp),
             confirmButton = {
                 Button(
                     onClick = {
@@ -1480,17 +1266,6 @@ fun AdminPanelScreen(
             }
         )
     }
-
-    // PIN-ის შეცვლის დიალოგი
-    if (showChangePinDialog) {
-        ChangePinDialog(
-            onDismiss = { showChangePinDialog = false },
-            onSuccess = {
-                showChangePinDialog = false
-                Toast.makeText(context, "ახალი PIN წარმატებით დაყენდა!", Toast.LENGTH_LONG).show()
-            }
-        )
-    }
 }
 
 // ==============================================================================
@@ -1503,7 +1278,7 @@ fun AdminProductRowItem(
     onDelete: () -> Unit,
     onToggleStock: () -> Unit
 ) {
-    val isSoftware = SoftwareCatalogData.isDigitalSoftwareService(item) || item.category == "პროგრამული სერვისები"
+    val isSoftware = item.type == "software" || item.category == "პროგრამული სერვისები"
     val previewDesc = item.shortDescription.ifBlank { item.description }
 
     Surface(
@@ -1593,15 +1368,16 @@ fun AdminProductRowItem(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    val isLongPrice = item.price.length > 10
+                    val hasAdminDiscount = item.hasActiveDiscount()
+                    val isLongPrice = item.effectiveDisplayPrice.length > 10
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = item.price,
-                            color = Color(0xFF4ADE80),
+                            text = item.effectiveDisplayPrice,
+                            color = if (hasAdminDiscount) Color(0xFFFF6B00) else Color(0xFF4ADE80),
                             fontSize = if (isLongPrice) 11.sp else 13.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -1610,8 +1386,33 @@ fun AdminProductRowItem(
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
+                        if (hasAdminDiscount) {
+                            Text(
+                                text = item.formattedOriginalPrice,
+                                color = Color(0xFF94A3B8),
+                                fontSize = 10.sp,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFFFF6B00)
+                            ) {
+                                Text(
+                                    text = "-${item.calculatedDiscountPercent}%",
+                                    color = Color.White,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
                         Surface(
-                            shape = RoundedCornerShape(4.dp),
+                            shape = RoundedCornerShape(BstoreRadii.Badge),
                             color = if (item.inStock) Color(0x334ADE80) else Color(0x33FF4D4F),
                             modifier = Modifier.clickable { onToggleStock() }
                         ) {
@@ -1629,6 +1430,23 @@ fun AdminProductRowItem(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                             )
+                        }
+
+                        if (!item.isActive) {
+                            Surface(
+                                shape = RoundedCornerShape(BstoreRadii.Badge),
+                                color = Color(0x33EF4444)
+                            ) {
+                                Text(
+                                    text = "გამორთულია",
+                                    color = Color(0xFFF87171),
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1682,13 +1500,21 @@ fun ProductEditDialog(
     existingCategories: List<String> = emptyList(),
     existingBrands: List<String> = emptyList(),
     onDismiss: () -> Unit,
-    onSave: (ProductItem) -> Unit
+    onSave: (ProductItem) -> Result<Unit>
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    var isSaving by remember { mutableStateOf(false) }
+    var saveErrorMessage by remember { mutableStateOf<String?>(null) }
+    var showAddBrandDialog by remember { mutableStateOf(false) }
+    var newBrandDialogInput by remember { mutableStateOf("") }
+
     var title by remember { mutableStateOf(product.title) }
     var price by remember { mutableStateOf(product.price) }
+    var originalPrice by remember { mutableStateOf(product.originalPrice) }
+    var discountedPrice by remember { mutableStateOf(product.discountedPrice) }
+    var discountExpiresAt by remember { mutableStateOf<Long?>(product.discountExpiresAt) }
     var brand by remember { mutableStateOf(product.brand) }
     var category by remember { mutableStateOf(product.category) }
     var subcategory by remember { mutableStateOf(product.subcategory) }
@@ -1724,6 +1550,13 @@ fun ProductEditDialog(
     }
 
     var inStock by remember { mutableStateOf(product.inStock) }
+    var availabilityStatus by remember {
+        mutableStateOf(
+            product.availabilityStatus.ifBlank { if (product.inStock) "IN_STOCK" else "OUT_OF_STOCK" }
+        )
+    }
+    var availabilityLabel by remember { mutableStateOf(product.availabilityLabel) }
+    var isActive by remember { mutableStateOf(product.isActive) }
     var isFeatured by remember { mutableStateOf(product.isFeatured) }
     var displayOrderInput by remember { mutableStateOf(product.displayOrder.toString()) }
 
@@ -1759,6 +1592,26 @@ fun ProductEditDialog(
     var aiStatusMessage by remember { mutableStateOf<String?>(null) }
     var isAiError by remember { mutableStateOf(false) }
 
+    var isCategoryManuallySelected by remember(product) { mutableStateOf(!isNew && product.category.isNotBlank()) }
+    var isTypeManuallySelected by remember(product) { mutableStateOf(!isNew && product.productType.isNotBlank()) }
+    var isAmbiguousCategoryConfirmed by remember(product) { mutableStateOf(!isNew) }
+
+    val categoryAssignmentAnalysis = remember(
+        title,
+        description,
+        selectedCategoryType,
+        category,
+        isCategoryManuallySelected,
+        isTypeManuallySelected
+    ) {
+        AdminStorage.detectProductCategoryAssignment(
+            title = title,
+            description = description,
+            explicitProductType = if (isTypeManuallySelected) selectedCategoryType.id else "",
+            manualCategoryOverride = if (isCategoryManuallySelected) category else ""
+        )
+    }
+
     // State for warning administrator before clearing incompatible type-specific fields on type switch
     var pendingCategoryTypeSwitch by remember { mutableStateOf<ProductCategoryType?>(null) }
     var pendingIncompatibleFieldNames by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -1785,7 +1638,8 @@ fun ProductEditDialog(
                 specificationsMap = updatedSpecs
             }
         }
-        if (category.isBlank() || category == prevConfig.categoryNameGeo) {
+        isTypeManuallySelected = true
+        if (!isCategoryManuallySelected || category.isBlank() || category == prevConfig.categoryNameGeo) {
             category = targetConfig.categoryNameGeo
         }
         if (targetType == ProductCategoryType.DIGITAL_SERVICE) {
@@ -1871,26 +1725,37 @@ fun ProductEditDialog(
 
     val baseBrands = listOf(
         "Apple", "Samsung", "Xiaomi", "Google Pixel", "OnePlus", "Honor", "Huawei",
-        "TP-Link", "ZTE", "Anker", "Baseus", "Ugreen", "Sony", "JBL",
-        "OpenAI", "Google", "Anthropic", "xAI", "Perplexity", "Cursor", "Lovable",
-        "Canva", "CapCut", "Adobe", "YouTube", "Spotify", "Microsoft"
+        "TP-Link", "ZTE", "Anker", "Baseus", "Ugreen", "Sony", "JBL", "Hoco", "Borofone", "Marshall"
     )
-    val brands = remember(existingBrands, brand) {
-        (baseBrands + existingBrands + listOfNotNull(brand.trim().takeIf { it.isNotBlank() })).distinct()
+    val storedBrands = remember(context, AdminStorage.brandsVersion) {
+        AdminStorage.getBrands(context).map { it.name }
+    }
+    val brands = remember(storedBrands, existingBrands, brand) {
+        val all = (storedBrands + baseBrands + existingBrands + listOfNotNull(brand.trim().takeIf { it.isNotBlank() }))
+            .map { AdminStorage.formatCanonicalBrandDisplayName(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+        all.sortedWith(String.CASE_INSENSITIVE_ORDER)
     }
 
-    val baseCategories = listOf(
-        "მობილური ტელეფონები", "ეკრანები", "აქსესუარები", "ყურსასმენები და აუდიო",
-        "დამტენები და კაბელები", "ქსელური მოწყობილობები", "ელექტრონიკა",
-        "პროგრამული სერვისები", "ელემენტები", "დამტენის პორტები", "კამერები", "კორპუსები", "დინამიკები"
-    )
-    val categories = remember(existingCategories, category) {
-        (baseCategories + existingCategories + listOfNotNull(category.trim().takeIf { it.isNotBlank() })).distinct()
+    val catVersion = AdminStorage.categoriesVersion
+    val baseCategories = remember(context, catVersion) {
+        AdminStorage.getCategories(context)
+            .filter { !ProductRepository.isProhibitedCategory(it) }
+            .sortedBy { it.displayOrder }
+            .map { it.name }
+    }
+    val categories = remember(baseCategories, existingCategories, category) {
+        val normExtra = existingCategories.map { AdminStorage.normalizeCategoryName(it) }
+        val normCurrent = AdminStorage.normalizeCategoryName(category)
+        (baseCategories +
+            normExtra.filterNot { it.equals("პროგრამული სერვისები", ignoreCase = true) } +
+            listOfNotNull(normCurrent.takeIf { it.isNotBlank() && !it.equals("პროგრამული სერვისები", ignoreCase = true) }))
+            .distinct()
     }
 
     val softwareSubcategories = remember(subcategory) {
-        (SoftwareCatalogData.softwareSubcategories.filter { it != "ყველა" } +
-            listOfNotNull(subcategory.trim().takeIf { it.isNotBlank() })).distinct()
+        listOfNotNull(subcategory.trim().takeIf { it.isNotBlank() })
     }
 
     val quickPrices = listOf(
@@ -1907,11 +1772,14 @@ fun ProductEditDialog(
 
     // ცოცხალი გადახედვის ობიექტი ქარდის ვიზუალისთვის
     val previewProduct = remember(
-        title, price, brand, category, subcategory, shortDescription, description, duration, imageUrl, selectedCategoryType
+        title, price, originalPrice, discountedPrice, discountExpiresAt, brand, category, subcategory, shortDescription, description, duration, imageUrl, selectedCategoryType
     ) {
         product.copy(
             title = title.ifBlank { "ახალი პროდუქტი" },
             price = price,
+            originalPrice = originalPrice,
+            discountedPrice = discountedPrice,
+            discountExpiresAt = discountExpiresAt,
             brand = brand,
             category = category.ifBlank { currentFormConfig.categoryNameGeo },
             type = if (isSoftwareService) "software" else "product",
@@ -2049,9 +1917,34 @@ fun ProductEditDialog(
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = title,
-                                onValueChange = { title = it },
+                                onValueChange = { newTitle ->
+                                    title = newTitle
+                                    val detected = AdminStorage.detectProductCategoryAssignment(
+                                        title = newTitle,
+                                        description = description,
+                                        explicitProductType = if (isTypeManuallySelected) selectedCategoryType.id else "",
+                                        manualCategoryOverride = if (isCategoryManuallySelected) category else ""
+                                    )
+                                    if (!isCategoryManuallySelected) {
+                                        if (detected.confidence == AdminStorage.AssignmentConfidence.EXACT_TYPE ||
+                                            detected.confidence == AdminStorage.AssignmentConfidence.HIGH_CONFIDENCE_TEXT
+                                        ) {
+                                            category = detected.categoryName
+                                            isAmbiguousCategoryConfirmed = true
+                                            if (!isTypeManuallySelected && detected.productType.isNotBlank()) {
+                                                val resolvedType = ProductCategoryType.fromId(detected.productType)
+                                                if (resolvedType != null && resolvedType != selectedCategoryType) {
+                                                    selectedCategoryType = resolvedType
+                                                    productType = resolvedType.id
+                                                }
+                                            }
+                                        } else if (detected.requiresAdminConfirmation) {
+                                            isAmbiguousCategoryConfirmed = false
+                                        }
+                                    }
+                                },
                                 label = { Text("დასახელება (Title)") },
-                                placeholder = { Text("მაგ: Samsung Galaxy S24 Ultra 12/256GB, Huawei B535-232, ChatGPT Plus...", fontSize = 12.sp) },
+                                placeholder = { Text("მაგ: Samsung Galaxy S24 Ultra 12/256GB, iPhone 16 Pro OLED ეკრანი...", fontSize = 12.sp) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
@@ -2295,6 +2188,440 @@ fun ProductEditDialog(
                                     },
                                     onDismiss = { aiReviewFields = null }
                                 )
+                            }
+                        }
+                    }
+
+                    // 1.1 პროდუქტის ფოტოს / ქარდის ვიზუალის მართვა (ყველა პროდუქტისთვის: ავტო-გენერაცია + ტელეფონის მეხსიერება + რეალური ლინკი)
+                    item {
+                        val isDark = AppPreferencesManager.isDarkMode
+                        val isUsingCustomPhoto = ProductImageManager.hasCustomAttachedPhoto(previewProduct)
+                        val isLocalGalleryPhoto = isUsingCustomPhoto && ProductImageManager.isLocalOrEmbeddedImage(imageUrl)
+
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isDark) Color(0xFF28303E) else Color(0xFFCBD5E1)
+                            ),
+                            modifier = Modifier.fillMaxWidth().testTag("product_photo_management_card")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "🖼️ ქარდის ფოტო / ვიზუალი:",
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = when {
+                                            isUsingCustomPhoto && isDark -> Color(0x264ADE80)
+                                            isUsingCustomPhoto && !isDark -> Color(0xFFDCFCE7)
+                                            isDark -> Color(0x26FF7A00)
+                                            else -> Color(0xFFFFEDD5)
+                                        },
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            when {
+                                                isUsingCustomPhoto && isDark -> Color(0x404ADE80)
+                                                isUsingCustomPhoto && !isDark -> Color(0xFF86EFAC)
+                                                isDark -> Color(0x40FF7A00)
+                                                else -> Color(0xFFFDBA74)
+                                            }
+                                        )
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isLocalGalleryPhoto -> "📱 გალერეიდან"
+                                                isUsingCustomPhoto -> "🔗 მიბმული ლინკით"
+                                                else -> "🎨 ავტო-გენერაცია"
+                                            },
+                                            color = when {
+                                                isUsingCustomPhoto && isDark -> Color(0xFF4ADE80)
+                                                isUsingCustomPhoto && !isDark -> Color(0xFF15803D)
+                                                isDark -> Color(0xFFFF9E40)
+                                                else -> Color(0xFFEA580C)
+                                            },
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                // ცოცხალი გადახედვა (Live Card Visual Preview)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(116.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF0D1017))
+                                        .border(1.dp, Color(0xFF262D3B), RoundedCornerShape(12.dp))
+                                ) {
+                                    ProductSmartVisual(
+                                        product = previewProduct,
+                                        modifier = Modifier.fillMaxSize(),
+                                        compact = false
+                                    )
+                                }
+
+                                // 3 რეჟიმის ღილაკი: ავტო-გენერაცია | მეხსიერებიდან (გალერეა) | ლინკით
+                                val isAutoSelected = !isUsingCustomPhoto && !showUrlInputBox
+                                val isGallerySelected = isLocalGalleryPhoto
+                                val isUrlSelected = showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)
+
+                                val unselectedBtnBg = if (isDark) Color(0xFF1E2430) else Color(0xFFFFFFFF)
+                                val unselectedBtnBorder = if (isDark) Color(0xFF333B4D) else Color(0xFFCBD5E1)
+                                val unselectedBtnText = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
+                                val unselectedBtnIcon = if (isDark) Color(0xFFFF9E40) else Color(0xFFEA580C)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // 1) ავტო-გენერაცია
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
+                                                showUrlInputBox = false
+                                            }
+                                            .testTag("photo_mode_auto_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AutoAwesome,
+                                                contentDescription = "Auto Photo",
+                                                tint = if (isAutoSelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "ავტო-ფოტო",
+                                                color = if (isAutoSelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+
+                                    // 2) ტელეფონის მეხსიერებიდან არჩევა (მრავალფოტოიანი არჩევა)
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                multiPhotoPickerLauncher.launch(
+                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                                )
+                                            }
+                                            .testTag("photo_mode_gallery_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AddPhotoAlternate,
+                                                contentDescription = "Pick Photo From Phone Memory",
+                                                tint = if (isGallerySelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "გალერეა",
+                                                color = if (isGallerySelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+
+                                    // 3) რეალური ლინკით მიბმა
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBg,
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBorder
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(44.dp)
+                                            .clickable {
+                                                showUrlInputBox = true
+                                                if (urlInputText.isNotBlank()) {
+                                                    imageUrl = urlInputText.trim()
+                                                }
+                                            }
+                                            .testTag("photo_mode_url_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Link,
+                                                contentDescription = "Photo URL Link",
+                                                tint = if (isUrlSelected) Color.White else unselectedBtnIcon,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = "ლინკით",
+                                                color = if (isUrlSelected) Color.White else unselectedBtnText,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // ლინკის ჩასაწერი ველი და დამატების ღილაკი
+                                if (showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = urlInputText,
+                                            onValueChange = { newUrl ->
+                                                urlInputText = newUrl
+                                                imageUrl = newUrl.trim().ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
+                                            },
+                                            label = { Text("ფოტოს რეალური ლინკი (https://...)") },
+                                            placeholder = { Text("ჩასვით სურათის პირდაპირი URL ბმული...", fontSize = 11.5.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color.White,
+                                                unfocusedTextColor = Color.White,
+                                                focusedBorderColor = Color(0xFFFF6A00),
+                                                unfocusedBorderColor = Color(0xFF2E3440)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("product_image_url_input")
+                                        )
+                                        Button(
+                                            onClick = {
+                                                val trimmed = urlInputText.trim()
+                                                if (trimmed.isNotBlank() && !productImages.contains(trimmed)) {
+                                                    productImages = (productImages + trimmed).toMutableList()
+                                                    if (primaryImageUrl.isBlank() || primaryImageUrl == ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) {
+                                                        primaryImageUrl = trimmed
+                                                        imageUrl = trimmed
+                                                    }
+                                                    urlInputText = ""
+                                                    Toast.makeText(context, "✅ ფოტოს ლინკი დაემატა!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp),
+                                            modifier = Modifier.height(48.dp)
+                                        ) {
+                                            Text("+", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
+                                // 4) მრავალფოტოიანი გალერეის სია (Multi-Image Gallery List)
+                                if (productImages.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "ატვირთული ფოტოები (${productImages.size}):",
+                                                color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                "⭐ მონიშნეთ მთავარი ფოტო",
+                                                color = Color(0xFFFFB800),
+                                                fontSize = 10.sp
+                                            )
+                                        }
+
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            items(productImages, key = { it }) { imgPath ->
+                                                val isPrimary = primaryImageUrl == imgPath || (primaryImageUrl.isBlank() && productImages.firstOrNull() == imgPath)
+                                                val imgIndex = productImages.indexOf(imgPath)
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (isDark) Color(0xFF1E2430) else Color(0xFFF1F5F9),
+                                                    border = androidx.compose.foundation.BorderStroke(
+                                                        1.5.dp,
+                                                        if (isPrimary) Color(0xFFFF6A00) else Color(0xFF333B4D)
+                                                    ),
+                                                    modifier = Modifier.width(105.dp)
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.padding(4.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(97.dp, 75.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(Color.Black)
+                                                        ) {
+                                                            SafeProductAsyncImage(
+                                                                imageUrl = imgPath,
+                                                                contentDescription = "Product image",
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+
+                                                            if (isPrimary) {
+                                                                Surface(
+                                                                    shape = RoundedCornerShape(bottomEnd = 6.dp),
+                                                                    color = Color(0xFFFF6A00),
+                                                                    modifier = Modifier.align(Alignment.TopStart)
+                                                                ) {
+                                                                    Text("⭐ მთავარი", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                                                                }
+                                                            }
+                                                        }
+
+                                                        // მოქმედებების ღილაკები: Star (Primary), Crop, Delete, Left/Right
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceAround,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            // Primary toggle
+                                                            IconButton(
+                                                                onClick = {
+                                                                    primaryImageUrl = imgPath
+                                                                    imageUrl = imgPath
+                                                                },
+                                                                modifier = Modifier.size(22.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    if (isPrimary) Icons.Default.Star else Icons.Default.StarBorder,
+                                                                    contentDescription = "Set Primary",
+                                                                    tint = if (isPrimary) Color(0xFFFFB800) else Color.Gray,
+                                                                    modifier = Modifier.size(15.dp)
+                                                                )
+                                                            }
+
+                                                            // Crop button
+                                                            IconButton(
+                                                                onClick = { imageToCrop = imgPath },
+                                                                modifier = Modifier.size(22.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    Icons.Default.Crop,
+                                                                    contentDescription = "Crop",
+                                                                    tint = Color(0xFFFF7A00),
+                                                                    modifier = Modifier.size(14.dp)
+                                                                )
+                                                            }
+
+                                                            // Move Left
+                                                            if (imgIndex > 0) {
+                                                                IconButton(
+                                                                    onClick = {
+                                                                        val list = productImages.toMutableList()
+                                                                        val tmp = list[imgIndex]
+                                                                        list[imgIndex] = list[imgIndex - 1]
+                                                                        list[imgIndex - 1] = tmp
+                                                                        productImages = list
+                                                                    },
+                                                                    modifier = Modifier.size(20.dp)
+                                                                ) {
+                                                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Move Left", tint = Color.LightGray, modifier = Modifier.size(13.dp))
+                                                                }
+                                                            }
+
+                                                            // Delete image
+                                                            IconButton(
+                                                                onClick = {
+                                                                    val list = productImages.toMutableList()
+                                                                    list.remove(imgPath)
+                                                                    productImages = list
+                                                                    if (primaryImageUrl == imgPath) {
+                                                                        primaryImageUrl = productImages.firstOrNull() ?: ""
+                                                                        imageUrl = primaryImageUrl.ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
+                                                                    }
+                                                                },
+                                                                modifier = Modifier.size(22.dp)
+                                                             ) {
+                                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF4D4F), modifier = Modifier.size(14.dp))
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2621,444 +2948,9 @@ fun ProductEditDialog(
                             }
                         }
                     }
-
-                    // 1.5 პროდუქტის ფოტოს / ქარდის ვიზუალის მართვა (ყველა პროდუქტისთვის: ავტო-გენერაცია + ტელეფონის მეხსიერება + რეალური ლინკი)
+                    // 2. ფასი + სწრაფი არჩევის ღილაკები + ფასდაკლების მართვა (მხოლოდ ადმინისტრატორის მიერ შესავსები)
                     item {
-                        val isDark = AppPreferencesManager.isDarkMode
-                        val isUsingCustomPhoto = ProductImageManager.hasCustomAttachedPhoto(previewProduct)
-                        val isLocalGalleryPhoto = isUsingCustomPhoto && ProductImageManager.isLocalOrEmbeddedImage(imageUrl)
-
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isDark) Color(0xFF12151C) else Color(0xFFF8FAFC),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isDark) Color(0xFF28303E) else Color(0xFFCBD5E1)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "🖼️ ქარდის ფოტო / ვიზუალი:",
-                                        color = if (isDark) Color.White else Color(0xFF0F172A),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = when {
-                                            isUsingCustomPhoto && isDark -> Color(0x264ADE80)
-                                            isUsingCustomPhoto && !isDark -> Color(0xFFDCFCE7)
-                                            isDark -> Color(0x26FF7A00)
-                                            else -> Color(0xFFFFEDD5)
-                                        },
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            when {
-                                                isUsingCustomPhoto && isDark -> Color(0x404ADE80)
-                                                isUsingCustomPhoto && !isDark -> Color(0xFF86EFAC)
-                                                isDark -> Color(0x40FF7A00)
-                                                else -> Color(0xFFFDBA74)
-                                            }
-                                        )
-                                    ) {
-                                        Text(
-                                            text = when {
-                                                isLocalGalleryPhoto -> "📱 გალერეიდან"
-                                                isUsingCustomPhoto -> "🔗 მიბმული ლინკით"
-                                                else -> "🎨 ავტო-გენერაცია"
-                                            },
-                                            color = when {
-                                                isUsingCustomPhoto && isDark -> Color(0xFF4ADE80)
-                                                isUsingCustomPhoto && !isDark -> Color(0xFF15803D)
-                                                isDark -> Color(0xFFFF9E40)
-                                                else -> Color(0xFFEA580C)
-                                            },
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
-                                    }
-                                }
-
-                                // ცოცხალი გადახედვა (Live Card Visual Preview)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(116.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFF0D1017))
-                                        .border(1.dp, Color(0xFF262D3B), RoundedCornerShape(12.dp))
-                                ) {
-                                    ProductSmartVisual(
-                                        product = previewProduct,
-                                        modifier = Modifier.fillMaxSize(),
-                                        compact = false
-                                    )
-                                }
-
-                                // 3 რეჟიმის ღილაკი: ავტო-გენერაცია | მეხსიერებიდან (გალერეა) | ლინკით
-                                val isAutoSelected = !isUsingCustomPhoto && !showUrlInputBox
-                                val isGallerySelected = isLocalGalleryPhoto
-                                val isUrlSelected = showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)
-
-                                val unselectedBtnBg = if (isDark) Color(0xFF1E2430) else Color(0xFFFFFFFF)
-                                val unselectedBtnBorder = if (isDark) Color(0xFF333B4D) else Color(0xFFCBD5E1)
-                                val unselectedBtnText = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
-                                val unselectedBtnIcon = if (isDark) Color(0xFFFF9E40) else Color(0xFFEA580C)
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // 1) ავტო-გენერაცია
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBg,
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            if (isAutoSelected) Color(0xFFFF6A00) else unselectedBtnBorder
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(44.dp)
-                                            .clickable {
-                                                imageUrl = ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
-                                                showUrlInputBox = false
-                                            }
-                                            .testTag("photo_mode_auto_button")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 6.dp),
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.AutoAwesome,
-                                                contentDescription = "Auto Photo",
-                                                tint = if (isAutoSelected) Color.White else unselectedBtnIcon,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "ავტო-ფოტო",
-                                                color = if (isAutoSelected) Color.White else unselectedBtnText,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Ellipsis,
-                                                textAlign = TextAlign.Center
-                                            )
-                                        }
-                                    }
-
-                                    // 2) ტელეფონის მეხსიერებიდან არჩევა (მრავალფოტოიანი არჩევა)
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBg,
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            if (isGallerySelected) Color(0xFFFF6A00) else unselectedBtnBorder
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(44.dp)
-                                            .clickable {
-                                                multiPhotoPickerLauncher.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                 )
-                                            }
-                                            .testTag("photo_mode_gallery_button")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 6.dp),
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.AddPhotoAlternate,
-                                                contentDescription = "Pick Photo From Phone Memory",
-                                                tint = if (isGallerySelected) Color.White else unselectedBtnIcon,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "გალერეა",
-                                                color = if (isGallerySelected) Color.White else unselectedBtnText,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Ellipsis,
-                                                textAlign = TextAlign.Center
-                                            )
-                                        }
-                                    }
-
-                                    // 3) რეალური ლინკით მიბმა
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBg,
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            if (isUrlSelected) Color(0xFFFF6A00) else unselectedBtnBorder
-                                        ),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(44.dp)
-                                            .clickable {
-                                                showUrlInputBox = true
-                                                if (urlInputText.isNotBlank()) {
-                                                    imageUrl = urlInputText.trim()
-                                                }
-                                            }
-                                            .testTag("photo_mode_url_button")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 6.dp),
-                                            horizontalArrangement = Arrangement.Center,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Link,
-                                                contentDescription = "Photo URL Link",
-                                                tint = if (isUrlSelected) Color.White else unselectedBtnIcon,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "ლინკით",
-                                                color = if (isUrlSelected) Color.White else unselectedBtnText,
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                softWrap = false,
-                                                overflow = TextOverflow.Ellipsis,
-                                                textAlign = TextAlign.Center
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // ლინკის ჩასაწერი ველი და დამატების ღილაკი
-                                if (showUrlInputBox || (isUsingCustomPhoto && !isLocalGalleryPhoto)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        OutlinedTextField(
-                                            value = urlInputText,
-                                            onValueChange = { newUrl ->
-                                                urlInputText = newUrl
-                                                imageUrl = newUrl.trim().ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
-                                            },
-                                            label = { Text("ფოტოს რეალური ლინკი (https://...)") },
-                                            placeholder = { Text("ჩასვით სურათის პირდაპირი URL ბმული...", fontSize = 11.5.sp) },
-                                            singleLine = true,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = Color(0xFFFF6A00),
-                                                unfocusedBorderColor = Color(0xFF2E3440)
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("product_image_url_input")
-                                        )
-                                        Button(
-                                            onClick = {
-                                                val trimmed = urlInputText.trim()
-                                                if (trimmed.isNotBlank() && !productImages.contains(trimmed)) {
-                                                    productImages = (productImages + trimmed).toMutableList()
-                                                    if (primaryImageUrl.isBlank() || primaryImageUrl == ProductImageManager.AUTO_GENERATED_IMAGE_MARKER) {
-                                                        primaryImageUrl = trimmed
-                                                        imageUrl = trimmed
-                                                    }
-                                                    urlInputText = ""
-                                                    Toast.makeText(context, "✅ ფოტოს ლინკი დაემატა!", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp),
-                                            modifier = Modifier.height(48.dp)
-                                        ) {
-                                            Text("+", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-
-                                // 4) მრავალფოტოიანი გალერეის სია (Multi-Image Gallery List)
-                                if (productImages.isNotEmpty()) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                "ატვირთული ფოტოები (${productImages.size}):",
-                                                color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            Text(
-                                                "⭐ მონიშნეთ მთავარი ფოტო",
-                                                color = Color(0xFFFFB800),
-                                                fontSize = 10.sp
-                                            )
-                                        }
-
-                                        LazyRow(
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            items(productImages, key = { it }) { imgPath ->
-                                                val isPrimary = primaryImageUrl == imgPath || (primaryImageUrl.isBlank() && productImages.firstOrNull() == imgPath)
-                                                val imgIndex = productImages.indexOf(imgPath)
-
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = if (isDark) Color(0xFF1E2430) else Color(0xFFF1F5F9),
-                                                    border = androidx.compose.foundation.BorderStroke(
-                                                        1.5.dp,
-                                                        if (isPrimary) Color(0xFFFF6A00) else Color(0xFF333B4D)
-                                                    ),
-                                                    modifier = Modifier.width(105.dp)
-                                                ) {
-                                                    Column(
-                                                        modifier = Modifier.padding(4.dp),
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                                    ) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(97.dp, 75.dp)
-                                                                .clip(RoundedCornerShape(8.dp))
-                                                                .background(Color.Black)
-                                                        ) {
-                                                            SafeProductAsyncImage(
-                                                                imageUrl = imgPath,
-                                                                contentDescription = "Product image",
-                                                                contentScale = ContentScale.Crop,
-                                                                modifier = Modifier.fillMaxSize()
-                                                            )
-
-                                                            if (isPrimary) {
-                                                                Surface(
-                                                                    shape = RoundedCornerShape(bottomEnd = 6.dp),
-                                                                    color = Color(0xFFFF6A00),
-                                                                    modifier = Modifier.align(Alignment.TopStart)
-                                                                ) {
-                                                                    Text("⭐ მთავარი", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
-                                                                }
-                                                            }
-                                                        }
-
-                                                        // მოქმედებების ღილაკები: Star (Primary), Crop, Delete, Left/Right
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceAround,
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            // Primary toggle
-                                                            IconButton(
-                                                                onClick = {
-                                                                    primaryImageUrl = imgPath
-                                                                    imageUrl = imgPath
-                                                                },
-                                                                modifier = Modifier.size(22.dp)
-                                                            ) {
-                                                                Icon(
-                                                                    if (isPrimary) Icons.Default.Star else Icons.Default.StarBorder,
-                                                                    contentDescription = "Set Primary",
-                                                                    tint = if (isPrimary) Color(0xFFFFB800) else Color.Gray,
-                                                                    modifier = Modifier.size(15.dp)
-                                                                )
-                                                            }
-
-                                                            // Crop button
-                                                            IconButton(
-                                                                onClick = { imageToCrop = imgPath },
-                                                                modifier = Modifier.size(22.dp)
-                                                            ) {
-                                                                Icon(
-                                                                    Icons.Default.Crop,
-                                                                    contentDescription = "Crop",
-                                                                    tint = Color(0xFFFF7A00),
-                                                                    modifier = Modifier.size(14.dp)
-                                                                )
-                                                            }
-
-                                                            // Move Left
-                                                            if (imgIndex > 0) {
-                                                                IconButton(
-                                                                    onClick = {
-                                                                        val list = productImages.toMutableList()
-                                                                        val tmp = list[imgIndex]
-                                                                        list[imgIndex] = list[imgIndex - 1]
-                                                                        list[imgIndex - 1] = tmp
-                                                                        productImages = list
-                                                                    },
-                                                                    modifier = Modifier.size(20.dp)
-                                                                ) {
-                                                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Move Left", tint = Color.LightGray, modifier = Modifier.size(13.dp))
-                                                                }
-                                                            }
-
-                                                            // Delete image
-                                                            IconButton(
-                                                                onClick = {
-                                                                    val list = productImages.toMutableList()
-                                                                    list.remove(imgPath)
-                                                                    productImages = list
-                                                                    if (primaryImageUrl == imgPath) {
-                                                                        primaryImageUrl = productImages.firstOrNull() ?: ""
-                                                                        imageUrl = primaryImageUrl.ifBlank { ProductImageManager.AUTO_GENERATED_IMAGE_MARKER }
-                                                                    }
-                                                                },
-                                                                modifier = Modifier.size(22.dp)
-                                                             ) {
-                                                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF4D4F), modifier = Modifier.size(14.dp))
-                                                             }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. ფასი + სწრაფი არჩევის ღილაკები (მხოლოდ ადმინისტრატორის მიერ შესავსები)
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedTextField(
                                 value = price,
                                 onValueChange = { price = it },
@@ -3095,6 +2987,244 @@ fun ProductEditDialog(
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                         )
+                                    }
+                                }
+                            }
+
+                            // 🏷️ ფასდაკლების მართვის ბლოკი (ფასდაკლებების სექციაში გამოსაჩენად)
+                            val origNumeric = remember(originalPrice, price) {
+                                val src = originalPrice.ifBlank { price }
+                                Regex("""(\d+(?:[.,]\d+)?)""").find(src.replace(" ", ""))?.groupValues?.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull()
+                            }
+                            val discNumeric = remember(discountedPrice) {
+                                Regex("""(\d+(?:[.,]\d+)?)""").find(discountedPrice.replace(" ", ""))?.groupValues?.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull()
+                            }
+                            val liveDiscountPercent = remember(origNumeric, discNumeric) {
+                                if (origNumeric != null && discNumeric != null && origNumeric > 0.0 && discNumeric > 0.0 && origNumeric > discNumeric) {
+                                    kotlin.math.round(((origNumeric - discNumeric) / origNumeric) * 100.0).toInt().coerceIn(1, 99)
+                                } else {
+                                    0
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isDark) Color(0xFF12151C) else Color(0xFFFFF7ED),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (liveDiscountPercent > 0) Color(0xFFFF6B00) else Color(0xFF2E3440)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("product_discount_section")
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.LocalOffer,
+                                                contentDescription = null,
+                                                tint = Color(0xFFFF6B00),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text(
+                                                text = "ფასდაკლების მართვა (ფასდაკლებების სექცია)",
+                                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        if (liveDiscountPercent > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0xFFFF6B00)
+                                            ) {
+                                                Text(
+                                                    text = "-$liveDiscountPercent%",
+                                                    color = Color.White,
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "თუ მიუთითებთ საწყის და ფასდაკლებულ ფასს, პროდუქტი ავტომატურად გამოჩნდება „ფასდაკლებების“ განყოფილებაში.",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 10.5.sp,
+                                        lineHeight = 14.sp
+                                    )
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = originalPrice,
+                                            onValueChange = { originalPrice = it },
+                                            label = { Text("საწყისი ფასი (მაგ: 120 ₾)", fontSize = 10.5.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                focusedBorderColor = Color(0xFFFF6B00),
+                                                unfocusedBorderColor = Color(0xFF2E3440)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("product_original_price_input")
+                                        )
+
+                                        OutlinedTextField(
+                                            value = discountedPrice,
+                                            onValueChange = { newDisc ->
+                                                discountedPrice = newDisc
+                                                if (originalPrice.isBlank() && price.isNotBlank() && !price.contains("შეთანხმებით")) {
+                                                    originalPrice = price
+                                                }
+                                            },
+                                            label = { Text("ფასდაკლებული (მაგ: 95 ₾)", fontSize = 10.5.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = Color(0xFFFF6B00),
+                                                unfocusedTextColor = Color(0xFFFF6B00),
+                                                focusedBorderColor = Color(0xFFFF6B00),
+                                                unfocusedBorderColor = Color(0xFF2E3440)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("product_discounted_price_input")
+                                        )
+                                    }
+
+                                    // სწრაფი პროცენტული ფასდაკლების ღილაკები
+                                    val quickPercents = listOf(10, 15, 20, 25, 30, 40, 50)
+                                    Text(
+                                        text = "სწრაფი პროცენტული დაკლება:",
+                                        color = Color(0xFFA0A5B0),
+                                        fontSize = 10.5.sp
+                                    )
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(quickPercents) { pct ->
+                                            val isSelectedPct = liveDiscountPercent == pct
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isSelectedPct) Color(0xFFFF6B00) else Color(0xFF1E222B),
+                                                border = androidx.compose.foundation.BorderStroke(
+                                                    1.dp,
+                                                    if (isSelectedPct) Color(0xFFFF6B00) else Color(0xFF2E3440)
+                                                ),
+                                                modifier = Modifier.clickable {
+                                                    val baseStr = originalPrice.ifBlank { price }
+                                                    val baseVal = Regex("""(\d+(?:[.,]\d+)?)""")
+                                                        .find(baseStr.replace(" ", ""))
+                                                        ?.groupValues?.getOrNull(1)
+                                                        ?.replace(',', '.')
+                                                        ?.toDoubleOrNull()
+                                                    if (baseVal != null && baseVal > 0.0) {
+                                                        val formattedBase = if (baseVal % 1.0 == 0.0) "${baseVal.toInt()} ₾" else "$baseVal ₾"
+                                                        originalPrice = formattedBase
+                                                        val newDiscVal = kotlin.math.round(baseVal * (100 - pct) / 100.0).toInt().coerceAtLeast(1)
+                                                        discountedPrice = "$newDiscVal ₾"
+                                                        price = "$newDiscVal ₾"
+                                                    } else {
+                                                        Toast.makeText(context, "ჯერ შეიყვანეთ საწყისი ფასი (რიცხვით)", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = "-$pct%",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // ფასდაკლების ვადის არჩევა (სურვილისამებრ)
+                                    val durationOptions = listOf(
+                                        null to "უვადო",
+                                        24L * 3600_000L to "24 სთ",
+                                        3L * 24L * 3600_000L to "3 დღე",
+                                        7L * 24L * 3600_000L to "7 დღე",
+                                        30L * 24L * 3600_000L to "30 დღე"
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "მოქმედების ვადა:",
+                                            color = Color(0xFFA0A5B0),
+                                            fontSize = 10.5.sp
+                                        )
+                                        if (originalPrice.isNotBlank() || discountedPrice.isNotBlank()) {
+                                            Text(
+                                                text = "✕ ფასდაკლების მოხსნა",
+                                                color = Color(0xFFFF4D4F),
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        if (originalPrice.isNotBlank()) {
+                                                            price = originalPrice
+                                                        }
+                                                        originalPrice = ""
+                                                        discountedPrice = ""
+                                                        discountExpiresAt = null
+                                                    }
+                                                    .testTag("clear_discount_button")
+                                            )
+                                        }
+                                    }
+
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        items(durationOptions) { (durationMs, label) ->
+                                            val isSelectedDur = if (durationMs == null) {
+                                                discountExpiresAt == null
+                                            } else {
+                                                val rem = (discountExpiresAt ?: 0L) - System.currentTimeMillis()
+                                                rem > 0 && kotlin.math.abs(rem - durationMs) < 12L * 3600_000L
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = if (isSelectedDur) Color(0xFFFF6B00).copy(alpha = 0.22f) else Color(0xFF1E222B),
+                                                border = androidx.compose.foundation.BorderStroke(
+                                                    1.dp,
+                                                    if (isSelectedDur) Color(0xFFFF6B00) else Color(0xFF2E3440)
+                                                ),
+                                                modifier = Modifier.clickable {
+                                                    discountExpiresAt = if (durationMs == null) null else System.currentTimeMillis() + durationMs
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelectedDur) Color(0xFFFF6B00) else Color.White,
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = if (isSelectedDur) FontWeight.Bold else FontWeight.Medium,
+                                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3142,10 +3272,107 @@ fun ProductEditDialog(
                         )
                     }
 
-                    // 5. კატეგორიის არჩევა + ხელით მითითება
+                    // 5. კატეგორიის არჩევა + ხელით მითითება + ავტომატური კატეგორიის დადასტურება
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("კატეგორია (აირჩიეთ ან ჩაწერეთ ხელით):", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "კატეგორია",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = if (isCategoryManuallySelected) Color(0xFF1E293B) else Color(0xFF0F2618),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isCategoryManuallySelected) Color(0xFF38BDF8) else Color(0xFF22C55E)
+                                    ),
+                                    modifier = Modifier.testTag("category_assignment_mode_badge")
+                                ) {
+                                    Text(
+                                        text = if (isCategoryManuallySelected) "✍️ ხელით" else "⚡ ავტო: ${categoryAssignmentAnalysis.categoryName}",
+                                        color = if (isCategoryManuallySelected) Color(0xFF38BDF8) else Color(0xFF4ADE80),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Text("აირჩიეთ ჩამონათვალიდან ან ჩაწერეთ ახალი კატეგორია:", color = Color(0xFFA0A5B0), fontSize = 11.5.sp)
+
+                            if (categoryAssignmentAnalysis.requiresAdminConfirmation && !isAmbiguousCategoryConfirmed && !isCategoryManuallySelected) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFF2B1D0E),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9E40)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("ambiguous_category_confirmation_banner")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "⚠️ საჭიროა კატეგორიის დადასტურება: დასახელება ორაზროვანია. შემოთავაზებულია „${categoryAssignmentAnalysis.categoryName}“",
+                                            color = Color(0xFFFFB86C),
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            categoryAssignmentAnalysis.candidateCategories.forEach { candName ->
+                                                Surface(
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    color = if (category == candName) Color(0xFFFF6A00) else Color(0xFF1E2430),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00)),
+                                                    modifier = Modifier.clickable {
+                                                        category = candName
+                                                        isCategoryManuallySelected = true
+                                                        isAmbiguousCategoryConfirmed = true
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        text = candName,
+                                                        color = Color.White,
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            Button(
+                                                onClick = {
+                                                    category = categoryAssignmentAnalysis.categoryName
+                                                    isAmbiguousCategoryConfirmed = true
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier
+                                                    .height(32.dp)
+                                                    .testTag("confirm_suggested_category_button")
+                                            ) {
+                                                Text("დადასტურება", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(categories) { c ->
                                     val isSelected = category.trim().equals(c, ignoreCase = true)
@@ -3156,7 +3383,13 @@ fun ProductEditDialog(
                                             1.dp,
                                             if (isSelected) Color(0xFFFF6A00) else Color(0xFF2E3440)
                                         ),
-                                        modifier = Modifier.clickable { category = c }
+                                        modifier = Modifier
+                                            .clickable {
+                                                category = c
+                                                isCategoryManuallySelected = true
+                                                isAmbiguousCategoryConfirmed = true
+                                            }
+                                            .testTag("category_chip_${AdminStorage.resolveCanonicalCategoryId(c)}")
                                     ) {
                                         Text(
                                             text = c,
@@ -3170,7 +3403,11 @@ fun ProductEditDialog(
                             }
                             OutlinedTextField(
                                 value = category,
-                                onValueChange = { category = it },
+                                onValueChange = {
+                                    category = it
+                                    isCategoryManuallySelected = it.isNotBlank()
+                                    if (it.isNotBlank()) isAmbiguousCategoryConfirmed = true
+                                },
                                 label = {
                                     Text(
                                         "კატეგორია (ხელით / ახალი)",
@@ -3181,7 +3418,7 @@ fun ProductEditDialog(
                                 },
                                 placeholder = {
                                     Text(
-                                        "მაგ: მობილური ტელეფონები, ეკრანები...",
+                                        "მაგ: მობილური ტელეფონები, ეკრანები, ყურსასმენები...",
                                         fontSize = 11.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -3201,25 +3438,113 @@ fun ProductEditDialog(
                         }
                     }
 
-                    // 6. ბრენდის არჩევა + ხელით მითითება
+                    // 6. ბრენდის არჩევა + ხელით მითითება + ახალი ბრენდის დამატება
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("ბრენდი (აირჩიეთ ან ჩაწერეთ ხელით):", color = Color(0xFFA0A5B0), fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "🏷️ ბრენდი (აირჩიეთ ან დაამატეთ):",
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        showAddBrandDialog = !showAddBrandDialog
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00)),
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .testTag("add_new_brand_inline_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add brand",
+                                        tint = Color(0xFFFF6A00),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "ახალი ბრენდი",
+                                        color = Color(0xFFFF6A00),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            if (showAddBrandDialog) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isDark) Color(0xFF1E2430) else Color(0xFFF1F5F9),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("add_brand_inline_panel")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = newBrandDialogInput,
+                                            onValueChange = { newBrandDialogInput = it },
+                                            placeholder = { Text("ახალი ბრენდი (მაგ: Hoco, Borofone, JBL)...", fontSize = 11.5.sp) },
+                                            singleLine = true,
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                                focusedBorderColor = Color(0xFFFF6A00),
+                                                unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
+                                            ),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("new_brand_name_input")
+                                        )
+                                        Button(
+                                            onClick = {
+                                                val clean = newBrandDialogInput.trim()
+                                                if (clean.isNotBlank()) {
+                                                    val canonical = AdminStorage.formatCanonicalBrandDisplayName(clean)
+                                                    val (addedBrand, _) = AdminStorage.addOrGetBrand(context, canonical)
+                                                    brand = addedBrand.name
+                                                    newBrandDialogInput = ""
+                                                    showAddBrandDialog = false
+                                                    Toast.makeText(context, "✅ ბრენდი წარმატებით დაემატა: $brand", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.testTag("confirm_add_brand_button")
+                                        ) {
+                                            Text("დამატება", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(brands) { b ->
                                     val isSelected = brand.trim().equals(b, ignoreCase = true)
                                     Surface(
                                         shape = RoundedCornerShape(10.dp),
-                                        color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222630),
+                                        color = if (isSelected) Color(0xFFFF6A00) else (if (isDark) Color(0xFF222630) else Color(0xFFE2E8F0)),
                                         border = androidx.compose.foundation.BorderStroke(
                                             1.dp,
-                                            if (isSelected) Color(0xFFFF6A00) else Color(0xFF2E3440)
+                                            if (isSelected) Color(0xFFFF6A00) else (if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1))
                                         ),
                                         modifier = Modifier.clickable { brand = b }
                                     ) {
                                         Text(
                                             text = b,
-                                            color = Color.White,
+                                            color = if (isSelected) Color.White else (if (isDark) Color.White else Color(0xFF0F172A)),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
@@ -3240,7 +3565,7 @@ fun ProductEditDialog(
                                 },
                                 placeholder = {
                                     Text(
-                                        "მაგ: Samsung, Apple, Huawei, Xiaomi...",
+                                        "მაგ: Samsung, Apple, Huawei, Xiaomi, Hoco...",
                                         fontSize = 11.5.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -3248,10 +3573,10 @@ fun ProductEditDialog(
                                 },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                    unfocusedTextColor = if (isDark) Color.White else Color(0xFF0F172A),
                                     focusedBorderColor = Color(0xFFFF6A00),
-                                    unfocusedBorderColor = Color(0xFF2E3440)
+                                    unfocusedBorderColor = if (isDark) Color(0xFF2E3440) else Color(0xFFCBD5E1)
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -3523,7 +3848,7 @@ fun ProductEditDialog(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    "ხელმისაწვდომია / მარაგშია (In Stock)",
+                                    "აქტიურია / ჩანს კატალოგში (Active)",
                                     color = Color.White,
                                     fontSize = 12.5.sp,
                                     maxLines = 1,
@@ -3533,12 +3858,80 @@ fun ProductEditDialog(
                                         .padding(end = 8.dp)
                                 )
                                 Switch(
-                                    checked = inStock,
-                                    onCheckedChange = { inStock = it },
+                                    checked = isActive,
+                                    onCheckedChange = { isActive = it },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = Color.White,
-                                        checkedTrackColor = Color(0xFFFF6A00)
-                                    )
+                                        checkedTrackColor = Color(0xFF16A34A)
+                                    ),
+                                    modifier = Modifier.testTag("product_is_active_switch")
+                                )
+                            }
+
+                            // მარაგის სტატუსი (Advanced Availability Status)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "მარაგის სტატუსი (Availability)",
+                                    color = Color(0xFFA0A5B0),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                val statusOptions = listOf(
+                                    Triple("IN_STOCK", "მარაგშია", Color(0xFF4ADE80)),
+                                    Triple("OUT_OF_STOCK", "ამოწურულია", Color(0xFFF87171)),
+                                    Triple("PREORDER", "წინასწარი შეკვეთით", Color(0xFFFBBF24))
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    statusOptions.forEach { (code, label, col) ->
+                                        val isSelected = availabilityStatus == code
+                                        Surface(
+                                            onClick = {
+                                                availabilityStatus = code
+                                                inStock = (code == "IN_STOCK" || code == "PREORDER")
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected) col.copy(alpha = 0.25f) else Color(0xFF101319),
+                                            border = BorderStroke(1.dp, if (isSelected) col else Color(0xFF2C3240)),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(38.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxSize(),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isSelected) col else Color(0xFFCBD5E1),
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    softWrap = false
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Custom label override (optional)
+                                OutlinedTextField(
+                                    value = availabilityLabel,
+                                    onValueChange = { availabilityLabel = it },
+                                    label = { Text("საბაჟო ტექსტი (სურვილისამებრ, მაგ. 3 ცალი დარჩა)") },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = Color(0xFFFF6A00),
+                                        unfocusedBorderColor = Color(0xFF2E3440)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_availability_label_input")
                                 )
                             }
 
@@ -3585,6 +3978,26 @@ fun ProductEditDialog(
                     }
                 }
 
+                if (!saveErrorMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isDark) Color(0xFF2D1215) else Color(0xFFFEE2E2),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4D4F)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("product_save_error_banner")
+                    ) {
+                        Text(
+                            text = "❌ $saveErrorMessage",
+                            color = Color(0xFFFF4D4F),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
@@ -3593,6 +4006,7 @@ fun ProductEditDialog(
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
+                        enabled = !isSaving,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -3605,19 +4019,64 @@ fun ProductEditDialog(
                     Button(
                         onClick = {
                             val trimmedPrice = price.trim()
-                            val normalizedPrice = when {
+                            val normalizedBasePrice = when {
                                 trimmedPrice.isBlank() -> "ფასი შეთანხმებით"
                                 trimmedPrice.all { it.isDigit() || it == '.' || it == ',' } -> "$trimmedPrice ₾"
                                 else -> trimmedPrice
                             }
+
+                            val trimmedOrig = originalPrice.trim()
+                            val normalizedOrig = when {
+                                trimmedOrig.isBlank() -> ""
+                                trimmedOrig.all { it.isDigit() || it == '.' || it == ',' } -> "$trimmedOrig ₾"
+                                else -> trimmedOrig
+                            }
+                            val trimmedDisc = discountedPrice.trim()
+                            val normalizedDisc = when {
+                                trimmedDisc.isBlank() -> ""
+                                trimmedDisc.all { it.isDigit() || it == '.' || it == ',' } -> "$trimmedDisc ₾"
+                                else -> trimmedDisc
+                            }
+
+                            val origVal = Regex("""(\d+(?:[.,]\d+)?)""").find(normalizedOrig.replace(" ", ""))?.groupValues?.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull()
+                            val discVal = Regex("""(\d+(?:[.,]\d+)?)""").find(normalizedDisc.replace(" ", ""))?.groupValues?.getOrNull(1)?.replace(',', '.')?.toDoubleOrNull()
+                            val hasValidDiscount = origVal != null && discVal != null && origVal > 0.0 && discVal > 0.0 && origVal > discVal
+                            val computedDiscountPercent = if (hasValidDiscount) {
+                                kotlin.math.round(((origVal!! - discVal!!) / origVal) * 100.0).toInt().coerceIn(1, 99)
+                            } else {
+                                0
+                            }
+                            val effectiveSavedPrice = if (hasValidDiscount) normalizedDisc else normalizedBasePrice
+
                             val parsedFeatures = featuresText
                                 .lines()
                                 .map { it.trim().removePrefix("•").removePrefix("-").trim() }
                                 .filter { it.isNotBlank() }
 
-                            val normalizedCategory = category.trim().ifBlank {
-                                currentFormConfig.categoryNameGeo
+                            val rawSelectedCategory = category.trim().ifBlank {
+                                if (!isCategoryManuallySelected && categoryAssignmentAnalysis.categoryName.isNotBlank()) {
+                                    categoryAssignmentAnalysis.categoryName
+                                } else {
+                                    currentFormConfig.categoryNameGeo
+                                }
                             }
+                            if (categoryAssignmentAnalysis.requiresAdminConfirmation && !isAmbiguousCategoryConfirmed && !isCategoryManuallySelected) {
+                                Toast.makeText(
+                                    context,
+                                    "⚠️ გთხოვთ დაადასტუროთ ან აირჩიოთ პროდუქტის კატეგორია შენახვამდე",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                return@Button
+                            }
+                            val normalizedCategory = AdminStorage.normalizeCategoryName(rawSelectedCategory)
+                            val ensuredCategory = AdminStorage.ensureCategoryExistsForProduct(
+                                context = context,
+                                rawCategoryName = normalizedCategory,
+                                rawProductType = selectedCategoryType.id
+                            )
+                            val resolvedCategoryId = ensuredCategory?.id
+                                ?: AdminStorage.resolveCanonicalCategoryId(normalizedCategory, selectedCategoryType.id)
+                            val resolvedCategoryName = ensuredCategory?.name ?: normalizedCategory
                             val normalizedBrand = brand.trim()
                             val savedImageUrl = imageUrl.trim().ifBlank {
                                 ProductImageManager.AUTO_GENERATED_IMAGE_MARKER
@@ -3628,9 +4087,14 @@ fun ProductEditDialog(
 
                             val finalItem = product.copy(
                                 title = title.trim().ifBlank { selectedCategoryType.labelGeo },
-                                price = normalizedPrice,
+                                price = effectiveSavedPrice,
+                                originalPrice = if (hasValidDiscount) normalizedOrig else "",
+                                discountedPrice = if (hasValidDiscount) normalizedDisc else "",
+                                discountPercent = computedDiscountPercent,
+                                discountExpiresAt = if (hasValidDiscount) discountExpiresAt else null,
                                 brand = normalizedBrand,
-                                category = normalizedCategory,
+                                category = resolvedCategoryName,
+                                categoryId = resolvedCategoryId,
                                 type = if (isSoftwareService) "software" else "product",
                                 subcategory = if (isSoftwareService) subcategory.trim() else "",
                                 shortDescription = shortDescription.trim(),
@@ -3652,20 +4116,45 @@ fun ProductEditDialog(
                                 condition = condition,
                                 exactModel = exactModel.trim(),
                                 inStock = inStock,
+                                isActive = isActive,
                                 isFeatured = isFeatured,
                                 displayOrder = displayOrderInput.toIntOrNull() ?: product.displayOrder
                             )
-                            onSave(finalItem)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("save_product_button")
-                    ) {
-                        Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
+                                isSaving = true
+                                saveErrorMessage = null
+                                try {
+                                    val res = onSave(finalItem)
+                                    isSaving = false
+                                    if (res.isSuccess) {
+                                        onDismiss()
+                                    } else {
+                                        saveErrorMessage = res.exceptionOrNull()?.message ?: "შენახვა ვერ მოხერხდა"
+                                    }
+                                } catch (e: Exception) {
+                                    isSaving = false
+                                    saveErrorMessage = e.message ?: "შენახვა ვერ მოხერხდა"
+                                }
+                            },
+                            enabled = !isSaving,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6A00)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("save_product_button")
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("ინახება...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            } else {
+                                Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
                 }
             }
         }
@@ -3947,25 +4436,27 @@ fun BulkPriceAndMarginScreen(
     }
 
     if (showResetConfirm) {
+        val isDarkReset = AppPreferencesManager.isDarkMode
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
-            title = { Text("საწყის ფასებზე დაბრუნება", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = { Text("გსურთ კატალოგის ყველა ფასის დაბრუნება საწყის ქარხნულ პარამეტრებზე?", color = Color(0xFFA0A5B0)) },
-            containerColor = Color(0xFF16191E),
+            title = { Text("საწყის ფასებზე დაბრუნება", color = if (isDarkReset) Color.White else Color(0xFF0F172A), fontWeight = FontWeight.Bold) },
+            text = { Text("გსურთ კატალოგის ყველა ფასის დაბრუნება საწყის ქარხნულ პარამეტრებზე?", color = if (isDarkReset) Color(0xFFA0A5B0) else Color(0xFF475569)) },
+            containerColor = if (isDarkReset) Color(0xFF16191E) else Color.White,
+            shape = RoundedCornerShape(18.dp),
             confirmButton = {
                 Button(
                     onClick = {
                         showResetConfirm = false
                         onResetDefaults()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4D4F))
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4D4F), contentColor = Color.White)
                 ) {
-                    Text("დაბრუნება")
+                    Text("დაბრუნება", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirm = false }) {
-                    Text("გაუქმება", color = Color(0xFFA0A5B0))
+                    Text("გაუქმება", color = if (isDarkReset) Color(0xFFA0A5B0) else Color(0xFF64748B))
                 }
             }
         )
@@ -4116,292 +4607,7 @@ fun StatCard(title: String, value: String, color: Color, modifier: Modifier = Mo
 // ==============================================================================
 @Composable
 fun AdminBankRequisitesView() {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    var currentRequisites by remember { mutableStateOf(AdminStorage.getBankRequisites(context)) }
-
-    var bogIbanInput by remember { mutableStateOf(currentRequisites.bogIban) }
-    var bogRecipientInput by remember { mutableStateOf(currentRequisites.bogRecipient) }
-    var tbcIbanInput by remember { mutableStateOf(currentRequisites.tbcIban) }
-    var tbcRecipientInput by remember { mutableStateOf(currentRequisites.tbcRecipient) }
-
-    DisposableEffect(Unit) {
-        var registration: com.google.firebase.firestore.ListenerRegistration? = null
-        try {
-            registration = FirestoreRepository(context).listenToBankRequisites { cloudReq ->
-                AdminStorage.saveBankRequisites(context, cloudReq)
-                currentRequisites = cloudReq
-                bogIbanInput = cloudReq.bogIban
-                bogRecipientInput = cloudReq.bogRecipient
-                tbcIbanInput = cloudReq.tbcIban
-                tbcRecipientInput = cloudReq.tbcRecipient
-            }
-        } catch (_: Exception) {}
-        onDispose {
-            registration?.remove()
-        }
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(14.dp)
-            .imePadding(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.3f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color(0xFFFF7A00).copy(alpha = 0.15f),
-                        modifier = Modifier.size(42.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.AccountBalance, contentDescription = null, tint = Color(0xFFFF7A00), modifier = Modifier.size(24.dp))
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            "საბანკო რეკვიზიტების რედაქტირება",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "აქ შეყვანილი ანგარიშის ნომრები მყისიერად გამოჩნდება მომხმარებლის პროფილში და შეკვეთისას გადარიცხვისთვის",
-                            color = Color(0xFFA0A5B0),
-                            fontSize = 11.5.sp,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // 1. საქართველოს ბანკი (BOG)
-        item {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFFF5E00).copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFFF5E00),
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("BOG", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            "საქართველოს ბანკი (Bank of Georgia)",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("IBAN ანგარიშის ნომერი", color = Color(0xFFFF7A00), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        OutlinedTextField(
-                            value = bogIbanInput,
-                            onValueChange = { bogIbanInput = it.uppercase().replace(" ", "") },
-                            placeholder = { Text("მაგ: GE17BG0000000580620970", color = Color.Gray, fontSize = 12.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF7A00),
-                                unfocusedBorderColor = Color(0xFF2E3440),
-                                focusedContainerColor = Color(0xFF0F1216),
-                                unfocusedContainerColor = Color(0xFF0F1216)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("მიმღების სახელი / კომპანია", color = Color(0xFFA0A5B0), fontSize = 11.sp)
-                        OutlinedTextField(
-                            value = bogRecipientInput,
-                            onValueChange = { bogRecipientInput = it },
-                            placeholder = { Text("ბექასერვისი / ბექა მღებრიშვილი", color = Color.Gray, fontSize = 12.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF7A00),
-                                unfocusedBorderColor = Color(0xFF2E3440),
-                                focusedContainerColor = Color(0xFF0F1216),
-                                unfocusedContainerColor = Color(0xFF0F1216)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. თიბისი ბანკი (TBC)
-        item {
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = Color(0xFF16191E),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF00A3E0).copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF00A3E0),
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text("TBC", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            "თიბისი ბანკი (TBC Bank)",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("IBAN ანგარიშის ნომერი", color = Color(0xFF00A3E0), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                        OutlinedTextField(
-                            value = tbcIbanInput,
-                            onValueChange = { tbcIbanInput = it.uppercase().replace(" ", "") },
-                            placeholder = { Text("მაგ: GE73TB7114445061100057", color = Color.Gray, fontSize = 12.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00A3E0),
-                                unfocusedBorderColor = Color(0xFF2E3440),
-                                focusedContainerColor = Color(0xFF0F1216),
-                                unfocusedContainerColor = Color(0xFF0F1216)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("მიმღების სახელი / კომპანია", color = Color(0xFFA0A5B0), fontSize = 11.sp)
-                        OutlinedTextField(
-                            value = tbcRecipientInput,
-                            onValueChange = { tbcRecipientInput = it },
-                            placeholder = { Text("ბექასერვისი / ბექა მღებრიშვილი", color = Color.Gray, fontSize = 12.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00A3E0),
-                                unfocusedBorderColor = Color(0xFF2E3440),
-                                focusedContainerColor = Color(0xFF0F1216),
-                                unfocusedContainerColor = Color(0xFF0F1216)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
-        }
-
-        // მოქმედების ღილაკები
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = {
-                        val newReq = AdminStorage.BankRequisites(
-                            bogIban = bogIbanInput.ifBlank { AdminStorage.DEFAULT_BOG_IBAN },
-                            bogRecipient = bogRecipientInput.ifBlank { AdminStorage.DEFAULT_BOG_RECIPIENT },
-                            tbcIban = tbcIbanInput.ifBlank { AdminStorage.DEFAULT_TBC_IBAN },
-                            tbcRecipient = tbcRecipientInput.ifBlank { AdminStorage.DEFAULT_TBC_RECIPIENT }
-                        )
-                        AdminStorage.saveBankRequisites(context, newReq)
-                        currentRequisites = newReq
-                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                            try {
-                                FirestoreRepository(context).saveBankRequisitesToCloud(newReq)
-                            } catch (_: Exception) {}
-                        }
-                        Toast.makeText(context, "✅ საბანკო რეკვიზიტები წარმატებით შეინახა!", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7A00)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                ) {
-                    Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("რეკვიზიტების შენახვა", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        val defaultReq = AdminStorage.resetBankRequisites(context)
-                        bogIbanInput = defaultReq.bogIban
-                        bogRecipientInput = defaultReq.bogRecipient
-                        tbcIbanInput = defaultReq.tbcIban
-                        tbcRecipientInput = defaultReq.tbcRecipient
-                        currentRequisites = defaultReq
-                        Toast.makeText(context, "🔄 დაბრუნდა საწყის რეკვიზიტებზე", Toast.LENGTH_SHORT).show()
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFA0A5B0)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2E3440)),
-                    modifier = Modifier.fillMaxWidth().height(44.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFFA0A5B0), modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("საწყის რეკვიზიტებზე დაბრუნება", fontSize = 12.sp)
-                }
-            }
-        }
-
-        // პირდაპირი ხედის ბარათი (Live Preview)
-        item {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = Color(0xFF101318),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF222630)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("👀 როგორ გამოჩნდება მომხმარებელთან:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("BOG IBAN: ${bogIbanInput.ifBlank { AdminStorage.DEFAULT_BOG_IBAN }}", color = Color(0xFFFF7A00), fontSize = 11.5.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                    Text("TBC IBAN: ${tbcIbanInput.ifBlank { AdminStorage.DEFAULT_TBC_IBAN }}", color = Color(0xFF00A3E0), fontSize = 11.5.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
-                    Text("მიმღები: ${bogRecipientInput.ifBlank { AdminStorage.DEFAULT_BOG_RECIPIENT }}", color = Color(0xFFA0A5B0), fontSize = 11.sp)
-                }
-            }
-        }
-    }
+    AdminMultiBankAccountsManagementView()
 }
 
 // ==============================================================================
@@ -5061,7 +5267,11 @@ fun AdminCategoriesManagementView(
     val coroutineScope = rememberCoroutineScope()
     val isDark = AppPreferencesManager.isDarkMode
 
+    val catVer = AdminStorage.categoriesVersion
     var categories by remember { mutableStateOf(AdminStorage.getCategories(context)) }
+    LaunchedEffect(catVer) {
+        categories = AdminStorage.getCategories(context)
+    }
     var editingCategory by remember { mutableStateOf<CategoryItem?>(null) }
     var isAddingNewCategory by remember { mutableStateOf(false) }
     var categoryToDelete by remember { mutableStateOf<CategoryItem?>(null) }
@@ -5077,8 +5287,7 @@ fun AdminCategoriesManagementView(
             registration = repo.listenToCategories(
                 onCategoriesUpdated = { cloudList ->
                     if (cloudList.isNotEmpty()) {
-                        AdminStorage.saveCategories(context, cloudList)
-                        categories = cloudList.sortedBy { it.displayOrder }
+                        categories = AdminStorage.mergeCloudCategories(context, cloudList)
                     }
                 }
             )
@@ -5187,8 +5396,13 @@ fun AdminCategoriesManagementView(
             contentPadding = PaddingValues(bottom = 20.dp)
         ) {
             items(filteredCategories, key = { it.id }) { cat ->
-                val productCount = remember(products, cat.name) {
-                    products.count { it.category.equals(cat.name, ignoreCase = true) }
+                val productCount = remember(products, cat.id, cat.name) {
+                    products.count {
+                        it.isActive &&
+                            !ProductRepository.isProhibitedOrRetiredService(it) &&
+                            (AdminStorage.resolveCanonicalCategoryId(it.category, it.productType) == cat.id ||
+                                AdminStorage.normalizeCategoryName(it.category).equals(cat.name, ignoreCase = true))
+                    }
                 }
                 val currentIndex = categories.indexOfFirst { it.id == cat.id }
 
@@ -5200,7 +5414,9 @@ fun AdminCategoriesManagementView(
                         if (cat.isPopular) Color(0xFFFF7A00).copy(alpha = 0.6f)
                         else if (isDark) Color(0xFF252B37) else Color(0xFFE2E8F0)
                     ),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_category_card_${cat.id}")
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(
@@ -5235,7 +5451,7 @@ fun AdminCategoriesManagementView(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = cat.localizedName.ifBlank { cat.name },
+                                            text = cat.name,
                                             color = if (isDark) Color.White else Color(0xFF0F172A),
                                             fontSize = 13.5.sp,
                                             fontWeight = FontWeight.Bold,
@@ -5271,7 +5487,7 @@ fun AdminCategoriesManagementView(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "ID: ${cat.name}",
+                                            text = "ID: ${cat.id} • ტიპი: ${cat.productType.ifBlank { cat.categoryType }}",
                                             color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                             fontSize = 10.5.sp,
                                             maxLines = 1,
@@ -5297,8 +5513,31 @@ fun AdminCategoriesManagementView(
                                 }
                             }
 
-                            // აქტიური ჩამრთველი
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            // აქტიური ჩამრთველი + ხილვადობა
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val updated = cat.copy(isVisible = !cat.isVisible)
+                                        AdminStorage.updateCategory(context, updated)
+                                        categories = AdminStorage.getCategories(context)
+                                        coroutineScope.launch {
+                                            FirestoreRepository(context).saveCategory(updated)
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .testTag("toggle_category_visibility_${cat.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = if (cat.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = "Toggle Visibility",
+                                        tint = if (cat.isVisible) Color(0xFF4ADE80) else Color(0xFF94A3B8),
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
                                 Switch(
                                     checked = cat.isActive,
                                     onCheckedChange = { active ->
@@ -5313,7 +5552,9 @@ fun AdminCategoriesManagementView(
                                         checkedThumbColor = Color.White,
                                         checkedTrackColor = Color(0xFFFF6A00)
                                     ),
-                                    modifier = Modifier.scale(0.8f)
+                                    modifier = Modifier
+                                        .scale(0.8f)
+                                        .testTag("toggle_category_active_${cat.id}")
                                 )
                             }
                         }
@@ -5502,12 +5743,13 @@ fun AdminCategoriesManagementView(
             categories.filter { it.id != toDelete.id }.map { it.name }
         }
 
+        val isDarkCat = AppPreferencesManager.isDarkMode
         AlertDialog(
             onDismissRequest = { categoryToDelete = null },
             title = {
                 Text(
                     text = "კატეგორიის წაშლა",
-                    color = Color.White,
+                    color = if (isDarkCat) Color.White else Color(0xFF0F172A),
                     fontWeight = FontWeight.Bold
                 )
             },
@@ -5515,14 +5757,14 @@ fun AdminCategoriesManagementView(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = "ნამდვილად გსურთ წაშალოთ კატეგორია „${toDelete.localizedName.ifBlank { toDelete.name }}“?",
-                        color = Color(0xFFA0A5B0),
+                        color = if (isDarkCat) Color(0xFFA0A5B0) else Color(0xFF475569),
                         fontSize = 13.sp
                     )
 
                     if (affectedCount > 0) {
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = Color(0xFF331616),
+                            color = if (isDarkCat) Color(0xFF331616) else Color(0xFFFEF2F2),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF4D4F)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -5535,7 +5777,7 @@ fun AdminCategoriesManagementView(
                                 )
                                 Text(
                                     text = "წაშლამდე მიუთითეთ, რომელ კატეგორიაში გადავიდეს ეს პროდუქტები:",
-                                    color = Color.White,
+                                    color = if (isDarkCat) Color.White else Color(0xFF1E293B),
                                     fontSize = 11.5.sp
                                 )
 
@@ -5544,13 +5786,13 @@ fun AdminCategoriesManagementView(
                                         val isSelected = reassignTargetCategoryName == dest
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
-                                            color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF222834),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else Color(0xFF3B4455)),
+                                            color = if (isSelected) Color(0xFFFF6A00) else if (isDarkCat) Color(0xFF222834) else Color(0xFFE2E8F0),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) Color(0xFFFF6A00) else if (isDarkCat) Color(0xFF3B4455) else Color(0xFFCBD5E1)),
                                             modifier = Modifier.clickable { reassignTargetCategoryName = dest }
                                         ) {
                                             Text(
                                                 text = dest,
-                                                color = Color.White,
+                                                color = if (isSelected) Color.White else if (isDarkCat) Color.White else Color(0xFF0F172A),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
@@ -5563,7 +5805,8 @@ fun AdminCategoriesManagementView(
                     }
                 }
             },
-            containerColor = Color(0xFF16191E),
+            containerColor = if (isDarkCat) Color(0xFF16191E) else Color.White,
+            shape = RoundedCornerShape(18.dp),
             confirmButton = {
                 Button(
                     onClick = {
@@ -5960,21 +6203,27 @@ fun AdminOrderNotificationsHistoryPanel(
     notifications: List<AdminOrderNotificationRecord>,
     unreadCount: Int,
     onOpenOrderNotification: (AdminOrderNotificationRecord) -> Unit,
+    onMarkNotificationRead: (AdminOrderNotificationRecord) -> Unit = {},
+    onDeleteNotification: (AdminOrderNotificationRecord, onComplete: () -> Unit) -> Unit = { _, onComplete -> onComplete() },
     onMarkAllRead: () -> Unit,
+    onViewAllClick: (() -> Unit)? = null,
     onClosePanel: (() -> Unit)? = null
 ) {
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = Color(0xFF141821),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.55f)),
+    val isDark = AppPreferencesManager.isDarkMode
+    val p = bstorePalette(isDark)
+    var pendingDeleteNotification by remember { mutableStateOf<AdminOrderNotificationRecord?>(null) }
+    var deletingId by remember { mutableStateOf<String?>(null) }
+
+    BstoreCard(
+        isDark = isDark,
+        accentBorder = p.brandOrangeBorder,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
             .testTag("admin_order_notifications_history_section")
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(BstoreDimens.CardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -5989,126 +6238,434 @@ fun AdminOrderNotificationsHistoryPanel(
                     Icon(
                         Icons.Default.NotificationsActive,
                         contentDescription = null,
-                        tint = Color(0xFFFF6A00),
-                        modifier = Modifier.size(18.dp)
+                        tint = p.brandOrange,
+                        modifier = Modifier.size(BstoreDimens.IconMd)
                     )
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "შემოსული შეკვეთების შეტყობინებები",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
+                            color = p.textPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 17.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("admin_notifications_panel_title")
                         )
                         Text(
                             text = "წაუკითხავი: $unreadCount • სულ: ${notifications.size}",
-                            color = Color(0xFFA0A5B0),
-                            fontSize = 11.sp
+                            color = p.textSecondary,
+                            fontSize = 11.sp,
+                            maxLines = 1
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (unreadCount > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFFF6A00).copy(alpha = 0.2f),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00)),
-                            modifier = Modifier
-                                .testTag("admin_mark_all_notifications_read_button")
-                                .clickable { onMarkAllRead() }
-                        ) {
-                            Text(
-                                text = "ყველას წაკითხულად მონიშვნა",
-                                color = Color(0xFFFF6A00),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                            )
-                        }
+                    if (onViewAllClick != null && notifications.isNotEmpty()) {
+                        BstoreSecondaryButton(
+                            text = "ყველას ნახვა",
+                            onClick = onViewAllClick,
+                            isDark = isDark,
+                            size = BstoreButtonSize.COMPACT,
+                            containerColor = p.brandOrangeSoft,
+                            borderColor = p.brandOrangeBorder,
+                            contentColor = p.brandOrange,
+                            maxLines = 1,
+                            modifier = Modifier.testTag("admin_notifications_view_all_button")
+                        )
                     }
                     if (onClosePanel != null) {
-                        IconButton(
+                        BstoreIconButton(
+                            icon = Icons.Default.Close,
+                            contentDescription = "შეტყობინებების პანელის დახურვა",
                             onClick = onClosePanel,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Close notifications history",
-                                tint = Color(0xFFA0A5B0),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
+                            isDark = isDark,
+                            size = 34.dp
+                        )
                     }
                 }
             }
 
+            if (unreadCount > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    BstoreTextActionButton(
+                        text = "ყველას წაკითხულად მონიშვნა",
+                        onClick = onMarkAllRead,
+                        color = p.brandOrange,
+                        modifier = Modifier.testTag("admin_mark_all_notifications_read_button")
+                    )
+                }
+            }
+
             if (notifications.isEmpty()) {
-                Text(
-                    text = "ახალი შეკვეთების შეტყობინებები ჯერ არ არის.",
-                    color = Color(0xFF6E7582),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(vertical = 6.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationsNone,
+                        contentDescription = null,
+                        tint = p.textMuted,
+                        modifier = Modifier.size(BstoreDimens.IconMd)
+                    )
+                    Text(
+                        text = "ახალი შეკვეთების შეტყობინებები ჯერ არ არის.",
+                        color = p.textSecondary,
+                        fontSize = 12.sp
+                    )
+                }
             } else {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.heightIn(max = 240.dp)
+                    modifier = Modifier
+                        .heightIn(max = 195.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    notifications.take(8).forEach { notif ->
+                    notifications.take(5).forEach { notif ->
+                        AdminOrderNotificationItemCard(
+                            notif = notif,
+                            isDark = isDark,
+                            isDeleting = deletingId == notif.notificationId,
+                            onOpen = { onOpenOrderNotification(notif) },
+                            onMarkRead = { onMarkNotificationRead(notif) },
+                            onRequestDelete = { pendingDeleteNotification = notif }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (pendingDeleteNotification != null) {
+        val target = pendingDeleteNotification!!
+        BstoreDialogShell(
+            onDismissRequest = { if (deletingId == null) pendingDeleteNotification = null },
+            isDark = isDark,
+            borderColor = p.errorRed.copy(alpha = 0.55f),
+            maxWidth = 440.dp
+        ) {
+            Column(
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "შეტყობინების წაშლა",
+                    color = p.textPrimary,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "დარწმუნებული ხართ, რომ გსურთ ამ შეტყობინების წაშლა? წაიშლება მხოლოდ შეტყობინება — თავად შეკვეთა შენარჩუნდება.",
+                    color = p.textSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    BstoreOutlinedButton(
+                        text = "გაუქმება",
+                        onClick = { pendingDeleteNotification = null },
+                        enabled = deletingId == null,
+                        isDark = isDark,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    BstoreDestructiveButton(
+                        text = "წაშლა",
+                        onClick = {
+                            deletingId = target.notificationId
+                            onDeleteNotification(target) {
+                                deletingId = null
+                                pendingDeleteNotification = null
+                            }
+                        },
+                        enabled = deletingId == null,
+                        isDark = isDark,
+                        filled = true,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("confirm_delete_admin_notif_button")
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminOrderNotificationItemCard(
+    notif: AdminOrderNotificationRecord,
+    isDark: Boolean,
+    isDeleting: Boolean,
+    onOpen: () -> Unit,
+    onMarkRead: () -> Unit,
+    onRequestDelete: () -> Unit
+) {
+    val p = bstorePalette(isDark)
+    val timeText = remember(notif.createdAtMillis) {
+        if (notif.createdAtMillis > 0L) {
+            java.text.SimpleDateFormat("dd.MM • HH:mm", java.util.Locale.forLanguageTag("ka"))
+                .format(java.util.Date(notif.createdAtMillis))
+        } else {
+            ""
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(BstoreRadii.Control),
+        color = if (!notif.read) p.cardElevatedBg else p.subSurfaceBg,
+        border = androidx.compose.foundation.BorderStroke(
+            BstoreDimens.BorderThin,
+            if (!notif.read) p.brandOrangeBorder else p.borderSubtle
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .minimumInteractiveComponentSize()
+            .testTag("admin_order_notif_item_${notif.orderId}")
+            .clickable(enabled = !isDeleting) { onOpen() }
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (!notif.read) {
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (!notif.read) Color(0xFF1F2633) else Color(0xFF161A23),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (!notif.read) Color(0xFFFF6A00).copy(alpha = 0.65f) else Color(0xFF282D37)
-                            ),
+                            shape = CircleShape,
+                            color = p.brandOrange,
+                            modifier = Modifier.size(8.dp)
+                        ) {}
+                    }
+                    Text(
+                        text = notif.title,
+                        color = p.textPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = if (!notif.read) FontWeight.ExtraBold else FontWeight.SemiBold,
+                        lineHeight = 16.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = notif.body,
+                    color = p.textSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "#${notif.orderId.takeLast(10)}",
+                        color = p.brandOrange,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    if (timeText.isNotBlank()) {
+                        Text(
+                            text = "• $timeText",
+                            color = p.textMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (!notif.read) {
+                    IconButton(
+                        onClick = onMarkRead,
+                        enabled = !isDeleting,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("admin_order_notif_mark_read_${notif.orderId}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Done,
+                            contentDescription = "წაკითხულად მონიშვნა",
+                            tint = p.successGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onRequestDelete,
+                    enabled = !isDeleting,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .testTag("admin_order_notif_delete_${notif.orderId}")
+                ) {
+                    if (isDeleting) {
+                        CircularProgressIndicator(
+                            color = p.errorRed,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "შეტყობინების წაშლა",
+                            tint = p.errorRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminAllOrderNotificationsDialog(
+    notifications: List<AdminOrderNotificationRecord>,
+    unreadCount: Int,
+    onOpenOrderNotification: (AdminOrderNotificationRecord) -> Unit,
+    onMarkNotificationRead: (AdminOrderNotificationRecord) -> Unit,
+    onDeleteNotification: (AdminOrderNotificationRecord, onComplete: () -> Unit) -> Unit,
+    onMarkAllRead: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var pendingDeleteNotification by remember { mutableStateOf<AdminOrderNotificationRecord?>(null) }
+    var deletingId by remember { mutableStateOf<String?>(null) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        val isDark = AppPreferencesManager.isDarkMode
+        val dialogBg = if (isDark) Color(0xFF141821) else Color(0xFFFFFFFF)
+        val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+        val textSecondary = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+        val dividerColor = if (isDark) Color(0xFF242A36) else Color(0xFFE2E8F0)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.72f))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 18.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = dialogBg,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF6A00).copy(alpha = 0.55f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 560.dp)
+                    .heightIn(max = 680.dp)
+                    .testTag("admin_all_notifications_dialog")
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ყველა შეკვეთის შეტყობინება",
+                                color = textPrimary,
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Text(
+                                text = "წაუკითხავი: $unreadCount • სულ: ${notifications.size}",
+                                color = textSecondary,
+                                fontSize = 11.5.sp
+                            )
+                        }
+                        if (unreadCount > 0) {
+                            TextButton(
+                                onClick = onMarkAllRead,
+                                modifier = Modifier.testTag("dialog_admin_mark_all_read")
+                            ) {
+                                Text(
+                                    text = "ყველას წაკითხვა",
+                                    color = Color(0xFFFF6A00),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "დახურვა", tint = textSecondary)
+                        }
+                    }
+
+                    HorizontalDivider(color = dividerColor)
+
+                    if (notifications.isEmpty()) {
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("admin_order_notif_item_${notif.orderId}")
-                                .clickable { onOpenOrderNotification(notif) }
+                                .padding(vertical = 48.dp, horizontal = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        if (!notif.read) {
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = Color(0xFFFF6A00),
-                                                modifier = Modifier.size(8.dp)
-                                            ) {}
-                                        }
-                                        Text(
-                                            text = notif.title,
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (!notif.read) FontWeight.ExtraBold else FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Text(
-                                        text = "${notif.body} • #${notif.orderId.takeLast(8)}",
-                                        color = Color(0xFFA0A5B0),
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Text(
-                                    text = if (!notif.read) "გახსნა →" else "ნანახია",
-                                    color = if (!notif.read) Color(0xFFFF6A00) else Color(0xFF64748B),
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
+                            Icon(
+                                imageVector = Icons.Default.NotificationsNone,
+                                contentDescription = null,
+                                tint = textSecondary,
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = "შემოსული შეკვეთების შეტყობინებები არ არის",
+                                color = textPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false),
+                            contentPadding = PaddingValues(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(notifications, key = { it.notificationId }) { notif ->
+                                AdminOrderNotificationItemCard(
+                                    notif = notif,
+                                    isDark = AppPreferencesManager.isDarkMode,
+                                    isDeleting = deletingId == notif.notificationId,
+                                    onOpen = { onOpenOrderNotification(notif) },
+                                    onMarkRead = { onMarkNotificationRead(notif) },
+                                    onRequestDelete = { pendingDeleteNotification = notif }
                                 )
                             }
                         }
@@ -6116,6 +6673,60 @@ fun AdminOrderNotificationsHistoryPanel(
                 }
             }
         }
+    }
+
+    if (pendingDeleteNotification != null) {
+        val target = pendingDeleteNotification!!
+        val isDark = AppPreferencesManager.isDarkMode
+        val dialogBg = if (isDark) Color(0xFF161922) else Color(0xFFFFFFFF)
+        val textPrimary = if (isDark) Color.White else Color(0xFF0F172A)
+        val textSecondary = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+        val cancelColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+        AlertDialog(
+            onDismissRequest = { if (deletingId == null) pendingDeleteNotification = null },
+            containerColor = dialogBg,
+            shape = RoundedCornerShape(18.dp),
+            title = {
+                Text(
+                    text = "შეტყობინების წაშლა",
+                    color = textPrimary,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "დარწმუნებული ხართ, რომ გსურთ ამ შეტყობინების წაშლა? წაიშლება მხოლოდ შეტყობინება — თავად შეკვეთა შენარჩუნდება.",
+                    color = textSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        deletingId = target.notificationId
+                        onDeleteNotification(target) {
+                            deletingId = null
+                            pendingDeleteNotification = null
+                        }
+                    },
+                    enabled = deletingId == null,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)
+                ) {
+                    Text("წაშლა", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingDeleteNotification = null },
+                    enabled = deletingId == null
+                ) {
+                    Text("გაუქმება", color = cancelColor)
+                }
+            }
+        )
     }
 }
 
@@ -6125,8 +6736,7 @@ fun AdminOrderNotificationsHistoryPanel(
 @Composable
 fun AdminOrdersManagementView(
     initialTargetOrderId: String? = null,
-    onTargetOrderConsumed: () -> Unit = {},
-    onNavigateToImeiRequest: (String) -> Unit = {}
+    onTargetOrderConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -6140,7 +6750,13 @@ fun AdminOrdersManagementView(
         )
     }
     var selectedStatusFilter by remember { mutableStateOf("ყველა") }
+    var selectedPaymentFilter by remember { mutableStateOf("ყველა") }
+    var orderNumberSearchQuery by remember { mutableStateOf("") }
     var selectedOrderForDetail by remember { mutableStateOf<OrderRecord?>(null) }
+    var orderPendingPaymentConfirm by remember { mutableStateOf<OrderRecord?>(null) }
+    var isConfirmingPayment by remember { mutableStateOf(false) }
+    var showPaymentAuditLogDialog by remember { mutableStateOf(false) }
+    var auditLogsList by remember { mutableStateOf<List<PaymentAuditEvent>>(emptyList()) }
 
     val notifVersion = BekaNotificationManager.stateVersion.intValue
     val adminNotifications = remember(notifVersion) {
@@ -6184,21 +6800,118 @@ fun AdminOrdersManagementView(
         }
     }
 
-    val statusFilters = remember { listOf("ყველა", "მიმდინარე", "დამუშავების პროცესში", "შესრულებული", "გაუქმებული") }
-    val filteredOrders = remember(ordersList, selectedStatusFilter) {
+    val statusFilters = remember { listOf("ყველა", "მოთხოვნები", "მიმდინარე", "დამუშავების პროცესში", "შესრულებული", "გაუქმებული") }
+    val filteredOrders = remember(ordersList, selectedStatusFilter, selectedPaymentFilter, orderNumberSearchQuery) {
+        val q = orderNumberSearchQuery.trim()
         ordersList.filter { ord ->
-            when (selectedStatusFilter) {
+            val matchesFulfillment = when (selectedStatusFilter) {
                 "ყველა" -> true
+                "მოთხოვნები" -> ord.isProductStockInquiry()
                 "მიმდინარე" -> ord.status == "მიმდინარე" || ord.status == "ახალი"
                 else -> ord.status == selectedStatusFilter
             }
+            val matchesPayment = matchesAdminPaymentFilter(ord, selectedPaymentFilter)
+            val matchesSearch = if (q.isBlank()) {
+                true
+            } else {
+                ord.orderNumber.contains(q, ignoreCase = true) ||
+                    ord.id.contains(q, ignoreCase = true) ||
+                    ord.paymentReference.contains(q, ignoreCase = true) ||
+                    ord.userPhone.contains(q, ignoreCase = true) ||
+                    ord.userName.contains(q, ignoreCase = true) ||
+                    ord.paymentInternalNote.contains(q, ignoreCase = true) ||
+                    ord.items.any { it.productTitle.contains(q, ignoreCase = true) }
+            }
+            matchesFulfillment && matchesPayment && matchesSearch
+        }
+    }
+
+    var showAllOrderNotificationsDialog by remember { mutableStateOf(false) }
+    var openingOrderIdInProgress by remember { mutableStateOf<String?>(null) }
+
+    val openOrderFromNotification: (AdminOrderNotificationRecord) -> Unit = { notif ->
+        val cleanTargetId = notif.orderId.trim().removePrefix("admin_order_")
+        if (cleanTargetId.isNotBlank() && openingOrderIdInProgress != cleanTargetId) {
+            openingOrderIdInProgress = cleanTargetId
+            BekaNotificationManager.markAdminOrderNotificationAsRead(
+                context = context,
+                orderIdOrNotificationId = notif.notificationId.ifBlank { cleanTargetId },
+                orderType = notif.orderType
+            )
+            val localMatch = ordersList.find {
+                it.id == cleanTargetId || it.orderNumber == cleanTargetId || it.id == notif.orderId
+            } ?: AuthAndOrderManager.getOrders(context).find {
+                it.id == cleanTargetId || it.orderNumber == cleanTargetId
+            }
+            if (localMatch != null) {
+                openingOrderIdInProgress = null
+                showAllOrderNotificationsDialog = false
+                selectedOrderForDetail = localMatch
+            } else {
+                coroutineScope.launch {
+                    val fetchRes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        FirestoreRepository(context).fetchOrderByIdForAdmin(cleanTargetId)
+                    }
+                    openingOrderIdInProgress = null
+                    val fetchedOrder = fetchRes.getOrNull()
+                    if (fetchedOrder != null) {
+                        if (ordersList.none { it.id == fetchedOrder.id }) {
+                            ordersList = listOf(fetchedOrder) + ordersList
+                        }
+                        showAllOrderNotificationsDialog = false
+                        selectedOrderForDetail = fetchedOrder
+                    } else if (fetchRes.isFailure) {
+                        Toast.makeText(
+                            context,
+                            "❌ შეკვეთის ჩატვირთვა ვერ მოხერხდა: ${fetchRes.exceptionOrNull()?.localizedMessage ?: ""}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "⚠️ შეკვეთა (#${cleanTargetId.takeLast(8)}) ბაზაში ვერ მოიძებნა (შესაძლოა წაშლილია).",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+
+    val deleteOrderNotificationAction: (AdminOrderNotificationRecord, onComplete: () -> Unit) -> Unit = { notif, onComplete ->
+        coroutineScope.launch {
+            val fbUser = runCatching {
+                com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+            }.getOrNull()
+            val delRes = if (fbUser != null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    FirestoreRepository(context).deleteAdminOrderNotification(
+                        notif.notificationId.ifBlank { notif.orderId }
+                    )
+                }
+            } else {
+                Result.success(Unit)
+            }
+            if (delRes.isSuccess) {
+                BekaNotificationManager.deleteAdminOrderNotificationLocalOnly(
+                    context = context,
+                    notificationId = notif.notificationId,
+                    orderId = notif.orderId
+                )
+                Toast.makeText(context, "🗑️ შეტყობინება წაიშალა (შეკვეთა შენარჩუნდა)", Toast.LENGTH_SHORT).show()
+            } else {
+                val errMsg = delRes.exceptionOrNull()?.localizedMessage ?: "შეტყობინების წაშლა ვერ მოხერხდა"
+                Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
+            }
+            onComplete()
         }
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp)
+            .testTag("admin_orders_lazy_column"),
         contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -6206,23 +6919,31 @@ fun AdminOrdersManagementView(
             AdminOrderNotificationsHistoryPanel(
                 notifications = adminNotifications,
                 unreadCount = unreadAdminNotificationsCount,
-                onOpenOrderNotification = { notif ->
+                onOpenOrderNotification = openOrderFromNotification,
+                onMarkNotificationRead = { notif ->
                     BekaNotificationManager.markAdminOrderNotificationAsRead(
                         context = context,
-                        orderIdOrNotificationId = notif.orderId,
+                        orderIdOrNotificationId = notif.notificationId.ifBlank { notif.orderId },
                         orderType = notif.orderType
                     )
-                    if (notif.orderType == "imei_check") {
-                        onNavigateToImeiRequest(notif.orderId)
-                    } else {
-                        val found = ordersList.find { it.id == notif.orderId || it.orderNumber == notif.orderId }
-                        if (found != null) {
-                            selectedOrderForDetail = found
-                        }
-                    }
                 },
+                onDeleteNotification = deleteOrderNotificationAction,
                 onMarkAllRead = {
                     BekaNotificationManager.markAllAdminOrderNotificationsAsRead(context)
+                },
+                onViewAllClick = { showAllOrderNotificationsDialog = true }
+            )
+        }
+
+        item(key = "admin_payment_dashboard") {
+            AdminPaymentDashboardSection(
+                orders = ordersList,
+                selectedPaymentFilter = selectedPaymentFilter,
+                onPaymentFilterChange = { selectedPaymentFilter = it },
+                searchOrderQuery = orderNumberSearchQuery,
+                onSearchOrderQueryChange = { orderNumberSearchQuery = it },
+                onOpenAuditHistory = {
+                    showPaymentAuditLogDialog = true
                 }
             )
         }
@@ -6244,13 +6965,13 @@ fun AdminOrdersManagementView(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "📦 შეკვეთების მართვა",
+                                "📦 შეკვეთების შესრულების სტატუსი",
                                 color = if (isDark) Color.White else Color(0xFF0F172A),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "სულ შეკვეთები: ${ordersList.size} | წაუკითხავი: $unreadAdminNotificationsCount",
+                                text = "სულ შეკვეთები: ${ordersList.size} | ნაჩვენებია: ${filteredOrders.size} | წაუკითხავი: $unreadAdminNotificationsCount",
                                 color = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B),
                                 fontSize = 11.5.sp
                             )
@@ -6267,7 +6988,10 @@ fun AdminOrdersManagementView(
                 }
 
                 // სტატუსის ფილტრები
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.testTag("admin_orders_status_filters_row")
+                ) {
                     items(statusFilters) { status ->
                         val isSelected = selectedStatusFilter == status
                         Surface(
@@ -6307,209 +7031,478 @@ fun AdminOrdersManagementView(
             }
         } else {
             items(filteredOrders, key = { it.id }) { order ->
-                    val summaryText = order.items.joinToString(", ") { "${it.productTitle} x${it.quantity}" }
-                        .ifBlank { "სერვისის შეკვეთა" }
-                    val totalCount = order.items.sumOf { it.quantity }.coerceAtLeast(1)
+                val isStockInquiry = order.isProductStockInquiry()
+                val summaryText = order.items.joinToString(", ") { "${it.productTitle} x${it.quantity}" }
+                    .ifBlank { if (isStockInquiry) "პროდუქტის მოთხოვნა" else "სერვისის შეკვეთა" }
+                val totalCount = order.items.sumOf { it.quantity }.coerceAtLeast(1)
+                val paymentMethodType = PaymentMethodType.fromCode(order.paymentMethodCode)
+                val paymentStatusEnum = PaymentStatus.fromCode(order.paymentStatus, paymentMethodType)
+                val paymentBadgeColor = Color(paymentStatusEnum.badgeColorHex)
+                val canConfirmPayment = !isStockInquiry &&
+                    paymentStatusEnum != PaymentStatus.PAID &&
+                    paymentStatusEnum != PaymentStatus.CANCELLED &&
+                    paymentStatusEnum != PaymentStatus.REFUNDED &&
+                    order.status != "გაუქმებული"
 
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFF16191E),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF282D37)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("admin_order_card_${order.id}")
-                            .clickable {
-                                BekaNotificationManager.markAdminOrderNotificationAsRead(context, order.id, "service_order")
-                                selectedOrderForDetail = order
-                            }
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFF16191E),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (isStockInquiry) Color(0x88FF6B00) else Color(0xFF282D37)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_order_card_${order.id}")
+                        .clickable {
+                            BekaNotificationManager.markAdminOrderNotificationAsRead(context, order.id, "service_order")
+                            selectedOrderForDetail = order
+                        }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Text(
+                                text = order.orderNumber.ifBlank { order.id },
+                                color = Color(0xFFFF7A00),
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = order.date,
+                                color = Color(0xFFA0A5B0),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+
+                        if (isStockInquiry) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0x28FF6B00),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x77FF6B00)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_order_inquiry_badge_${order.id}")
                             ) {
                                 Text(
-                                    text = order.orderNumber.ifBlank { order.id },
-                                    color = Color(0xFFFF7A00),
-                                    fontSize = 13.5.sp,
+                                    text = "📦 პოტენციური შეკვეთა • მარაგის მოთხოვნა",
+                                    color = Color(0xFFFF9E40),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+
+                        // გადახდის მეთოდი და სტატუსი (დამოუკიდებელი შეკვეთის სტატუსისგან)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isStockInquiry) "📦 მარაგის დაზუსტება • AI ასისტენტი" else "💳 ${order.paymentMethod}",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = if (isStockInquiry) Color(0x22FF7A00) else paymentBadgeColor.copy(alpha = 0.16f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    0.8.dp,
+                                    if (isStockInquiry) Color(0x66FF7A00) else paymentBadgeColor.copy(alpha = 0.45f)
+                                )
+                            ) {
+                                Text(
+                                    text = if (isStockInquiry) "ფასი შეთანხმებით" else paymentStatusEnum.adminLabelKa,
+                                    color = if (isStockInquiry) Color(0xFFFF9E40) else paymentBadgeColor,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = order.date,
-                                    color = Color(0xFFA0A5B0),
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                 )
                             }
+                        }
 
+                        Text(
+                            text = summaryText,
+                            color = Color.White,
+                            fontSize = 12.5.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (isStockInquiry && order.paymentInternalNote.isNotBlank()) {
                             Text(
-                                text = summaryText,
-                                color = Color.White,
-                                fontSize = 12.5.sp,
+                                text = "📝 შენიშვნა: ${order.paymentInternalNote}",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 11.sp,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (order.userName.isNotBlank() || order.userPhone.isNotBlank() || order.bankName.isNotBlank()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                if (order.userName.isNotBlank() || order.userPhone.isNotBlank()) {
+                                    Text(
+                                        text = "👤 ${order.userName.ifBlank { "მომხმარებელი" }}${if (order.userPhone.isNotBlank()) " • ${order.userPhone}" else ""}",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (paymentMethodType == PaymentMethodType.BANK_TRANSFER && order.bankName.isNotBlank()) {
+                                    Text(
+                                        text = "🏦 ბანკი: ${order.bankName}${if (order.paymentReference.isNotBlank()) " • ${order.paymentReference}" else ""}",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 10.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        if (order.userConfirmedPaymentAtMillis > 0L && paymentStatusEnum != PaymentStatus.PAID) {
+                            val confirmedAtFormatted = remember(order.userConfirmedPaymentAtMillis) {
+                                java.text.SimpleDateFormat("dd.MM.yyyy • HH:mm", java.util.Locale.forLanguageTag("ka"))
+                                    .format(java.util.Date(order.userConfirmedPaymentAtMillis))
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF172554).copy(alpha = 0.65f),
+                                border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFF60A5FA).copy(alpha = 0.55f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_user_transfer_confirmed_badge_${order.id}")
                             ) {
                                 Text(
-                                    text = "ჯამი: ${order.totalAmount} ($totalCount ერთ.)",
-                                    color = Color(0xFF4ADE80),
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
+                                    text = "🕒 გადმორიცხვა დადასტურებულია მომხმარებლის მიერ: $confirmedAtFormatted",
+                                    color = Color(0xFF93C5FD),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "ჯამი: ${order.totalAmount} ($totalCount ერთ.)",
+                                color = Color(0xFF4ADE80),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = when (order.status) {
+                                        "შესრულებული" -> Color(0x334ADE80)
+                                        "გაუქმებული" -> Color(0x33FF4D4F)
+                                        else -> Color(0x33FF7A00)
+                                    }
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
+                                    Text(
+                                        text = order.status,
                                         color = when (order.status) {
-                                            "შესრულებული" -> Color(0x334ADE80)
-                                            "გაუქმებული" -> Color(0x33FF4D4F)
-                                            else -> Color(0x33FF7A00)
+                                            "შესრულებული" -> Color(0xFF4ADE80)
+                                            "გაუქმებული" -> Color(0xFFFF4D4F)
+                                            else -> Color(0xFFFF9E40)
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0x22FF4D4F),
+                                    border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0x55FF4D4F)),
+                                    modifier = Modifier.clickable {
+                                        coroutineScope.launch {
+                                            val delRes = FirestoreRepository(context).deleteOrderFromCloud(order.id)
+                                            AuthAndOrderManager.deleteOrder(context, order.id)
+                                            if (delRes.isSuccess) {
+                                                ordersList = ordersList.filterNot { it.id == order.id }
+                                                Toast.makeText(context, "🗑️ შეკვეთა წაიშალა!", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                val errMsg = delRes.exceptionOrNull()?.localizedMessage ?: "შეკვეთის წაშლა ვერ მოხერხდა"
+                                                Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
+                                            }
                                         }
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                                     ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "შეკვეთის წაშლა",
+                                            tint = Color(0xFFFF4D4F),
+                                            modifier = Modifier.size(12.dp)
+                                        )
                                         Text(
-                                            text = order.status,
-                                            color = when (order.status) {
-                                                "შესრულებული" -> Color(0xFF4ADE80)
-                                                "გაუქმებული" -> Color(0xFFFF4D4F)
-                                                else -> Color(0xFFFF9E40)
-                                            },
+                                            text = "წაშლა",
+                                            color = Color(0xFFFF4D4F),
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
                                             maxLines = 1,
-                                            softWrap = false,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            softWrap = false
                                         )
-                                    }
-
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0x22FF4D4F),
-                                        border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0x55FF4D4F)),
-                                        modifier = Modifier.clickable {
-                                            coroutineScope.launch {
-                                                val delRes = FirestoreRepository(context).deleteOrderFromCloud(order.id)
-                                                AuthAndOrderManager.deleteOrder(context, order.id)
-                                                if (delRes.isSuccess) {
-                                                    ordersList = ordersList.filterNot { it.id == order.id }
-                                                    Toast.makeText(context, "🗑️ შეკვეთა წაიშალა!", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    val errMsg = delRes.exceptionOrNull()?.localizedMessage ?: "შეკვეთის წაშლა ვერ მოხერხდა"
-                                                    Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
-                                                }
-                                            }
-                                        }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "შეკვეთის წაშლა",
-                                                tint = Color(0xFFFF4D4F),
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                            Text(
-                                                text = "წაშლა",
-                                                color = Color(0xFFFF4D4F),
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                softWrap = false
-                                            )
-                                        }
                                     }
                                 }
                             }
+                        }
 
-                            // სწრაფი სტატუსის შეცვლის ღილაკები ადმინისთვის
-                            val statusActions = listOf(
-                                Triple("pending", "მიმდინარე", "ახალი"),
-                                Triple("in_progress", "დამუშავების პროცესში", "მუშავდება"),
-                                Triple("completed", "შესრულებული", "დასრულებული"),
-                                Triple("cancelled", "გაუქმებული", "გაუქმება")
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // გადახდის დადასტურების ღილაკი (საბანკო გადარიცხვის ან COD-ის ფაქტობრივი მიღების შემდეგ)
+                        if (canConfirmPayment) {
+                            Surface(
+                                shape = RoundedCornerShape(9.dp),
+                                color = Color(0xFF14532D).copy(alpha = 0.72f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4ADE80).copy(alpha = 0.65f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_confirm_payment_btn_${order.id}")
+                                    .clickable {
+                                        orderPendingPaymentConfirm = order
+                                    }
                             ) {
-                                statusActions.forEach { (cloudStatus, uiStatusValue, label) ->
-                                    val isCurrent = order.status == uiStatusValue
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isCurrent) Color(0xFFFF6A00) else Color(0xFF222630),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                coroutineScope.launch {
-                                                    val cloudRes = FirestoreRepository(context).updateOrderStatusAsAdmin(order.id, cloudStatus)
-                                                    if (cloudRes.isSuccess) {
-                                                        AuthAndOrderManager.updateOrderStatus(context, order.id, uiStatusValue)
-                                                        ordersList = ordersList.map {
-                                                            if (it.id == order.id) it.copy(status = uiStatusValue) else it
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Verified,
+                                        contentDescription = null,
+                                        tint = Color(0xFF4ADE80),
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = when {
+                                            paymentStatusEnum == PaymentStatus.VERIFICATION_PENDING ->
+                                                "თანხის მიღება დავადასტურე"
+                                            paymentMethodType == PaymentMethodType.COD ->
+                                                "ნაღდი ანგარიშსწორების მიღება დავადასტურე"
+                                            else ->
+                                                "თანხის მიღება დავადასტურე (${order.bankName.ifBlank { "ბანკი" }})"
+                                        },
+                                        color = Color(0xFF4ADE80),
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
+                        // სწრაფი სტატუსის შეცვლის 2x2 ბადის ღილაკები ადმინისთვის (ვიწრო ეკრანზეც 0 მოჭრა)
+                        val statusActions = listOf(
+                            Triple("pending", "მიმდინარე", "ახალი"),
+                            Triple("in_progress", "დამუშავების პროცესში", "მუშავდება"),
+                            Triple("completed", "შესრულებული", "დასრულებული"),
+                            Triple("cancelled", "გაუქმებული", "გაუქმება")
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("admin_order_status_grid_${order.id}"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            statusActions.chunked(2).forEach { rowPair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowPair.forEach { (cloudStatus, uiStatusValue, label) ->
+                                        val isCurrent = order.status == uiStatusValue
+                                        val btnBorder = if (isCurrent) {
+                                            Color(0xFFFF6B00)
+                                        } else {
+                                            Color(0xFF333B49)
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(BstoreRadii.Control),
+                                            color = if (isCurrent) Color(0xFFFF6B00) else Color(0xFF1B2029),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, btnBorder),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 40.dp)
+                                                .testTag("admin_order_status_btn_${order.id}_$cloudStatus")
+                                                .clickable {
+                                                    coroutineScope.launch {
+                                                        val cloudRes = FirestoreRepository(context).updateOrderStatusAsAdmin(order.id, cloudStatus)
+                                                        if (cloudRes.isSuccess) {
+                                                            AuthAndOrderManager.updateOrderStatus(context, order.id, uiStatusValue, rawCode = cloudStatus)
+                                                            ordersList = ordersList.map {
+                                                                if (it.id == order.id) it.copy(status = uiStatusValue, fulfillmentStatusCode = cloudStatus) else it
+                                                            }
+                                                            Toast.makeText(context, "☁️ სტატუსი განახლდა: $uiStatusValue", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            val errMsg = cloudRes.exceptionOrNull()?.localizedMessage ?: "სტატუსის განახლება ვერ მოხერხდა"
+                                                            Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
                                                         }
-                                                        Toast.makeText(context, "☁️ სტატუსი განახლდა: $uiStatusValue", Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        val errMsg = cloudRes.exceptionOrNull()?.localizedMessage ?: "სტატუსის განახლება ვერ მოხერხდა"
-                                                        Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
                                                     }
                                                 }
+                                        ) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 8.dp, vertical = 9.dp)
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    color = if (isCurrent) Color.White else Color(0xFFE2E8F0),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    softWrap = false,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    textAlign = TextAlign.Center
+                                                )
                                             }
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            color = Color.White,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            softWrap = false,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 6.dp, horizontal = 2.dp)
-                                        )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
         }
+    }
+
+    if (orderPendingPaymentConfirm != null) {
+        val targetOrd = orderPendingPaymentConfirm!!
+        AdminConfirmPaymentDialog(
+            order = targetOrd,
+            isSubmitting = isConfirmingPayment,
+            onDismiss = {
+                if (!isConfirmingPayment) {
+                    orderPendingPaymentConfirm = null
+                }
+            },
+            onConfirm = { note ->
+                if (!isConfirmingPayment) {
+                    isConfirmingPayment = true
+                    coroutineScope.launch {
+                        val fbUser = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+                        val cloudRes = FirestoreRepository(context).confirmOrderPaymentAsAdmin(targetOrd, note)
+                        val allowLocalOnly = fbUser == null
+                        if (cloudRes.isSuccess || allowLocalOnly) {
+                            val localRes = AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(context, targetOrd, note)
+                            val updatedOrd = localRes.getOrNull() ?: targetOrd.copy(
+                                paymentStatus = PaymentStatus.PAID.code,
+                                paymentConfirmedAtMillis = System.currentTimeMillis(),
+                                paymentConfirmedBy = AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                                paymentInternalNote = note
+                            )
+                            ordersList = ordersList.map { if (it.id == targetOrd.id) updatedOrd else it }
+                            if (selectedOrderForDetail?.id == targetOrd.id) {
+                                selectedOrderForDetail = updatedOrd
+                            }
+                            isConfirmingPayment = false
+                            orderPendingPaymentConfirm = null
+                            Toast.makeText(
+                                context,
+                                "✅ გადახდა დადასტურდა: ${targetOrd.orderNumber}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            isConfirmingPayment = false
+                            val errMsg = cloudRes.exceptionOrNull()?.localizedMessage
+                                ?: "გადახდის დადასტურება Cloud-ში ვერ მოხერხდა"
+                            Toast.makeText(context, "❌ $errMsg", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    if (showPaymentAuditLogDialog) {
+        AdminPaymentAuditHistoryDialog(
+            onDismiss = { showPaymentAuditLogDialog = false }
+        )
     }
 
     if (selectedOrderForDetail != null) {
         val ord = selectedOrderForDetail!!
+        val isOrdInquiry = ord.isProductStockInquiry()
+        val ordMethodType = PaymentMethodType.fromCode(ord.paymentMethodCode)
+        val ordPaymentStatus = PaymentStatus.fromCode(ord.paymentStatus, ordMethodType)
+        val canDetailConfirmPayment = !isOrdInquiry &&
+            ordPaymentStatus != PaymentStatus.PAID &&
+            ordPaymentStatus != PaymentStatus.CANCELLED &&
+            ordPaymentStatus != PaymentStatus.REFUNDED &&
+            ord.status != "გაუქმებული"
+        val isDark = AppPreferencesManager.isDarkMode
+        val dialogContainerColor = if (isDark) Color(0xFF16191E) else Color(0xFFFFFFFF)
+        val dialogTitleColor = if (isDark) Color.White else Color(0xFF0F172A)
+        val dialogTextPrimary = if (isDark) Color.White else Color(0xFF1E293B)
+        val dialogTextSecondary = if (isDark) Color(0xFFA0A5B0) else Color(0xFF64748B)
+        val dialogDividerColor = if (isDark) Color(0xFF282D37) else Color(0xFFE2E8F0)
+        val dialogSnapshotTitle = if (isDark) Color(0xFFFF9E40) else Color(0xFFEA580C)
+        val dialogTotalColor = if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
+        val dialogBankColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)
+
         AlertDialog(
             onDismissRequest = { selectedOrderForDetail = null },
-            containerColor = Color(0xFF16191E),
+            containerColor = dialogContainerColor,
+            titleContentColor = dialogTitleColor,
+            textContentColor = dialogTextPrimary,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.testTag("admin_order_detail_dialog"),
             title = {
                 Text(
-                    text = "შეკვეთა ${ord.orderNumber.ifBlank { ord.id }}",
-                    color = Color.White,
+                    text = if (isOrdInquiry) {
+                        "📦 პოტენციური შეკვეთა ${ord.orderNumber.ifBlank { ord.id }}"
+                    } else {
+                        "შეკვეთა ${ord.orderNumber.ifBlank { ord.id }}"
+                    },
+                    color = dialogTitleColor,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     maxLines = 1,
@@ -6517,22 +7510,93 @@ fun AdminOrdersManagementView(
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("თარიღი: ${ord.date}", color = Color(0xFFA0A5B0), fontSize = 12.sp)
-                    Text("სტატუსი: ${ord.status}", color = Color(0xFFFF7A00), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                    Text("გადახდა: ${ord.paymentMethod}", color = Color.White, fontSize = 12.sp)
-                    Text("თრექინგ კოდი: ${ord.trackingCode}", color = Color(0xFF60A5FA), fontSize = 12.sp)
-                    HorizontalDivider(color = Color(0xFF282D37), modifier = Modifier.padding(vertical = 4.dp))
-                    Text("პროდუქტები (Snapshot):", color = Color(0xFFFF9E40), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    ord.items.forEach { itemSnap ->
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("თარიღი: ${ord.date}", color = dialogTextSecondary, fontSize = 12.sp)
+                    Text("შეკვეთის სტატუსი: ${ord.status}", color = Color(0xFFFF7A00), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                    if (isOrdInquiry) {
+                        Text("ტიპი: მარაგის დაზუსტება • პოტენციური შეკვეთა", color = dialogSnapshotTitle, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Text("გადახდის სტატუსი: ${ordPaymentStatus.adminLabelKa}", color = Color(ordPaymentStatus.badgeColorHex), fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text("გადახდის მეთოდი: ${ord.paymentMethod}", color = dialogTextPrimary, fontSize = 12.sp)
+                    }
+                    if (ord.bankName.isNotBlank()) {
+                        Text("ბანკი: ${ord.bankName} (${ord.ibanSnapshot})", color = dialogBankColor, fontSize = 11.5.sp)
+                    }
+                    if (ord.paymentReference.isNotBlank()) {
+                        Text("დანიშნულება: ${ord.paymentReference}", color = Color(0xFF2563EB), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (ord.userConfirmedPaymentAtMillis > 0L) {
+                        val userConfStr = java.text.SimpleDateFormat("dd.MM.yyyy • HH:mm", java.util.Locale.forLanguageTag("ka"))
+                            .format(java.util.Date(ord.userConfirmedPaymentAtMillis))
+                        Text("მომხმარებელმა გადარიცხვა დაადასტურა: $userConfStr", color = if (isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (ord.paymentConfirmedAtMillis > 0L) {
+                        val adminConfStr = java.text.SimpleDateFormat("dd.MM.yyyy • HH:mm", java.util.Locale.forLanguageTag("ka"))
+                            .format(java.util.Date(ord.paymentConfirmedAtMillis))
+                        Text("ადმინმა დაადასტურა: $adminConfStr (${ord.paymentConfirmedBy.ifBlank { AuthAndOrderManager.SOLE_ADMIN_EMAIL }})", color = if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D), fontSize = 11.5.sp)
+                    }
+                    if (ord.userPhone.isNotBlank() || ord.deliveryAddress.isNotBlank()) {
+                        Text("კლიენტი: ${ord.userName} • ${ord.userPhone}", color = dialogTextPrimary, fontSize = 11.5.sp)
+                        Text("მიწოდება: ${ord.deliveryAddress}", color = dialogTextSecondary, fontSize = 11.5.sp)
+                    }
+                    if (ord.paymentInternalNote.isNotBlank()) {
                         Text(
-                            text = "• ${itemSnap.productTitle} (${itemSnap.quality}) x${itemSnap.quantity} — ${itemSnap.price}",
-                            color = Color.White,
+                            text = if (isOrdInquiry) "მომხმარებლის შენიშვნა: ${ord.paymentInternalNote}" else "ადმინ შენიშვნა: ${ord.paymentInternalNote}",
+                            color = if (isDark) Color(0xFFFBBF24) else Color(0xFFB45309),
                             fontSize = 11.5.sp
                         )
                     }
-                    HorizontalDivider(color = Color(0xFF282D37), modifier = Modifier.padding(vertical = 4.dp))
-                    Text("ჯამური თანხა: ${ord.totalAmount}", color = Color(0xFF4ADE80), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    HorizontalDivider(color = dialogDividerColor, modifier = Modifier.padding(vertical = 4.dp))
+                    Text("პროდუქტები (Snapshot):", color = dialogSnapshotTitle, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    ord.items.forEach { itemSnap ->
+                        Text(
+                            text = "• ${itemSnap.productTitle} (${itemSnap.quality}) x${itemSnap.quantity} — ${itemSnap.price}",
+                            color = dialogTextPrimary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                    HorizontalDivider(color = dialogDividerColor, modifier = Modifier.padding(vertical = 4.dp))
+                    Text("ჯამური თანხა: ${ord.totalAmount}", color = dialogTotalColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+
+                    if (canDetailConfirmPayment) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        androidx.compose.runtime.CompositionLocalProvider(LocalPreserveWhiteText provides true) {
+                            Button(
+                                onClick = {
+                                    orderPendingPaymentConfirm = ord
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A), contentColor = Color.White),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("admin_detail_confirm_payment_button")
+                            ) {
+                                Text("თანხის მიღება დავადასტურე", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    } else if (ordPaymentStatus == PaymentStatus.PAID) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    FirestoreRepository(context).updateOrderPaymentStatusAsAdmin(ord, PaymentStatus.REFUNDED, "თანხა დაბრუნდა")
+                                    AuthAndOrderManager.updateOrderPaymentStatusLocalAsAdmin(context, ord, PaymentStatus.REFUNDED, "თანხა დაბრუნდა")
+                                    val updated = ord.copy(paymentStatus = PaymentStatus.REFUNDED.code)
+                                    ordersList = ordersList.map { if (it.id == ord.id) updated else it }
+                                    selectedOrderForDetail = updated
+                                    Toast.makeText(context, "🔄 სტატუსი განახლდა: თანხა დაბრუნებულია", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFA855F7)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("თანხის დაბრუნებულად მონიშვნა (Refund)", color = Color(0xFFA855F7), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
                 }
             },
             dismissButton = {
@@ -6561,6 +7625,26 @@ fun AdminOrdersManagementView(
                     Text("დახურვა", color = Color(0xFFFF7A00), fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+
+    if (showAllOrderNotificationsDialog) {
+        AdminAllOrderNotificationsDialog(
+            notifications = adminNotifications,
+            unreadCount = unreadAdminNotificationsCount,
+            onOpenOrderNotification = openOrderFromNotification,
+            onMarkNotificationRead = { notif ->
+                BekaNotificationManager.markAdminOrderNotificationAsRead(
+                    context = context,
+                    orderIdOrNotificationId = notif.notificationId.ifBlank { notif.orderId },
+                    orderType = notif.orderType
+                )
+            },
+            onDeleteNotification = deleteOrderNotificationAction,
+            onMarkAllRead = {
+                BekaNotificationManager.markAllAdminOrderNotificationsAsRead(context)
+            },
+            onDismiss = { showAllOrderNotificationsDialog = false }
         )
     }
 }
@@ -6727,15 +7811,16 @@ fun AdminPushNotificationsView(
     val repo = remember { FirestoreRepository(context) }
 
     var editingNotificationId by remember { mutableStateOf<String?>(null) }
-    var titleInput by remember { mutableStateOf("BEKASERVICE • ახალი შეთავაზება") }
+    var titleInput by remember { mutableStateOf("BSTORE • ახალი შეთავაზება") }
     var bodyInput by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf("announcement") }
     var selectedProductId by remember { mutableIntStateOf(0) }
+    var selectedProductDocId by remember { mutableStateOf("") }
     var selectedTargetTab by remember { mutableIntStateOf(0) }
     var productSearchFilter by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var recentNotifications by remember {
-        mutableStateOf(BekaNotificationManager.loadLocalNotificationHistory(context))
+        mutableStateOf<List<PushNotificationRecord>>(emptyList())
     }
     var fcmToken by remember { mutableStateOf(BekaNotificationManager.getLocalFcmToken(context)) }
     var firebaseUserEmail by remember {
@@ -6749,19 +7834,28 @@ fun AdminPushNotificationsView(
 
     DisposableEffect(Unit) {
         val auth = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance() }.getOrNull()
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        val attachAdminHistoryListener = {
+            registration?.remove()
+            registration = null
+            if (AuthAndOrderManager.isCurrentUserVerifiedSoleAdmin(context)) {
+                try {
+                    registration = repo.listenToAllNotificationsForAdmin { list ->
+                        recentNotifications = list
+                    }
+                } catch (_: Exception) {}
+            } else {
+                recentNotifications = emptyList()
+            }
+        }
         val authListener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { fbAuth ->
             firebaseUserEmail = fbAuth.currentUser?.email ?: AuthAndOrderManager.resolveActiveUserEmail(context).ifBlank {
                 if (AdminStorage.isAdminSessionActive(context)) AuthAndOrderManager.SOLE_ADMIN_EMAIL else null
             }
+            attachAdminHistoryListener()
         }
         auth?.addAuthStateListener(authListener)
-
-        var registration: com.google.firebase.firestore.ListenerRegistration? = null
-        try {
-            registration = repo.listenToBroadcastNotifications { list ->
-                recentNotifications = BekaNotificationManager.syncCloudNotificationsToLocal(context, list)
-            }
-        } catch (_: Exception) {}
+        attachAdminHistoryListener()
         onDispose {
             auth?.removeAuthStateListener(authListener)
             registration?.remove()
@@ -6783,15 +7877,19 @@ fun AdminPushNotificationsView(
 
     val notificationTypes = listOf(
         Pair("announcement", "📢 ზოგადი განცხადება"),
+        Pair("product", "🛍️ კონკრეტული პროდუქტი"),
         Pair("product_offer", "🔥 პროდუქტის აქცია"),
+        Pair("promotion", "🏷️ ფასდაკლება / აქცია"),
+        Pair("system_update", "📲 აპის განახლება"),
         Pair("service_update", "🛠️ სერვისის სიახლე")
     )
 
     val targetPages = listOf(
+        Pair(-1, "ℹ️ ინფორმაციული (დეტალები)"),
         Pair(0, "🏠 მთავარი გვერდი"),
         Pair(1, "📦 კატალოგი"),
-        Pair(2, "🛠️ დიაგნოსტიკა"),
-        Pair(3, "🤖 AI ასისტენტი"),
+        Pair(2, "🏷️ ფასდაკლებები"),
+        Pair(3, "🤖 AI ასისტენტი & დიაგნოსტიკა"),
         Pair(4, "👤 პროფილი"),
         Pair(5, "🛒 კალათა"),
         Pair(6, "🔔 შეტყობინებები"),
@@ -6806,7 +7904,10 @@ fun AdminPushNotificationsView(
             products.filter {
                 it.title.lowercase().contains(q) ||
                     it.brand.lowercase().contains(q) ||
-                    it.category.lowercase().contains(q)
+                    it.category.lowercase().contains(q) ||
+                    it.firestoreDocId.lowercase().contains(q) ||
+                    "prod_${it.id}".lowercase().contains(q) ||
+                    it.id.toString().contains(q)
             }.take(30)
         }
     }
@@ -6974,9 +8075,10 @@ fun AdminPushNotificationsView(
                                 color = Color(0xFF262A34),
                                 modifier = Modifier.clickable {
                                     editingNotificationId = null
-                                    titleInput = "BEKASERVICE • ახალი შეთავაზება"
+                                    titleInput = "BSTORE • ახალი შეთავაზება"
                                     bodyInput = ""
                                     selectedProductId = 0
+                                    selectedProductDocId = ""
                                     selectedTargetTab = 0
                                     selectedType = "announcement"
                                 }
@@ -7000,7 +8102,21 @@ fun AdminPushNotificationsView(
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                                modifier = Modifier.clickable { selectedType = typeKey }
+                                modifier = Modifier.clickable {
+                                    selectedType = typeKey
+                                    when (typeKey) {
+                                        "product" -> selectedTargetTab = 1
+                                        "system_update" -> selectedTargetTab = 7
+                                        "product_offer", "promotion" -> {
+                                            selectedTargetTab = if (selectedProductId > 0 || selectedProductDocId.isNotBlank()) 1 else 2
+                                        }
+                                        "announcement", "service_update" -> {
+                                            if (selectedTargetTab !in 0..7 && selectedTargetTab != -1) {
+                                                selectedTargetTab = 0
+                                            }
+                                        }
+                                    }
+                                }
                             ) {
                                 Text(
                                     text = label,
@@ -7045,48 +8161,50 @@ fun AdminPushNotificationsView(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // 1. გადასასვლელი გვერდის არჩევა
-                    Text(
-                        text = "გადასასვლელი გვერდი დაკლიკებისას:",
-                        color = Color(0xFFA0A5B0),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    if (selectedType != "product") {
+                        // 1. გადასასვლელი გვერდის არჩევა
+                        Text(
+                            text = "გადასასვლელი გვერდი დაკლიკებისას:",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(targetPages, key = { it.first }) { (tabIdx, tabLabel) ->
-                            val isSelected = selectedTargetTab == tabIdx
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                                border = androidx.compose.foundation.BorderStroke(
-                                    1.dp,
-                                    if (isSelected) Color(0xFFFF7A00) else Color(0xFF282D37)
-                                ),
-                                modifier = Modifier.clickable {
-                                    selectedTargetTab = tabIdx
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(targetPages, key = { it.first }) { (tabIdx, tabLabel) ->
+                                val isSelected = selectedTargetTab == tabIdx
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1E222B),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isSelected) Color(0xFFFF7A00) else Color(0xFF282D37)
+                                    ),
+                                    modifier = Modifier.clickable {
+                                        selectedTargetTab = tabIdx
+                                    }
+                                ) {
+                                    Text(
+                                        text = tabLabel,
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
                                 }
-                            ) {
-                                Text(
-                                    text = tabLabel,
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
                             }
                         }
                     }
 
-                    // 2. კონკრეტული პროდუქტის ან სერვისის მიბმა (სურვილისამებრ)
+                    // 2. კონკრეტული პროდუქტის ან სერვისის მიბმა
                     Text(
-                        text = "კონკრეტული პროდუქტი / სერვისი (სურვილისამებრ):",
+                        text = if (selectedType == "product") "კონკრეტული პროდუქტი (სავალდებულო):" else "კონკრეტული პროდუქტი / სერვისი (სურვილისამებრ):",
                         color = Color(0xFFA0A5B0),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -7124,8 +8242,11 @@ fun AdminPushNotificationsView(
                         item(key = "prod_none") {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (selectedProductId == 0) Color(0xFFFF6A00) else Color(0xFF1E222B),
-                                modifier = Modifier.clickable { selectedProductId = 0 }
+                                color = if (selectedProductId == 0 && selectedProductDocId.isBlank()) Color(0xFFFF6A00) else Color(0xFF1E222B),
+                                modifier = Modifier.clickable {
+                                    selectedProductId = 0
+                                    selectedProductDocId = ""
+                                }
                             ) {
                                 Text(
                                     text = "არცერთი (მხოლოდ გვერდზე გადასვლა)",
@@ -7138,15 +8259,19 @@ fun AdminPushNotificationsView(
                             }
                         }
                         items(filteredProductsForPicker, key = { it.id }) { prod ->
-                            val isSelected = selectedProductId == prod.id
+                            val resolvedDocId = prod.firestoreDocId.ifBlank { "prod_${prod.id}" }
+                            val isSelected = (selectedProductDocId.isNotBlank() && resolvedDocId == selectedProductDocId) ||
+                                (selectedProductId > 0 && selectedProductId == prod.id)
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = if (isSelected) Color(0xFFFF6A00) else Color(0xFF1E222B),
                                 modifier = Modifier.clickable {
                                     selectedProductId = prod.id
-                                    if (selectedTargetTab == 0) {
-                                        selectedTargetTab = 1
+                                    selectedProductDocId = resolvedDocId
+                                    if (selectedType == "announcement" || selectedType == "service_update") {
+                                        selectedType = "product"
                                     }
+                                    selectedTargetTab = 1
                                     if (bodyInput.isBlank()) {
                                         bodyInput = "${prod.title} — ${prod.price}"
                                     }
@@ -7164,6 +8289,52 @@ fun AdminPushNotificationsView(
                         }
                     }
 
+                    if (selectedProductId > 0 || selectedProductDocId.isNotBlank()) {
+                        val linkedSelectedProd = remember(selectedProductId, selectedProductDocId, products) {
+                            products.find {
+                                (selectedProductDocId.isNotBlank() &&
+                                    (it.firestoreDocId == selectedProductDocId || "prod_${it.id}" == selectedProductDocId)) ||
+                                    (selectedProductId > 0 && it.id == selectedProductId)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF1A2220),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4ADE80).copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "🔗 მიბმული პროდუქტი: ${linkedSelectedProd?.title ?: "არჩეული"} • ID: ${selectedProductDocId.ifBlank { "prod_$selectedProductId" }}",
+                                    color = Color(0xFF4ADE80),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        selectedProductId = 0
+                                        selectedProductDocId = ""
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "პროდუქტის მოხსნა",
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -7173,9 +8344,10 @@ fun AdminPushNotificationsView(
                                 val shown = BekaNotificationManager.showNotification(
                                     context = context,
                                     notificationId = "local_test_${System.currentTimeMillis()}",
-                                    title = titleInput.ifBlank { "BEKASERVICE ტესტი" },
+                                    title = titleInput.ifBlank { "BSTORE ტესტი" },
                                     body = bodyInput.ifBlank { "სატესტო Push შეტყობინება წარმატებით მუშაობს!" },
                                     targetProductId = selectedProductId,
+                                    targetProductDocId = selectedProductDocId,
                                     targetTab = selectedTargetTab,
                                     type = selectedType,
                                     ignoreDeduplication = true,
@@ -7207,11 +8379,15 @@ fun AdminPushNotificationsView(
                                     Toast.makeText(context, "შეიყვანეთ შეტყობინების ტექსტი", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
+                                if (selectedType == "product" && selectedProductId <= 0 && selectedProductDocId.isBlank()) {
+                                    Toast.makeText(context, "აირჩიეთ კონკრეტული პროდუქტი სიიდან", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
                                 coroutineScope.launch {
                                     isSending = true
                                     val isEdit = editingNotificationId != null
                                     val notifId = editingNotificationId ?: "notif_${System.currentTimeMillis()}"
-                                    val finalTitle = titleInput.ifBlank { "BEKASERVICE • ახალი შეთავაზება" }
+                                    val finalTitle = titleInput.ifBlank { "BSTORE • ახალი შეთავაზება" }
                                     val finalBody = bodyInput.trim()
 
                                     val res = if (isEdit) {
@@ -7220,18 +8396,23 @@ fun AdminPushNotificationsView(
                                             title = finalTitle,
                                             body = finalBody,
                                             targetProductId = selectedProductId,
+                                            targetProductDocId = selectedProductDocId,
                                             targetTab = selectedTargetTab,
                                             type = selectedType,
-                                            rebroadcastNow = true
+                                            rebroadcastNow = true,
+                                            visibility = "PUBLIC"
                                         )
                                     } else {
                                         repo.sendAdminNotification(
                                             title = finalTitle,
                                             body = finalBody,
                                             targetProductId = selectedProductId,
+                                            targetProductDocId = selectedProductDocId,
                                             targetTab = selectedTargetTab,
                                             type = selectedType,
-                                            explicitNotificationId = notifId
+                                            explicitNotificationId = notifId,
+                                            audience = "all",
+                                            visibility = "PUBLIC"
                                         )
                                     }
                                     isSending = false
@@ -7244,10 +8425,13 @@ fun AdminPushNotificationsView(
                                             title = finalTitle,
                                             body = finalBody,
                                             targetProductId = selectedProductId,
+                                            targetProductDocId = selectedProductDocId,
                                             targetTab = selectedTargetTab,
                                             type = selectedType,
                                             ignoreDeduplication = true,
-                                            persistToHistory = true
+                                            persistToHistory = true,
+                                            audience = "all",
+                                            visibility = "PUBLIC"
                                         )
                                         val updatedRecord = PushNotificationRecord(
                                             id = notifId,
@@ -7255,16 +8439,19 @@ fun AdminPushNotificationsView(
                                             body = finalBody,
                                             type = selectedType,
                                             targetProductId = selectedProductId,
+                                            targetProductDocId = selectedProductDocId,
                                             targetTab = selectedTargetTab,
                                             senderEmail = firebaseUserEmail ?: "beqa1994@gmail.com",
                                             createdAtMillis = System.currentTimeMillis(),
                                             audience = "all",
-                                            status = "submitted"
+                                            status = "submitted",
+                                            visibility = "PUBLIC"
                                         )
-                                        BekaNotificationManager.upsertLocalNotificationRecord(context, updatedRecord)
-                                        recentNotifications = BekaNotificationManager.loadLocalNotificationHistory(context)
+                                        recentNotifications = listOf(updatedRecord) + recentNotifications.filterNot { it.id == notifId }
                                         editingNotificationId = null
                                         bodyInput = ""
+                                        selectedProductId = 0
+                                        selectedProductDocId = ""
 
                                         Toast.makeText(
                                             context,
@@ -7316,8 +8503,12 @@ fun AdminPushNotificationsView(
             }
 
             items(recentNotifications, key = { it.id }) { notif ->
-                val linkedProduct = remember(notif.targetProductId, products) {
-                    if (notif.targetProductId > 0) products.find { it.id == notif.targetProductId } else null
+                val linkedProduct = remember(notif.targetProductId, notif.targetProductDocId, products) {
+                    products.find {
+                        (notif.targetProductDocId.isNotBlank() &&
+                            (it.firestoreDocId == notif.targetProductDocId || "prod_${it.id}" == notif.targetProductDocId)) ||
+                            (notif.targetProductId > 0 && it.id == notif.targetProductId)
+                    }
                 }
                 val formattedDate = remember(notif.createdAtMillis) {
                     java.text.SimpleDateFormat("dd.MM.yyyy • HH:mm", java.util.Locale.getDefault())
@@ -7400,7 +8591,7 @@ fun AdminPushNotificationsView(
                                 )
                             }
 
-                            if (notif.targetProductId > 0) {
+                            if (notif.targetProductId > 0 || notif.targetProductDocId.isNotBlank()) {
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
                                     color = Color(0xFF1E222B),
@@ -7410,7 +8601,7 @@ fun AdminPushNotificationsView(
                                         text = if (linkedProduct != null) {
                                             "🔗 ${linkedProduct.title}"
                                         } else {
-                                            "🔗 პროდუქტის ID: #${notif.targetProductId}"
+                                            "🔗 პროდუქტის ID: ${notif.targetProductDocId.ifBlank { "#${notif.targetProductId}" }}"
                                         },
                                         color = Color(0xFFFF9E40),
                                         fontSize = 10.sp,
@@ -7449,23 +8640,35 @@ fun AdminPushNotificationsView(
                                                 title = notif.title,
                                                 body = notif.body,
                                                 targetProductId = notif.targetProductId,
+                                                targetProductDocId = notif.targetProductDocId,
                                                 targetTab = notif.targetTab,
                                                 type = notif.type,
-                                                explicitNotificationId = resentId
+                                                explicitNotificationId = resentId,
+                                                audience = notif.audience.ifBlank { "all" },
+                                                orderId = notif.orderId,
+                                                orderNumber = notif.orderNumber,
+                                                visibility = notif.visibility.ifBlank { "" },
+                                                recipientUid = notif.recipientUid
                                             )
                                             if (res.isSuccess) {
-                                                BekaNotificationManager.showNotification(
-                                                    context = context,
-                                                    notificationId = resentId,
-                                                    title = notif.title,
-                                                    body = notif.body,
-                                                    targetProductId = notif.targetProductId,
-                                                    targetTab = notif.targetTab,
-                                                    type = notif.type,
-                                                    ignoreDeduplication = true,
-                                                    persistToHistory = true
-                                                )
-                                                recentNotifications = BekaNotificationManager.loadLocalNotificationHistory(context)
+                                                val resentVis = BekaNotificationManager.classifyRecord(notif)
+                                                if (resentVis == NotificationVisibility.PUBLIC) {
+                                                    BekaNotificationManager.showNotification(
+                                                        context = context,
+                                                        notificationId = resentId,
+                                                        title = notif.title,
+                                                        body = notif.body,
+                                                        targetProductId = notif.targetProductId,
+                                                        targetProductDocId = notif.targetProductDocId,
+                                                        targetTab = notif.targetTab,
+                                                        type = notif.type,
+                                                        ignoreDeduplication = true,
+                                                        persistToHistory = true,
+                                                        audience = "all",
+                                                        visibility = "PUBLIC"
+                                                    )
+                                                }
+                                                recentNotifications = listOf(notif.copy(id = resentId, createdAtMillis = System.currentTimeMillis())) + recentNotifications
                                                 Toast.makeText(
                                                     context,
                                                     "🔄 შეტყობინება განმეორებით გაიგზავნა!",
@@ -7500,6 +8703,7 @@ fun AdminPushNotificationsView(
                                         bodyInput = notif.body
                                         selectedType = notif.type
                                         selectedProductId = notif.targetProductId
+                                        selectedProductDocId = notif.targetProductDocId
                                         selectedTargetTab = notif.targetTab
                                         Toast.makeText(
                                             context,

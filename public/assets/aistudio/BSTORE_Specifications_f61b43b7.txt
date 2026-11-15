@@ -1,0 +1,670 @@
+BSTORE — GLOBAL UI DESIGN CONSISTENCY & AI ASSISTANT INTELLIGENCE IMPROVEMENT
+
+Act as a senior Android/Kotlin engineer, Jetpack Compose UI/UX designer, AI application architect, and Firebase integration specialist.
+
+Your task is to improve two important areas of the existing BSTORE Android application:
+
+1. Global visual consistency, including button shapes, sizes, spacing, proportions, and component layouts, using the four attached visual reference files.
+2. The AI Assistant, including its intelligence, product discovery capabilities, response quality, diagnostic-mode separation, and visual interface, using the attached demonstration video as a reference.
+
+This is an existing application. Inspect the actual project and implement the improvements directly. Do not rebuild the application or replace its architecture.
+
+==================================================
+PART 1 — GLOBAL VISUAL DESIGN CONSISTENCY
+
+1.1. Analyze all four attached visual reference files
+
+Carefully inspect all four attached files before modifying the interface.
+
+Treat them as visual references for identifying inconsistent or poorly designed interface elements.
+
+The objective is not to copy individual elements blindly, but to establish one consistent design language throughout BSTORE.
+
+Inspect the entire existing application and identify:
+
+- Buttons with inconsistent dimensions.
+- Different corner radii used without a clear design reason.
+- Buttons that are unnecessarily large or visually dominant.
+- Buttons that are too small or difficult to tap.
+- Inconsistent icon sizes.
+- Incorrect icon-to-text spacing.
+- Inconsistent horizontal and vertical padding.
+- Poorly aligned labels and controls.
+- Uneven spacing between sections.
+- Excessive empty space.
+- Text wrapping and clipping.
+- Inconsistent card proportions.
+- Poorly balanced modal and dialog layouts.
+- Inconsistent input field heights.
+- Different visual styles for controls that perform similar actions.
+- Components that do not adapt properly to different screen sizes.
+
+1.2. Establish a unified component design system
+
+Create or refine a consistent design system for the entire application.
+
+Define reusable standards for:
+
+- Primary buttons.
+- Secondary buttons.
+- Outlined buttons.
+- Icon-only buttons.
+- Destructive actions.
+- Text buttons.
+- Product card actions.
+- Filter and category controls.
+- Segmented selectors.
+- Input fields.
+- Dialogs and bottom sheets.
+- Notification cards.
+- Navigation elements.
+- AI Assistant controls and quick-action buttons.
+
+All components performing similar actions should have consistent:
+
+- Height.
+- Minimum width where appropriate.
+- Corner radius.
+- Internal padding.
+- Typography.
+- Icon dimensions.
+- Border thickness.
+- Alignment.
+- Interaction feedback.
+- Disabled, loading, pressed, and selected states.
+
+Do not apply identical dimensions to every button regardless of context. Establish appropriate size variants while maintaining consistent proportions.
+
+For example:
+
+- Main actions should be easily recognizable and comfortably tappable.
+- Secondary actions should be visually quieter.
+- Icon-only buttons should have consistent dimensions and adequate touch targets.
+- Compact controls should remain readable and usable.
+
+1.3. Preserve BSTORE's visual identity
+
+Do not introduce an unrelated design language.
+
+Preserve the existing BSTORE identity:
+
+- Dark interface.
+- Black and graphite surfaces.
+- White and secondary grey typography.
+- Existing orange brand accent.
+- Existing overall visual character.
+
+Improve the balance and consistency of colors, surfaces, buttons, borders, and component proportions.
+
+Avoid excessive bright orange surfaces where they create unnecessary visual dominance.
+
+Do not apply strong glassmorphism or blur effects everywhere.
+
+Use transparency, subtle borders, and surface contrast only where they genuinely improve the interface.
+
+The result should feel like one professionally designed application, not a collection of independently styled screens.
+
+1.4. Apply the improvements throughout the application
+
+Do not limit the visual changes to the four screenshots.
+
+Inspect and apply the unified design system to all relevant existing screens, including:
+
+- Home screen.
+- Product cards.
+- Product details.
+- Categories.
+- Discounts.
+- Cart.
+- Checkout.
+- Profile.
+- Orders.
+- Payment screens.
+- Notification screens.
+- AI Assistant.
+- Admin panel.
+- Bank account forms.
+- Dialogs and bottom sheets.
+
+Do not unnecessarily redesign content or remove functionality.
+
+The goal is visual consistency, not a complete redesign.
+
+1.5. Responsive behavior
+
+Verify that updated components work correctly on:
+
+- Narrow Android screens.
+- Different screen densities.
+- Different font sizes.
+- Long Georgian text.
+- Long product names.
+- Keyboard-visible states.
+- Scrolling screens.
+- Dialogs and bottom sheets.
+
+Avoid clipped text, overlapping controls, incorrect widths, and inaccessible touch targets.
+
+==================================================
+PART 2 — AI ASSISTANT: INTELLIGENCE AND FUNCTIONAL IMPROVEMENT
+
+The current BSTORE AI Assistant is too superficial and does not provide the quality of assistance expected from a useful shopping assistant.
+
+Inspect the attached video carefully.
+
+Use it to understand the current assistant's behavior, response style, interaction flow, and visual problems.
+
+Do not merely change the wording of responses. Investigate the underlying implementation and improve the actual assistant architecture and data access.
+
+The AI Assistant should become a genuinely useful, accurate, context-aware shopping and product advisor for BSTORE.
+
+==================================================
+2.1. PRODUCT-AWARE INTELLIGENCE — CRITICAL
+
+The assistant must correctly search and recommend products from the actual BSTORE product catalog.
+
+This requirement applies to:
+
+- Products already present in the database.
+- Products added by administrators in the future.
+- Newly added products without requiring an application update.
+- Products whose prices, availability, descriptions, or categories change.
+
+Do not hardcode product names or create a static list of products for the assistant.
+
+The assistant must use the existing Firebase-backed product catalog as its source of truth.
+
+Inspect the current Firestore product structure, product repository, and existing AI integration.
+
+Implement a reliable product retrieval and search mechanism.
+
+The assistant must be able to:
+
+1. Retrieve current products from the actual catalog.
+2. Search by product name.
+3. Search by product category.
+4. Search by brand and model.
+5. Search by product description and relevant attributes.
+6. Understand natural-language requests.
+7. Recognize common Georgian and English product terms.
+8. Handle reasonable spelling mistakes and alternative names.
+9. Understand product-related synonyms.
+10. Filter by price range when requested.
+11. Identify discounted products.
+12. Check current availability and stock information when that data exists.
+13. Compare relevant products.
+14. Recommend suitable alternatives when the requested item is unavailable.
+15. Explain why a particular product matches the customer's needs.
+
+Examples of expected questions:
+
+- „რომელი აიფონი გაქვთ ყველაზე იაფად?“
+- „350 ლარამდე რა ტელეფონის ეკრანები გაქვთ?“
+- „iPhone 16 Pro Max-ის ეკრანი გაქვთ?“
+- „რომელი პროდუქტებია ფასდაკლებაში?“
+- „შემიდარე ეს ორი პროდუქტი.“
+- „მირჩიე საუკეთესო ვარიანტი ჩემი ბიუჯეტისთვის.“
+- „უფრო იაფი ალტერნატივა გაქვთ?“
+- „რომელი პროდუქტია ხარისხით უკეთესი?“
+
+The assistant must understand what the customer is actually asking instead of returning generic responses.
+
+2.2. DYNAMIC PRODUCT DATA — FUTURE PRODUCTS MUST WORK AUTOMATICALLY
+
+A particularly important requirement:
+
+When an administrator adds a new product to BSTORE through the existing admin panel, the AI Assistant must be able to discover and recommend that product without:
+
+- Updating the application.
+- Modifying source code.
+- Adding the product manually to an AI prompt.
+- Rebuilding the APK.
+- Maintaining a separate hardcoded product catalog.
+
+Use the existing Firebase data architecture.
+
+Ensure the product search layer retrieves current data rather than relying on a permanently cached product list.
+
+If indexing, search metadata, or a dedicated retrieval layer is necessary, implement an appropriate maintainable solution.
+
+Keep the assistant synchronized with:
+
+- Newly added products.
+- Product updates.
+- Changed prices.
+- Changed descriptions.
+- Discount changes.
+- Availability changes.
+- Removed or deactivated products.
+
+Avoid showing deleted, inactive, or unavailable products as purchasable.
+
+If a product is temporarily unavailable, clearly communicate its actual availability.
+
+2.3. ACCURACY — NEVER INVENT PRODUCTS OR PRICES
+
+The assistant must never fabricate:
+
+- Product names.
+- Prices.
+- Discounts.
+- Stock availability.
+- Product specifications.
+- Product compatibility.
+- Delivery promises.
+- Warranty conditions.
+- Other business information.
+
+Product recommendations must be grounded in actual catalog records.
+
+When relevant information is missing, the assistant must say so rather than inventing details.
+
+When showing a recommendation, use the actual product data available in the database.
+
+Where appropriate, show:
+
+- Product name.
+- Current price.
+- Discounted price, if applicable.
+- Relevant product information.
+- Availability.
+- A way to open the actual product details or add it to the cart.
+
+Use existing product identifiers and navigation.
+
+Do not create fake product cards or non-functional product links.
+
+If the current AI integration cannot reliably access the catalog, improve the data retrieval architecture instead of attempting to solve everything through prompt engineering alone.
+
+==================================================
+2.4. CLEAR SEPARATION BETWEEN AI ASSISTANT AND DIAGNOSTICS
+
+This is a critical behavioral requirement.
+
+The AI Assistant currently appears to mix ordinary assistant responses with diagnostic-style responses.
+
+These two modes must be clearly separated.
+
+The application has an existing top selection/control field through which the customer can choose a mode.
+
+Inspect how this selector currently works and preserve its intended navigation and functionality.
+
+There must be two distinct behaviors:
+
+MODE A — AI ASSISTANT
+
+This is the normal default assistant mode.
+
+When the customer is using the ordinary AI Assistant screen, the assistant must NOT return diagnostic reports, diagnostic conclusions, diagnostic procedures, or diagnostic-style analysis.
+
+It must behave as an intelligent and helpful BSTORE shopping assistant.
+
+Its responsibilities include:
+
+- Product discovery.
+- Product recommendations.
+- Product comparisons.
+- Price-related questions.
+- Product availability.
+- Shopping advice.
+- Help with selecting suitable products.
+- Questions about BSTORE.
+- General assistance related to the application.
+- Orders and shopping workflow guidance, where supported by actual application data.
+- Natural conversational interaction.
+
+Do not automatically enter diagnostic mode based on the wording of a message.
+
+Even if the customer asks a question that resembles a diagnostic request, the normal assistant must not generate a diagnostic report.
+
+Instead, it should politely explain that diagnostic functionality is available through the dedicated Diagnostics option in the top selector and guide the customer to select it.
+
+MODE B — DIAGNOSTICS
+
+Diagnostic functionality must only be activated when the customer explicitly selects the Diagnostics option from the existing top selector.
+
+Only after this selection should the diagnostic workflow, diagnostic tools, diagnostic-specific prompts, or diagnostic-style responses become available.
+
+Switching to Diagnostics must be explicit and controlled by the existing UI.
+
+Returning to the normal AI Assistant must restore normal shopping-assistant behavior.
+
+The selected mode must be clearly visible to the customer.
+
+Do not mix diagnostic context with normal assistant conversation history.
+
+Do not allow a previous diagnostic session to silently influence ordinary assistant responses.
+
+If the application already has diagnostic functionality, preserve it and correct the mode separation instead of removing it.
+
+IMPORTANT:
+Do not assume the word "diagnostics" has a particular technical meaning without inspecting the existing project. Preserve the actual diagnostic functionality already implemented.
+
+==================================================
+2.5. CONVERSATIONAL QUALITY — NATURAL, USEFUL AND RESPONSIVE
+
+The assistant must not behave like a rigid automated FAQ.
+
+It should understand conversational language and respond naturally.
+
+It must remain useful even when the customer:
+
+- Starts with a greeting.
+- Writes informally.
+- Uses humor.
+- Makes a joke.
+- Asks an incomplete question.
+- Uses slang.
+- Makes a casual comment.
+- Changes the subject slightly.
+- Asks a follow-up question.
+- Makes a playful remark.
+
+For example:
+
+Customer: „გამარჯობა“
+
+Assistant: A friendly, natural greeting in Georgian.
+
+Customer: „დღეს რას მირჩევ, ფული არ მაქვს ბევრი 😂“
+
+Assistant: A natural, lightly humorous response that offers to find affordable products within the customer's budget.
+
+Customer: „შენ რომელს იყიდდი?“
+
+Assistant: A helpful recommendation based on actual product information and the customer's stated needs.
+
+Customer: „ყველაზე მაგარი რა გაქვთ?“
+
+Assistant: Ask what category or budget they mean if the catalog does not provide enough context, or suggest relevant top options using actual available data.
+
+The assistant should be conversational without becoming irrelevant or excessively humorous.
+
+A playful customer message should not cause the assistant to stop responding or return a generic error.
+
+2.6. KEEP THE ASSISTANT PRIMARILY BSTORE-RELATED
+
+The assistant should focus primarily on BSTORE and its products.
+
+It may respond naturally to greetings, jokes, and brief unrelated conversational remarks, but should gently guide the discussion back toward useful assistance when appropriate.
+
+Prioritize:
+
+- BSTORE products.
+- Shopping recommendations.
+- Product selection.
+- Prices.
+- Discounts.
+- Product comparisons.
+- Availability.
+- Ordering.
+- Delivery information actually configured in the application.
+- Payment instructions actually supported by BSTORE.
+- Application functionality.
+- Customer assistance.
+
+Do not turn the assistant into a generic unrestricted chatbot.
+
+Do not make every response sound like a sales pitch.
+
+The assistant should provide honest recommendations, including saying when a product is not suitable or when there is not enough information to recommend one.
+
+2.7. CONTEXT AND FOLLOW-UP QUESTIONS
+
+The assistant must understand conversation context.
+
+Examples:
+
+Customer: „iPhone 16 Pro Max-ის ეკრანი გაქვთ?“
+
+Assistant: Retrieves relevant products.
+
+Customer: „უფრო იაფი?“
+
+Assistant: Understands that the customer wants a cheaper alternative in the same product category.
+
+Customer: „და ხარისხით რომელია უკეთესი?“
+
+Assistant: Compares the relevant alternatives using available product information.
+
+Do not treat every message as a completely new request.
+
+Maintain relevant conversation context without mixing users' conversations or diagnostic sessions.
+
+If the request is ambiguous, ask one concise clarification rather than returning a generic response.
+
+==================================================
+2.8. AI ASSISTANT UI — VISUAL IMPROVEMENT
+
+Inspect the attached video and the current AI Assistant interface.
+
+Improve the appearance and consistency of the entire assistant screen.
+
+Use the unified component design system established in Part 1.
+
+Inspect:
+
+- Assistant header.
+- Mode selector.
+- Message bubbles.
+- User messages.
+- AI responses.
+- Product recommendation cards.
+- Input field.
+- Send button.
+- Quick-action buttons.
+- Suggested questions.
+- Loading indicator.
+- Typing state.
+- Error messages.
+- Empty conversation state.
+- Scroll behavior.
+- Keyboard interaction.
+
+Requirements:
+
+- Make message bubbles visually balanced and readable.
+- Use consistent corner radii and padding.
+- Ensure long responses do not create awkward layouts.
+- Make product recommendations visually clear and actionable.
+- Ensure product cards match the existing BSTORE design language.
+- Make the input field comfortable to use.
+- Ensure the send button is appropriately sized.
+- Refine the shape and dimensions of all existing assistant buttons.
+- Remove excessive empty space.
+- Ensure quick-action buttons are compact and consistent.
+- Make the mode selector visually clear and easy to understand.
+- Clearly distinguish normal AI Assistant mode from Diagnostics mode.
+- Keep all customer-facing text in Georgian.
+- Ensure the screen works correctly with the Android keyboard open.
+
+Do not create decorative controls that do not work.
+
+Do not remove useful existing assistant features.
+
+==================================================
+PART 3 — TECHNICAL IMPLEMENTATION AND PRESERVATION
+
+Before implementation, inspect:
+
+- Existing AI Assistant architecture.
+- Gemini or other currently configured AI integration.
+- System instructions and prompts.
+- Product repository and Firestore schema.
+- Product search implementation.
+- Current conversation context management.
+- Mode selector and diagnostic routing.
+- Existing product recommendation UI.
+- Existing navigation and cart integration.
+- Loading and error handling.
+- Firebase Security Rules and backend access patterns.
+
+Implement product retrieval using the existing secure Firebase architecture.
+
+Do not expose Firebase Admin credentials or privileged backend secrets in Android client code.
+
+Do not allow the AI model to invent database results or directly modify product prices, inventory, orders, or payment states.
+
+The assistant should retrieve product information through controlled application/backend functions and use the returned records as the factual source.
+
+If a server-side retrieval function or additional search infrastructure is necessary, implement it using the existing architecture where possible.
+
+If additional Firebase configuration, deployment, or billing is required, explain it clearly.
+
+Do not claim that a backend function has been deployed unless it actually has.
+
+Preserve:
+
+- Existing package/application ID.
+- Firebase project.
+- Kotlin and Jetpack Compose architecture.
+- Authentication.
+- Admin authorization.
+- Products and catalog.
+- Cart and checkout.
+- Orders.
+- Payments.
+- Existing diagnostic functionality.
+- Existing navigation.
+- Release signing configuration and keystore.
+
+Do not introduce Supabase.
+
+Do not rebuild the application from scratch.
+
+==================================================
+PART 4 — REQUIRED TESTING
+
+After implementation, test the actual functionality.
+
+Visual consistency
+
+- Compare all four attached references with the updated interface.
+- Verify button dimensions and shapes.
+- Verify consistent spacing and alignment.
+- Verify icon sizes and touch targets.
+- Verify card and modal proportions.
+- Verify all relevant screens use the same design language.
+- Verify narrow-screen behavior and long Georgian text.
+
+Product search
+
+- Search for an existing product by exact name.
+- Search using an alternative name or synonym.
+- Search with a spelling mistake.
+- Search by category.
+- Search within a specified budget.
+- Request discounted products.
+- Compare two actual products.
+- Ask for a cheaper alternative.
+- Add a new product through the admin panel and verify that the assistant can discover it without an application update.
+- Change a product price and verify that the assistant uses the updated price.
+- Deactivate a product and verify that it is not recommended as available.
+
+Assistant behavior
+
+- Test greetings.
+- Test informal Georgian messages.
+- Test humorous messages.
+- Test incomplete questions.
+- Test follow-up questions.
+- Test product-related conversations.
+- Test BSTORE service and ordering questions.
+- Verify that the assistant remains natural and helpful.
+- Verify that it does not invent catalog information.
+
+Mode separation
+
+- Open the normal AI Assistant.
+- Ask a diagnostic-style question.
+- Verify that no diagnostic report or diagnostic workflow is activated.
+- Select Diagnostics using the top selector.
+- Verify that diagnostic functionality works as intended.
+- Return to normal AI Assistant mode.
+- Verify that diagnostic context does not leak into normal assistant responses.
+
+AI Assistant UI
+
+- Test all existing buttons.
+- Test the mode selector.
+- Test message scrolling.
+- Test keyboard behavior.
+- Test product recommendation navigation.
+- Test quick actions.
+- Test loading and error states.
+
+Do not report tests as successful unless they were actually executed.
+
+==================================================
+PART 5 — IMPLEMENTATION ORDER
+
+PHASE 1 — INSPECTION
+
+- Inspect all four visual reference files.
+- Inspect the attached AI Assistant video.
+- Inspect the relevant source code and architecture.
+- Identify the actual causes of visual inconsistencies and superficial assistant behavior.
+
+PHASE 2 — DESIGN SYSTEM
+
+- Establish consistent reusable button styles and dimensions.
+- Refine component shapes, spacing, typography, and colors.
+- Apply the design system across the existing application.
+- Improve the AI Assistant screen using the same design language.
+
+PHASE 3 — AI ASSISTANT
+
+- Improve actual product retrieval.
+- Connect recommendations to the live Firebase product catalog.
+- Ensure future products are discoverable automatically.
+- Improve natural-language understanding and follow-up context.
+- Separate normal assistant mode from Diagnostics mode.
+- Improve response quality and product recommendation accuracy.
+
+PHASE 4 — VALIDATION
+
+- Build the project.
+- Fix compilation errors introduced by the changes.
+- Test visual consistency.
+- Test product search and recommendations.
+- Test diagnostic mode separation.
+- Test all relevant buttons and navigation.
+- Verify existing application functionality remains intact.
+
+Do not stop after writing a plan. Implement the improvements directly wherever the available environment permits.
+
+==================================================
+PART 6 — FINAL REPORT IN GEORGIAN
+
+After implementation, provide a clear report in Georgian containing:
+
+1. Which visual inconsistencies were identified from the four attached files.
+2. Which reusable design components were created or updated.
+3. Which screens received visual improvements.
+4. What changed in button sizes, shapes, spacing, and proportions.
+5. What was wrong with the AI Assistant's previous behavior.
+6. How product search and recommendations now work.
+7. How future products added by the administrator become searchable.
+8. How normal AI Assistant mode is separated from Diagnostics mode.
+9. How conversational quality and follow-up context were improved.
+10. Which source files were modified.
+11. Which tests were actually executed and their results.
+12. Whether the application builds successfully.
+13. Any remaining backend deployment or Firebase configuration requirements.
+
+Clearly distinguish:
+
+- Implemented and tested.
+- Implemented but not deployed.
+- Not implemented.
+- Requires manual configuration.
+
+Do not claim that functionality works unless it has actually been verified.
+
+FINAL OBJECTIVE:
+
+Transform BSTORE into a visually consistent, polished, modern shopping application with a genuinely useful AI shopping assistant.
+
+The assistant must accurately discover and recommend all current and future products from the real catalog, respond naturally to customers, and keep diagnostic functionality strictly limited to the explicitly selected Diagnostics mode.
+
+All visual improvements must fit the existing BSTORE identity and work consistently throughout the entire application.

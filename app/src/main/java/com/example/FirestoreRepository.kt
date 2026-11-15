@@ -88,6 +88,9 @@ data class FirestoreOrder(
     val userPhone: String = "",
     val userEmail: String = "",
     val deliveryAddress: String = "",
+    val deliveryMethodCode: String = "pickup",
+    val deliveryCity: String = "ახალციხე",
+    val deliveryFeeText: String = "უფასო (0 ₾)",
     val deviceModel: String = "",
     val serviceType: String = "",
     val issueDescription: String = "",
@@ -96,7 +99,22 @@ data class FirestoreOrder(
     val price: String = "",
     val totalAmount: Double = 0.0,
     val currency: String = "GEL",
-    val paymentMethod: String = "WhatsApp & ნაღდი / საბანკო გადარიცხვა",
+    val paymentMethod: String = "ნაღდი ანგარიშსწორება",
+    val paymentMethodCode: String = "",
+    val paymentStatus: String = "",
+    val bankAccountId: String = "",
+    val bankCode: String = "",
+    val bankName: String = "",
+    val recipientNameSnapshot: String = "",
+    val ibanSnapshot: String = "",
+    val paymentReference: String = "",
+    val paymentInstructionsSnapshot: String = "",
+    val userConfirmedPaymentAtMillis: Long = 0L,
+    val paymentConfirmedAtMillis: Long = 0L,
+    val paymentConfirmedBy: String = "",
+    val paymentInternalNote: String = "",
+    val acceptedTermsVersion: String = "",
+    val acceptedTermsAtMillis: Long = 0L,
     val trackingCode: String = "",
     val adminRead: Boolean = false,
     @ServerTimestamp val adminReadAt: Timestamp? = null,
@@ -135,16 +153,44 @@ data class FirestoreOrder(
         val resolvedPrice = price.ifBlank {
             if (totalAmount > 0) "${totalAmount.toInt()} ₾" else "ფასი შეთანხმებით"
         }
+        val resolvedOrdNumber = orderNumber.ifBlank { "#BS-${resolvedId.takeLast(4).uppercase()}" }
+        val resolvedMethodType = PaymentMethodType.fromCode(paymentMethodCode, paymentMethod)
+        val resolvedPayStatus = PaymentStatus.fromCode(paymentStatus, resolvedMethodType)
 
         return OrderRecord(
             id = resolvedId,
-            orderNumber = orderNumber.ifBlank { "#BS-${resolvedId.takeLast(4).uppercase()}" },
+            orderNumber = resolvedOrdNumber,
             date = formattedDate,
             items = parsedItems,
             totalAmount = resolvedPrice,
             status = uiStatus,
-            paymentMethod = paymentMethod.ifBlank { "WhatsApp & საბანკო გადარიცხვა" },
-            trackingCode = trackingCode.ifBlank { "BS-TRK-${resolvedId.takeLast(5).uppercase()}" }
+            paymentMethod = paymentMethod.ifBlank { resolvedMethodType.titleKa },
+            trackingCode = trackingCode.ifBlank { "BS-TRK-${resolvedId.takeLast(5).uppercase()}" },
+            userId = userId,
+            userName = userName,
+            userPhone = userPhone,
+            userEmail = userEmail,
+            deliveryAddress = deliveryAddress,
+            deliveryMethodCode = deliveryMethodCode.ifBlank { "pickup" },
+            deliveryCity = deliveryCity.ifBlank { "ახალციხე" },
+            deliveryFeeText = deliveryFeeText.ifBlank { "უფასო (0 ₾)" },
+            paymentMethodCode = resolvedMethodType.code,
+            paymentStatus = resolvedPayStatus.code,
+            bankAccountId = bankAccountId,
+            bankCode = bankCode,
+            bankName = bankName,
+            recipientNameSnapshot = recipientNameSnapshot,
+            ibanSnapshot = ibanSnapshot,
+            paymentReference = paymentReference.ifBlank { resolvedOrdNumber },
+            paymentInstructionsSnapshot = paymentInstructionsSnapshot,
+            userConfirmedPaymentAtMillis = userConfirmedPaymentAtMillis,
+            paymentConfirmedAtMillis = paymentConfirmedAtMillis,
+            paymentConfirmedBy = paymentConfirmedBy,
+            paymentInternalNote = paymentInternalNote,
+            acceptedTermsVersion = acceptedTermsVersion,
+            acceptedTermsAtMillis = acceptedTermsAtMillis,
+            fulfillmentStatusCode = status,
+            createdAtMillis = createdAt?.toDate()?.time ?: System.currentTimeMillis()
         )
     }
 
@@ -189,7 +235,7 @@ data class FirestoreDiagnostic(
 data class AdminOrderNotificationRecord(
     val notificationId: String = "",
     val orderId: String = "",
-    val orderType: String = "imei_check", // "imei_check" | "service_order"
+    val orderType: String = "service_order", // "service_order"
     val title: String = "",
     val body: String = "",
     val deepLink: String = "",
@@ -227,11 +273,145 @@ class FirestoreRepository(
     private val auth: FirebaseAuth get() = FirebaseAuth.getInstance()
 
     // ==========================================================================
-    // ADMIN ROLE VERIFICATION (Server-Side / Token Claims / Admins Collection / Sole Admin beqa1994@gmail.com)
+    // ADMIN ROLE VERIFICATION & CLAIM SYNCHRONIZATION
+    // (Server-Side Token Claims, syncSoleAdminCustomClaims & /admins/{uid} Collection)
     // ==========================================================================
+    private fun invokeSyncSoleAdminCallable(projectId: String, idToken: String): Boolean {
+        val endpoint = "https://us-central1-$projectId.cloudfunctions.net/syncSoleAdminCustomClaims"
+        val connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 2500
+            readTimeout = 2500
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Authorization", "Bearer $idToken")
+        }
+        return try {
+            connection.outputStream.use { os ->
+                os.write("""{"data":{}}""".toByteArray(Charsets.UTF_8))
+            }
+            val code = connection.responseCode
+            if (code in 200..299) {
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                val resultObj = json.optJSONObject("result") ?: json.optJSONObject("data")
+                resultObj?.optBoolean("authorized", false) == true &&
+                    resultObj.optBoolean("customClaimAdmin", false)
+            } else {
+                false
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Synchronizes and verifies the sole administrator's (`beqa1994@gmail.com`) server-side
+     * authorization and Firebase Custom Claim (`admin: true`):
+     * 1. Verifies the currently authenticated Firebase user's email and email-verified status.
+     * 2. Calls the `syncSoleAdminCustomClaims` Cloud Function using the caller's verified ID token
+     *    (never passing a client-supplied UID or email).
+     * 3. Force-refreshes the Firebase Auth ID token (`getIdToken(true)`) so updated custom claims
+     *    take effect immediately without signing out or reinstalling the app.
+     * 4. Ensures `/admins/{uid}` is synchronized and verified against Firestore Security Rules.
+     */
+    suspend fun syncSoleAdminCustomClaims(): Result<Boolean> {
+        val firebaseAuth = runCatching { auth }.getOrNull()
+        val currentUser = firebaseAuth?.currentUser
+            ?: return Result.failure(IllegalStateException("Authentication is required."))
+
+        return try {
+            val initialToken = runCatching { currentUser.getIdToken(false).await() }.getOrNull()
+            val initialClaims = initialToken?.claims.orEmpty()
+
+            val email = (initialClaims["email"] as? String)
+                ?.takeIf { it.isNotBlank() }
+                ?: currentUser.email?.takeIf { it.isNotBlank() }
+                ?: currentUser.providerData.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotBlank() } }
+                ?: ""
+
+            if (!AuthAndOrderManager.isSoleAdminEmail(email)) {
+                return Result.failure(
+                    SecurityException("Only the sole authorized administrator (beqa1994@gmail.com) may obtain admin claims.")
+                )
+            }
+
+            val signInProvider = initialToken?.signInProvider
+                ?: ((initialClaims["firebase"] as? Map<*, *>)?.get("sign_in_provider") as? String)
+                ?: ""
+            val isEmailVerified = (initialClaims["email_verified"] as? Boolean) != false ||
+                currentUser.isEmailVerified ||
+                signInProvider == "password"
+            if (!isEmailVerified) {
+                return Result.failure(
+                    SecurityException("Administrator email address is not verified.")
+                )
+            }
+
+            // 1. Check if /admins/{uid} already exists and whether it is explicitly disabled
+            val adminDocRef = db.collection("admins").document(currentUser.uid)
+            val existingAdminDoc = runCatching { adminDocRef.get().await() }.getOrNull()
+            if (existingAdminDoc != null && existingAdminDoc.exists()) {
+                if (existingAdminDoc.getBoolean("enabled") != true) {
+                    return Result.success(false)
+                }
+            }
+
+            // 2. Invoke server-side syncSoleAdminCustomClaims Cloud Function when targeting live project
+            val projectId = runCatching { db.app.options.projectId }.getOrNull().orEmpty()
+            val idTokenStr = initialToken?.token.orEmpty()
+            if (idTokenStr.isNotBlank() && projectId.isNotBlank() && projectId != "demo-no-project") {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        invokeSyncSoleAdminCallable(projectId, idTokenStr)
+                    }.onFailure { e ->
+                        Log.d("FirestoreRepo", "Callable syncSoleAdminCustomClaims fallback: ${e.message}")
+                    }
+                }
+            }
+
+            // 3. Force-refresh the Firebase ID token so any newly assigned custom claim is loaded immediately
+            val refreshedToken = runCatching { currentUser.getIdToken(true).await() }.getOrNull() ?: initialToken
+            val refreshedClaims = refreshedToken?.claims.orEmpty()
+            val hasCustomClaim = refreshedClaims["admin"] == true
+
+            // 4. Ensure /admins/{uid} is synchronized on the Firestore server (enforced by isValidSoleAdminSelfSync rule)
+            if (existingAdminDoc == null || !existingAdminDoc.exists()) {
+                val syncPayload = mapOf(
+                    "uid" to currentUser.uid,
+                    "email" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                    "enabled" to true,
+                    "role" to "sole_admin",
+                    "customClaimAdmin" to true,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                adminDocRef.set(syncPayload, SetOptions.merge()).await()
+            }
+
+            val verifiedDoc = runCatching { adminDocRef.get().await() }.getOrNull()
+            val isServerDocActive = verifiedDoc != null &&
+                verifiedDoc.exists() &&
+                verifiedDoc.getBoolean("enabled") == true &&
+                (verifiedDoc.getString("email").orEmpty().let { it.isBlank() || AuthAndOrderManager.isSoleAdminEmail(it) })
+
+            val authorized = hasCustomClaim || isServerDocActive
+            if (authorized && appContext != null) {
+                AuthAndOrderManager.setAdminClaimVerified(appContext, true)
+            }
+            Result.success(authorized)
+        } catch (e: Exception) {
+            Log.w("FirestoreRepo", "syncSoleAdminCustomClaims failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
     suspend fun checkIsCurrentUserAdmin(): Boolean {
-        val firebaseAuth = runCatching { auth }.getOrNull() ?: return false
-        val currentUser = firebaseAuth.currentUser ?: return false
+        val firebaseAuth = runCatching { auth }.getOrNull()
+        val currentUser = firebaseAuth?.currentUser
+        if (currentUser == null) {
+            return appContext != null && AuthAndOrderManager.hasVerifiedAdminClaim(appContext)
+        }
         return try {
             val tokenResult = runCatching { currentUser.getIdToken(false).await() }.getOrNull()
             val claims = tokenResult?.claims.orEmpty()
@@ -242,53 +422,56 @@ class FirestoreRepository(
                 ?: currentUser.providerData.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotBlank() } }
                 ?: ""
 
-            // Strictly enforce single authorized administrator: "beqa1994@gmail.com"
+            // Strictly enforce single authorized administrator email ("beqa1994@gmail.com")
             if (!AuthAndOrderManager.isSoleAdminEmail(email)) {
                 return false
             }
 
-            if (claims["admin"] == true) {
-                return true
+            val signInProvider = tokenResult?.signInProvider
+                ?: ((claims["firebase"] as? Map<*, *>)?.get("sign_in_provider") as? String)
+                ?: ""
+            val isEmailVerified = (claims["email_verified"] as? Boolean) != false ||
+                currentUser.isEmailVerified ||
+                signInProvider == "password"
+            if (!isEmailVerified) {
+                return false
             }
 
+            // 1. Check server-side /admins/{uid} authorization document first (respects explicit revocation if enabled == false)
             val adminDoc = runCatching {
                 db.collection("admins").document(currentUser.uid).get().await()
             }.getOrNull()
             if (adminDoc != null && adminDoc.exists()) {
-                return adminDoc.getBoolean("enabled") == true
-            }
-
-            val explicitEmailVerifiedClaim = claims["email_verified"] as? Boolean
-            val firebaseClaimMap = claims["firebase"] as? Map<*, *>
-            val signInProvider = firebaseClaimMap?.get("sign_in_provider") as? String
-                ?: currentUser.providerData.firstOrNull { it.providerId != "firebase" }?.providerId
-                ?: ""
-
-            if (explicitEmailVerifiedClaim == false &&
-                signInProvider != "password" &&
-                signInProvider != "google.com"
-            ) {
+                if (adminDoc.getBoolean("enabled") != true) {
+                    return false
+                }
+                val docEmail = adminDoc.getString("email").orEmpty()
+                if (docEmail.isBlank() || AuthAndOrderManager.isSoleAdminEmail(docEmail)) {
+                    return true
+                }
                 return false
             }
 
-            // Ensure /admins/{uid} document exists in Firestore for the verified sole admin
-            runCatching {
-                db.collection("admins").document(currentUser.uid).set(
-                    mapOf(
-                        "uid" to currentUser.uid,
-                        "email" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
-                        "enabled" to true,
-                        "role" to "sole_admin",
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    ),
-                    SetOptions.merge()
-                ).await()
+            // 2. Verify Firebase Custom Claim ("admin": true) on the ID token
+            if (claims["admin"] == true) {
+                return true
             }
 
-            true
+            // 3. Synchronize sole admin custom claims & server-side /admins/{uid} record and force-refresh token
+            val synced = syncSoleAdminCustomClaims().getOrDefault(false)
+            if (synced) {
+                return true
+            }
+
+            // Do not bypass the custom claim check based solely on client-side email comparison
+            Log.w(
+                "FirestoreRepo",
+                "Authenticated user ($email) does not have 'admin: true' custom claim or active /admins/${currentUser.uid} document."
+            )
+            false
         } catch (e: Exception) {
             Log.w("FirestoreRepo", "Admin check failed: ${e.message}")
-            AuthAndOrderManager.isSoleAdminEmail(currentUser.email)
+            false
         }
     }
 
@@ -395,6 +578,33 @@ class FirestoreRepository(
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.GET, docRef.path)
             throw e
+        }
+    }
+
+    /**
+     * Google Play Policy Compliance: Completely deletes the user's Firestore document,
+     * device tokens, and Firebase Auth account.
+     */
+    suspend fun deleteCurrentUserAccount(): Result<Unit> {
+        val currentUser = auth.currentUser
+        return try {
+            if (currentUser != null) {
+                val uid = currentUser.uid
+                runCatching {
+                    db.collection("users").document(uid).delete().await()
+                }
+                runCatching {
+                    val tokens = db.collection("fcm_tokens").whereEqualTo("userId", uid).get().await()
+                    for (doc in tokens.documents) {
+                        doc.reference.delete().await()
+                    }
+                }
+                currentUser.delete().await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("FirestoreRepo", "Failed to delete user account: ${e.message}", e)
+            Result.failure(e)
         }
     }
 
@@ -544,13 +754,23 @@ class FirestoreRepository(
             docRef.set(payload).await()
             Log.d("FirestoreRepo", "Order created in Firestore: $orderId")
             runCatching {
-                createAdminOrderNotification(orderId = orderId, orderType = "service_order")
+                createAdminOrderNotification(
+                    orderId = orderId,
+                    orderType = "service_order",
+                    createdByUid = uid,
+                    orderNumber = "#BS-${orderId.takeLast(4)}",
+                    summaryTitle = serviceType,
+                    priceText = price
+                )
             }
             appContext?.let { ctx ->
                 BekaNotificationManager.recordOrderCreatedForAdminOnly(
                     context = ctx,
                     orderId = orderId,
-                    orderType = "service_order"
+                    orderType = "service_order",
+                    orderNumber = "#BS-${orderId.takeLast(4)}",
+                    summaryText = serviceType,
+                    amountText = price
                 )
             }
         } catch (e: Exception) {
@@ -593,10 +813,13 @@ class FirestoreRepository(
             "id" to safeOrderId,
             "orderNumber" to orderRecord.orderNumber.take(40),
             "userId" to uid,
-            "userName" to (user?.displayName ?: currentUser.displayName ?: "მომხმარებელი").take(100),
-            "userPhone" to (user?.phone ?: "+995 598 23 33 32").ifBlank { "+995 598 23 33 32" }.take(30),
-            "userEmail" to (user?.email ?: currentUser.email ?: "").take(150),
-            "deliveryAddress" to (user?.address ?: "ქ. ახალციხე, კოსტავას ქ. 10").take(300),
+            "userName" to (orderRecord.userName.ifBlank { user?.displayName ?: currentUser.displayName ?: "მომხმარებელი" }).take(100),
+            "userPhone" to (orderRecord.userPhone.ifBlank { user?.phone ?: "+995 598 23 33 32" }).ifBlank { "+995 598 23 33 32" }.take(30),
+            "userEmail" to (orderRecord.userEmail.ifBlank { user?.email ?: currentUser.email ?: "" }).take(150),
+            "deliveryAddress" to (orderRecord.deliveryAddress.ifBlank { user?.address ?: "ქ. ახალციხე, კოსტავას N10" }).take(300),
+            "deliveryMethodCode" to orderRecord.deliveryMethodCode.ifBlank { "pickup" }.take(30),
+            "deliveryCity" to orderRecord.deliveryCity.ifBlank { "ახალციხე" }.take(100),
+            "deliveryFeeText" to orderRecord.deliveryFeeText.ifBlank { "უფასო (0 ₾)" }.take(120),
             "deviceModel" to (user?.deviceModel ?: "Device").ifBlank { "Device" }.take(100),
             "serviceType" to summaryTitle,
             "issueDescription" to detailsSummary,
@@ -607,6 +830,137 @@ class FirestoreRepository(
             "priceVerified" to false,
             "currency" to "GEL",
             "paymentMethod" to orderRecord.paymentMethod.take(120),
+            "paymentMethodCode" to orderRecord.paymentMethodCode.ifBlank { "cod" }.take(40),
+            "paymentStatus" to (if (orderRecord.paymentMethodCode == "bank_transfer") "pending" else "awaiting_collection"),
+            "bankAccountId" to orderRecord.bankAccountId.take(80),
+            "bankCode" to orderRecord.bankCode.take(40),
+            "bankName" to orderRecord.bankName.take(120),
+            "recipientNameSnapshot" to orderRecord.recipientNameSnapshot.take(160),
+            "ibanSnapshot" to orderRecord.ibanSnapshot.take(40),
+            "paymentReference" to orderRecord.paymentReference.ifBlank { orderRecord.orderNumber }.take(60),
+            "paymentInstructionsSnapshot" to orderRecord.paymentInstructionsSnapshot.take(1000),
+            "userConfirmedPaymentAtMillis" to 0L,
+            "acceptedTermsVersion" to orderRecord.acceptedTermsVersion.ifBlank { BstorePaymentManager.CURRENT_TERMS_VERSION }.take(60),
+            "acceptedTermsAtMillis" to (if (orderRecord.acceptedTermsAtMillis > 0L) orderRecord.acceptedTermsAtMillis else System.currentTimeMillis()),
+            "trackingCode" to orderRecord.trackingCode.take(60),
+            "adminRead" to false,
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        return try {
+            val createdNew = db.runTransaction { tx ->
+                val existingSnap = tx.get(docRef)
+                if (!existingSnap.exists()) {
+                    tx.set(docRef, payload)
+                    true
+                } else {
+                    false
+                }
+            }.await()
+            Log.d("FirestoreRepo", "Cart order saved idempotently (createdNew=$createdNew): $safeOrderId")
+            if (createdNew) {
+                runCatching {
+                    createAdminOrderNotification(
+                        orderId = safeOrderId,
+                        orderType = "service_order",
+                        createdByUid = uid,
+                        orderNumber = orderRecord.orderNumber,
+                        summaryTitle = summaryTitle,
+                        priceText = orderRecord.totalAmount
+                    )
+                }
+                appContext?.let { ctx ->
+                    BekaNotificationManager.recordOrderCreatedForAdminOnly(
+                        context = ctx,
+                        orderId = safeOrderId,
+                        orderType = "service_order",
+                        orderNumber = orderRecord.orderNumber,
+                        summaryText = summaryTitle,
+                        amountText = orderRecord.totalAmount
+                    )
+                }
+            }
+            Result.success(safeOrderId)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Saves a customer's product availability inquiry from the AI Assistant directly to `/orders`
+     * as a potential order / product request (`#REQ-...`) strictly adhering to `isValidServiceOrder`
+     * rules, and dispatches a sanitized `/admin_notifications` alert to the sole administrator.
+     */
+    suspend fun createProductStockInquiryOrder(
+        orderRecord: OrderRecord,
+        requestedProduct: String,
+        customerNote: String = ""
+    ): Result<String> {
+        val currentUser = auth.currentUser
+            ?: return Result.failure(IllegalStateException("მარაგის მოთხოვნის ონლაინ გასაგზავნად საჭიროა Google ავტორიზაცია"))
+
+        val uid = currentUser.uid
+        val safeOrderId = orderRecord.id.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+            .ifBlank { "req_${System.currentTimeMillis()}" }
+        val cleanProduct = requestedProduct.trim().ifBlank { "სასურველი პროდუქტი" }.take(200)
+        val cleanNote = customerNote.trim().take(1500)
+        val docRef = db.collection("orders").document(safeOrderId)
+
+        val snapshotItems = orderRecord.items.take(50).map { item ->
+            hashMapOf<String, Any>(
+                "productTitle" to item.productTitle.take(200),
+                "name" to item.productTitle.take(200),
+                "quality" to item.quality.take(100),
+                "quantity" to item.quantity.coerceAtLeast(1),
+                "price" to item.price.take(50),
+                "imageUrl" to item.imageUrl.take(1000)
+            )
+        }
+
+        val summaryServiceType = "პროდუქტის მოთხოვნა / პოტენციური შეკვეთა: $cleanProduct".take(300)
+        val detailsDesc = buildString {
+            append("მოთხოვნილი პროდუქტი (მარაგის დაზუსტება): $cleanProduct\n")
+            if (cleanNote.isNotBlank()) {
+                append("კომენტარი: $cleanNote\n")
+            }
+            append("საკონტაქტო: ${orderRecord.userPhone}")
+        }.take(4000)
+        val acceptedMillis = if (orderRecord.acceptedTermsAtMillis > 0L) {
+            orderRecord.acceptedTermsAtMillis
+        } else {
+            System.currentTimeMillis()
+        }
+
+        val payload = hashMapOf<String, Any>(
+            "id" to safeOrderId,
+            "orderNumber" to orderRecord.orderNumber.take(40),
+            "userId" to uid,
+            "userName" to (orderRecord.userName.ifBlank { currentUser.displayName ?: "მომხმარებელი" }).take(100),
+            "userPhone" to orderRecord.userPhone.ifBlank { "+995 598 23 33 32" }.take(30),
+            "userEmail" to (orderRecord.userEmail.ifBlank { currentUser.email ?: "" }).take(150),
+            "deliveryAddress" to orderRecord.deliveryAddress.ifBlank { "დაზუსტდება ზარით / WhatsApp-ით" }.take(300),
+            "deliveryMethodCode" to "pickup",
+            "deliveryCity" to orderRecord.deliveryCity.ifBlank { "ახალციხე" }.take(100),
+            "deliveryFeeText" to orderRecord.deliveryFeeText.ifBlank { "უფასო (0 ₾)" }.take(120),
+            "deviceModel" to cleanProduct.take(100),
+            "serviceType" to summaryServiceType,
+            "issueDescription" to detailsDesc,
+            "items" to snapshotItems,
+            "status" to "pending",
+            "price" to "ფასი შეთანხმებით",
+            "totalAmount" to 0.0,
+            "priceVerified" to false,
+            "currency" to "GEL",
+            "paymentMethod" to orderRecord.paymentMethod.take(120),
+            "paymentMethodCode" to "legacy_unspecified",
+            "paymentStatus" to "pending",
+            "paymentReference" to orderRecord.orderNumber.take(60),
+            "paymentInternalNote" to cleanNote.take(500),
+            "userConfirmedPaymentAtMillis" to 0L,
+            "acceptedTermsVersion" to "stock_inquiry_v1",
+            "acceptedTermsAtMillis" to acceptedMillis,
             "trackingCode" to orderRecord.trackingCode.take(60),
             "adminRead" to false,
             "createdAt" to FieldValue.serverTimestamp(),
@@ -615,15 +969,25 @@ class FirestoreRepository(
 
         return try {
             docRef.set(payload).await()
-            Log.d("FirestoreRepo", "Cart order saved to Firestore: $safeOrderId")
+            Log.d("FirestoreRepo", "Product stock inquiry order saved to Firestore: $safeOrderId")
             runCatching {
-                createAdminOrderNotification(orderId = safeOrderId, orderType = "service_order")
+                createAdminOrderNotification(
+                    orderId = safeOrderId,
+                    orderType = "service_order",
+                    createdByUid = uid,
+                    orderNumber = orderRecord.orderNumber,
+                    summaryTitle = cleanProduct,
+                    priceText = "მარაგის დაზუსტება",
+                    isStockInquiry = true
+                )
             }
             appContext?.let { ctx ->
-                BekaNotificationManager.recordOrderCreatedForAdminOnly(
+                BekaNotificationManager.recordProductInquiryForAdminOnly(
                     context = ctx,
                     orderId = safeOrderId,
-                    orderType = "service_order"
+                    orderNumber = orderRecord.orderNumber,
+                    requestedProduct = cleanProduct,
+                    customerNote = cleanNote
                 )
             }
             Result.success(safeOrderId)
@@ -731,6 +1095,336 @@ class FirestoreRepository(
         }
     }
 
+    suspend fun switchOrderBankByCustomer(
+        order: OrderRecord,
+        bank: BankAccountConfig
+    ): Result<OrderRecord> {
+        val currentUser = auth.currentUser
+            ?: return Result.failure(IllegalStateException("საბანკო ბანკის შესაცვლელად საჭიროა ავტორიზაცია"))
+        if (order.paymentMethodCode != PaymentMethodType.BANK_TRANSFER.code) {
+            return Result.failure(IllegalArgumentException("ბანკის შეცვლა შესაძლებელია მხოლოდ საბანკო გადარიცხვის შეკვეთაზე"))
+        }
+        val currentPayStatus = PaymentStatus.fromCode(order.paymentStatus, PaymentMethodType.BANK_TRANSFER)
+        if (currentPayStatus != PaymentStatus.PENDING) {
+            return Result.failure(IllegalStateException("ბანკის შეცვლა შესაძლებელია მხოლოდ გადახდის მოლოდინში მყოფ შეკვეთაზე"))
+        }
+        if (!bank.isEnabled || !BstorePaymentManager.isValidIban(bank.iban) || bank.recipientName.isBlank()) {
+            return Result.failure(IllegalArgumentException("არჩეული საბანკო ანგარიში მიუწვდომელია"))
+        }
+
+        val methodLabel = "საბანკო გადარიცხვა (${bank.bankName})"
+        val instructions = bank.paymentInstructions.ifBlank { BankAccountConfig.DEFAULT_PAYMENT_INSTRUCTIONS_KA }
+        val docRef = db.collection("orders").document(order.id)
+
+        return try {
+            if (order.userId.isBlank() || order.userId == currentUser.uid) {
+                docRef.update(
+                    mapOf(
+                        "paymentStatus" to PaymentStatus.PENDING.code,
+                        "bankAccountId" to bank.id.take(80),
+                        "bankCode" to bank.bankCode.take(40),
+                        "bankName" to bank.bankName.take(120),
+                        "recipientNameSnapshot" to bank.recipientName.take(160),
+                        "ibanSnapshot" to BstorePaymentManager.normalizeIban(bank.iban).take(40),
+                        "paymentMethod" to methodLabel.take(120),
+                        "paymentInstructionsSnapshot" to instructions.take(1000),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                return Result.failure(SecurityException("PERMISSION_DENIED: სხვა მომხმარებლის შეკვეთის შეცვლა აკრძალულია"))
+            }
+            val updated = appContext?.let { ctx ->
+                AuthAndOrderManager.switchOrderBankLocal(ctx, order.id, bank)
+            } ?: order.copy(
+                bankAccountId = bank.id,
+                bankCode = bank.bankCode,
+                bankName = bank.bankName,
+                recipientNameSnapshot = bank.recipientName,
+                ibanSnapshot = BstorePaymentManager.normalizeIban(bank.iban),
+                paymentMethod = methodLabel,
+                paymentInstructionsSnapshot = instructions
+            )
+            Result.success(updated)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun confirmTransferSentByCustomer(
+        order: OrderRecord,
+        selectedBank: BankAccountConfig? = null
+    ): Result<OrderRecord> {
+        val currentUser = auth.currentUser
+            ?: return Result.failure(IllegalStateException("გადარიცხვის დასადასტურებლად საჭიროა ავტორიზაცია"))
+        if (order.paymentMethodCode != PaymentMethodType.BANK_TRANSFER.code) {
+            return Result.failure(IllegalArgumentException("ეს მოქმედება განკუთვნილია მხოლოდ საბანკო გადარიცხვისთვის"))
+        }
+        val currentPayStatus = PaymentStatus.fromCode(order.paymentStatus, PaymentMethodType.BANK_TRANSFER)
+        if (currentPayStatus == PaymentStatus.VERIFICATION_PENDING || currentPayStatus == PaymentStatus.PAID) {
+            return Result.success(order)
+        }
+        if (currentPayStatus != PaymentStatus.PENDING || order.status == "გაუქმებული") {
+            return Result.failure(IllegalStateException("მიმდინარე სტატუსზე გადარიცხვის დადასტურება შეუძლებელია"))
+        }
+        if (order.userId.isNotBlank() && order.userId != currentUser.uid) {
+            return Result.failure(SecurityException("PERMISSION_DENIED: სხვა მომხმარებლის შეკვეთაზე წვდომა აკრძალულია"))
+        }
+
+        val nowMillis = System.currentTimeMillis()
+        val docRef = db.collection("orders").document(order.id)
+        val updates = hashMapOf<String, Any>(
+            "paymentStatus" to PaymentStatus.VERIFICATION_PENDING.code,
+            "userConfirmedPaymentAtMillis" to nowMillis,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (selectedBank != null && selectedBank.isEnabled && BstorePaymentManager.isValidIban(selectedBank.iban)) {
+            updates["bankAccountId"] = selectedBank.id.take(80)
+            updates["bankCode"] = selectedBank.bankCode.take(40)
+            updates["bankName"] = selectedBank.bankName.take(120)
+            updates["recipientNameSnapshot"] = selectedBank.recipientName.take(160)
+            updates["ibanSnapshot"] = BstorePaymentManager.normalizeIban(selectedBank.iban).take(40)
+            updates["paymentMethod"] = "საბანკო გადარიცხვა (${selectedBank.bankName})".take(120)
+            updates["paymentInstructionsSnapshot"] = selectedBank.paymentInstructions
+                .ifBlank { BankAccountConfig.DEFAULT_PAYMENT_INSTRUCTIONS_KA }
+                .take(1000)
+        }
+
+        return try {
+            docRef.update(updates).await()
+
+            val ordNum = order.orderNumber.ifBlank { "#BS-${order.id.takeLast(4).uppercase()}" }
+            val safeTitle = BekaNotificationManager.stripSensitiveDataFromPayload(
+                "გადარიცხვა დადასტურდა $ordNum"
+            ).take(120)
+            val safeBody = BekaNotificationManager.stripSensitiveDataFromPayload(
+                "მომხმარებელმა დაადასტურა $ordNum შეკვეთის თანხის გადმორიცხვა. საჭიროა საბანკო ანგარიშზე შემოწმება."
+            ).take(400)
+            val notifId = "admin_order_${order.id}"
+            val adminNotifRef = db.collection("admin_notifications").document(notifId)
+            val updateResult = runCatching {
+                adminNotifRef.update(
+                    mapOf(
+                        "title" to safeTitle,
+                        "body" to safeBody,
+                        "actorUid" to currentUser.uid,
+                        "read" to false,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            if (updateResult.isFailure) {
+                runCatching {
+                    adminNotifRef.set(
+                        hashMapOf<String, Any>(
+                            "id" to notifId,
+                            "notificationId" to notifId,
+                            "orderId" to order.id,
+                            "orderType" to "service_order",
+                            "title" to safeTitle,
+                            "body" to safeBody,
+                            "deepLink" to "bekaservice://admin/orders/service/${order.id}",
+                            "actorUid" to currentUser.uid,
+                            "targetAdminEmail" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                            "read" to false,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            }
+
+            val updatedOrder = appContext?.let { ctx ->
+                AuthAndOrderManager.markOrderTransferSentByUserLocal(ctx, order.id, selectedBank).getOrNull()
+            } ?: order.copy(
+                paymentStatus = PaymentStatus.VERIFICATION_PENDING.code,
+                userConfirmedPaymentAtMillis = nowMillis,
+                bankAccountId = selectedBank?.id ?: order.bankAccountId,
+                bankCode = selectedBank?.bankCode ?: order.bankCode,
+                bankName = selectedBank?.bankName ?: order.bankName,
+                recipientNameSnapshot = selectedBank?.recipientName ?: order.recipientNameSnapshot,
+                ibanSnapshot = selectedBank?.let { BstorePaymentManager.normalizeIban(it.iban) } ?: order.ibanSnapshot,
+                paymentMethod = selectedBank?.let { "საბანკო გადარიცხვა (${it.bankName})" } ?: order.paymentMethod
+            )
+            Result.success(updatedOrder)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun confirmOrderPaymentAsAdmin(
+        order: OrderRecord,
+        internalNote: String = ""
+    ): Result<OrderRecord> {
+        if (order.id.isBlank()) return Result.failure(IllegalArgumentException("ცარიელი შეკვეთის ID"))
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: გადახდის დადასტურებისთვის საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
+            )
+        }
+        val currentPayStatus = PaymentStatus.fromCode(
+            order.paymentStatus,
+            PaymentMethodType.fromCode(order.paymentMethodCode, order.paymentMethod)
+        )
+        if (currentPayStatus == PaymentStatus.PAID) {
+            return Result.success(order)
+        }
+        val adminUid = auth.currentUser?.uid ?: "sole_admin"
+        val nowMillis = System.currentTimeMillis()
+        val methodType = PaymentMethodType.fromCode(order.paymentMethodCode, order.paymentMethod)
+        val prevPaymentStatus = order.paymentStatus
+        val docRef = db.collection("orders").document(order.id)
+
+        return try {
+            docRef.update(
+                mapOf(
+                    "paymentStatus" to PaymentStatus.PAID.code,
+                    "paymentConfirmedAtMillis" to nowMillis,
+                    "paymentConfirmedBy" to adminUid,
+                    "paymentInternalNote" to internalNote.trim().take(500),
+                    "priceVerified" to true,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+
+            val numericAmount = order.totalAmount.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
+            val eventType = if (methodType == PaymentMethodType.COD) {
+                "COD_COLLECTION_CONFIRMED"
+            } else {
+                "BANK_TRANSFER_CONFIRMED"
+            }
+            val auditId = "audit_${nowMillis}_${order.id.takeLast(6)}"
+            val auditPayload = hashMapOf<String, Any>(
+                "id" to auditId,
+                "orderId" to order.id,
+                "orderNumber" to order.orderNumber,
+                "eventType" to eventType,
+                "previousStatus" to prevPaymentStatus,
+                "newStatus" to PaymentStatus.PAID.code,
+                "amount" to numericAmount,
+                "currency" to "GEL",
+                "actorUid" to adminUid,
+                "actorEmail" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                "actorRole" to "sole_admin",
+                "timestampMillis" to nowMillis,
+                "timestamp" to nowMillis,
+                "note" to internalNote.trim().take(500),
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            runCatching {
+                db.collection("payment_audit_logs").document(auditId).set(auditPayload).await()
+            }
+
+            // Send targeted PRIVATE_USER customer notification (NEVER fall back to "all" if userId is missing!)
+            val ordNum = order.orderNumber.ifBlank { "#BS-${order.id.takeLast(4).uppercase()}" }
+            val cleanRecipientUid = order.userId.trim()
+            if (cleanRecipientUid.isNotBlank()) {
+                runCatching {
+                    sendAdminNotification(
+                        title = "გადახდა დადასტურდა $ordNum",
+                        body = "თქვენი $ordNum შეკვეთის გადახდა დადასტურდა.",
+                        targetTab = 4,
+                        type = "order_update",
+                        explicitNotificationId = "notif_order_paid_${order.id}",
+                        orderId = order.id,
+                        orderNumber = ordNum,
+                        audience = "user:$cleanRecipientUid",
+                        visibility = "PRIVATE_USER",
+                        recipientUid = cleanRecipientUid,
+                        relatedEntityId = order.id
+                    )
+                }
+            } else {
+                Log.w("BekaPush", "Skipping customer payment notification for ${order.id}: missing order.userId")
+            }
+
+            val updatedRecord = order.copy(
+                paymentStatus = PaymentStatus.PAID.code,
+                paymentConfirmedAtMillis = nowMillis,
+                paymentConfirmedBy = adminUid,
+                paymentInternalNote = internalNote.trim()
+            )
+            appContext?.let { ctx ->
+                AuthAndOrderManager.confirmOrderPaymentLocalAsAdmin(ctx, order, internalNote)
+            }
+            Result.success(updatedRecord)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateOrderPaymentStatusAsAdmin(
+        order: OrderRecord,
+        newPaymentStatus: PaymentStatus,
+        internalNote: String = ""
+    ): Result<OrderRecord> {
+        if (order.id.isBlank()) return Result.failure(IllegalArgumentException("ცარიელი შეკვეთის ID"))
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: გადახდის სტატუსის შესაცვლელად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
+            )
+        }
+        val adminUid = auth.currentUser?.uid ?: "sole_admin"
+        val nowMillis = System.currentTimeMillis()
+        val prevStatus = order.paymentStatus
+        val docRef = db.collection("orders").document(order.id)
+
+        return try {
+            val updates = mutableMapOf<String, Any>(
+                "paymentStatus" to newPaymentStatus.code,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (newPaymentStatus == PaymentStatus.PAID) {
+                updates["paymentConfirmedAtMillis"] = nowMillis
+                updates["paymentConfirmedBy"] = adminUid
+                updates["priceVerified"] = true
+            }
+            if (internalNote.isNotBlank()) {
+                updates["paymentInternalNote"] = internalNote.trim().take(500)
+            }
+            docRef.update(updates).await()
+
+            val numericAmount = order.totalAmount.filter { it.isDigit() || it == '.' }.toDoubleOrNull() ?: 0.0
+            val auditId = "audit_${nowMillis}_${order.id.takeLast(6)}"
+            val auditPayload = hashMapOf<String, Any>(
+                "id" to auditId,
+                "orderId" to order.id,
+                "orderNumber" to order.orderNumber,
+                "eventType" to "PAYMENT_STATUS_CHANGED",
+                "previousStatus" to prevStatus,
+                "newStatus" to newPaymentStatus.code,
+                "amount" to numericAmount,
+                "currency" to "GEL",
+                "actorUid" to adminUid,
+                "actorEmail" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+                "actorRole" to "sole_admin",
+                "timestampMillis" to nowMillis,
+                "note" to internalNote.trim().take(500),
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            runCatching {
+                db.collection("payment_audit_logs").document(auditId).set(auditPayload).await()
+            }
+
+            val updatedRecord = order.copy(
+                paymentStatus = newPaymentStatus.code,
+                paymentConfirmedAtMillis = if (newPaymentStatus == PaymentStatus.PAID) nowMillis else order.paymentConfirmedAtMillis,
+                paymentConfirmedBy = if (newPaymentStatus == PaymentStatus.PAID) adminUid else order.paymentConfirmedBy,
+                paymentInternalNote = internalNote.trim().ifBlank { order.paymentInternalNote }
+            )
+            appContext?.let { ctx ->
+                AuthAndOrderManager.updateOrderPaymentStatusLocalAsAdmin(ctx, order, newPaymentStatus, internalNote)
+            }
+            Result.success(updatedRecord)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun deleteOrderFromCloud(orderId: String): Result<Unit> {
         if (orderId.isBlank()) return Result.failure(IllegalArgumentException("ცარიელი შეკვეთის ID"))
         if (auth.currentUser == null) {
@@ -824,15 +1518,17 @@ class FirestoreRepository(
 
         val image = (doc.getString("imageUrl") ?: doc.getString("image") ?: "").trim()
         val category = (doc.getString("category") ?: "ეკრანები").trim()
-        val explicitId = (doc.get("productId") as? Number)?.toInt()
+        val rawExplicitId = (doc.get("productId") as? Number)?.toInt()
             ?: doc.id.removePrefix("prod_").toIntOrNull()
             ?: kotlin.math.abs(doc.id.hashCode()).let { if (it == 0) 9999 else it }
 
         val shortDesc = doc.getString("shortDescription") ?: ""
         val fullDesc = doc.getString("description") ?: ""
         val subcat = doc.getString("subcategory") ?: ""
-        val brand = doc.getString("brand") ?: ""
+        val rawBrand = doc.getString("brand") ?: ""
+        val rawBrandId = doc.getString("brandId") ?: ""
         val inStock = doc.getBoolean("inStock") ?: doc.getBoolean("isAvailable") ?: true
+        val isActive = doc.getBoolean("isActive") ?: doc.getBoolean("active") ?: true
         val isFeatured = doc.getBoolean("isFeatured") ?: false
         val displayOrder = (doc.get("displayOrder") as? Number)?.toInt()
             ?: (doc.get("sortOrder") as? Number)?.toInt()
@@ -860,14 +1556,29 @@ class FirestoreRepository(
         val specsRaw = doc.get("specifications") as? Map<*, *>
         val specsMap = specsRaw?.entries?.associate { it.key.toString() to it.value.toString() } ?: emptyMap()
         val productType = doc.getString("productType") ?: ""
+        val rawCategoryId = doc.getString("categoryId") ?: ""
+        val resolvedCategoryName = AdminStorage.resolveCanonicalCategoryName(category, productType, rawCategoryId)
+        val resolvedCategoryId = AdminStorage.resolveCanonicalCategoryId(resolvedCategoryName, productType, rawCategoryId)
         val condition = doc.getString("condition") ?: "ახალი"
         val exactModel = doc.getString("exactModel") ?: ""
+        val originalPrice = doc.getString("originalPrice") ?: ""
+        val discountedPrice = doc.getString("discountedPrice") ?: ""
+        val discountPercent = (doc.get("discountPercent") as? Number)?.toInt() ?: 0
+        val discountExpiresAt = (doc.get("discountExpiresAt") as? Number)?.toLong()?.takeIf { it > 0L }
 
-        return ProductItem(
-            id = explicitId,
+        val resolvedBrand = AdminStorage.formatCanonicalBrandDisplayName(
+            rawBrand.ifBlank { if (title.contains("iPhone", ignoreCase = true)) "Apple" else "Samsung" }
+        )
+        val resolvedBrandId = AdminStorage.resolveCanonicalBrandId(resolvedBrand, rawBrandId)
+
+        // თუ ადმინმა ადრე შექმნა ფიზიკური აპარატურული პროდუქტი, რომელსაც შეცდომით მიენიჭა ID 86..124 დიაპაზონიდან,
+        // გადავიყვანოთ უსაფრთხო ID-ზე (200 + rawExplicitId), ხოლო რეალური აკრძალული სერვისები დავბლოკოთ.
+        val probeForHardwareCheck = ProductItem(
+            id = if (rawExplicitId in ProductRepository.RETIRED_PRODUCT_IDS) rawExplicitId + 200 else rawExplicitId,
             title = title,
             price = price,
-            category = category,
+            category = resolvedCategoryName,
+            categoryId = resolvedCategoryId,
             type = type,
             subcategory = subcat,
             imageUrl = if (image.isBlank()) ProductImageManager.AUTO_GENERATED_IMAGE_MARKER else image,
@@ -887,7 +1598,8 @@ class FirestoreRepository(
             displayOrder = displayOrder,
             rating = rating,
             inStock = inStock,
-            brand = brand.ifBlank { if (title.contains("iPhone", ignoreCase = true)) "Apple" else "Samsung" },
+            brand = resolvedBrand,
+            brandId = resolvedBrandId,
             compatibleModels = compatibleModels,
             warranty = warranty,
             firestoreDocId = doc.id,
@@ -898,14 +1610,30 @@ class FirestoreRepository(
             specifications = specsMap,
             productType = productType,
             condition = condition,
-            exactModel = exactModel
+            exactModel = exactModel,
+            originalPrice = originalPrice,
+            discountedPrice = discountedPrice,
+            discountPercent = discountPercent,
+            discountExpiresAt = discountExpiresAt,
+            isActive = isActive,
+            availabilityStatus = doc.getString("availabilityStatus")?.takeIf { it.isNotBlank() } ?: if (inStock) "IN_STOCK" else "OUT_OF_STOCK",
+            availabilityLabel = doc.getString("availabilityLabel") ?: ""
         )
+        if (ProductRepository.isProhibitedOrRetiredService(probeForHardwareCheck)) {
+            return null
+        }
+        return probeForHardwareCheck
     }
 
     private fun extractProductIdFromDoc(doc: DocumentSnapshot): Int {
-        return (doc.get("productId") as? Number)?.toInt()
+        val raw = (doc.get("productId") as? Number)?.toInt()
             ?: doc.id.removePrefix("prod_").toIntOrNull()
             ?: kotlin.math.abs(doc.id.hashCode()).let { if (it == 0) 9999 else it }
+        return if (raw in ProductRepository.RETIRED_PRODUCT_IDS && parseProductDocument(doc) != null) {
+            raw + 200
+        } else {
+            raw
+        }
     }
 
     fun listenToProductsWithChanges(
@@ -922,6 +1650,7 @@ class FirestoreRepository(
                 if (snapshot != null) {
                     val prods = mutableListOf<ProductItem>()
                     val removedIds = mutableSetOf<Int>()
+                    removedIds.addAll(ProductRepository.RETIRED_PRODUCT_IDS)
                     val presentDocIds = mutableSetOf<String>()
 
                     for (change in snapshot.documentChanges) {
@@ -939,6 +1668,8 @@ class FirestoreRepository(
                         if (parsed != null) {
                             prods.add(parsed)
                             presentDocIds.add(doc.id)
+                        } else {
+                            removedIds.add(extractProductIdFromDoc(doc))
                         }
                     }
 
@@ -977,6 +1708,59 @@ class FirestoreRepository(
         }
     }
 
+    /**
+     * Fetches a single active product directly from Firestore using its stable Firestore document ID
+     * (preferred), SKU field, or numeric productId fallback. Returns null if deleted, inactive, or absent.
+     */
+    suspend fun fetchProductByStableId(
+        productDocId: String = "",
+        numericProductId: Int = 0
+    ): Result<ProductItem?> {
+        val cleanDocId = productDocId.trim()
+        if (cleanDocId.isBlank() && numericProductId <= 0) {
+            return Result.success(null)
+        }
+        return try {
+            val candidateDocs = mutableListOf<DocumentSnapshot>()
+            if (cleanDocId.isNotBlank()) {
+                val directSnap = db.collection("products").document(cleanDocId).get().await()
+                if (directSnap.exists()) {
+                    candidateDocs.add(directSnap)
+                } else {
+                    val bySkuSnap = db.collection("products")
+                        .whereEqualTo("sku", cleanDocId)
+                        .limit(1)
+                        .get()
+                        .await()
+                    candidateDocs.addAll(bySkuSnap.documents)
+                }
+            }
+            if (candidateDocs.isEmpty() && numericProductId > 0) {
+                val deterministicSnap = db.collection("products").document("prod_$numericProductId").get().await()
+                if (deterministicSnap.exists()) {
+                    candidateDocs.add(deterministicSnap)
+                } else {
+                    val byNumericFieldSnap = db.collection("products")
+                        .whereEqualTo("productId", numericProductId)
+                        .limit(1)
+                        .get()
+                        .await()
+                    candidateDocs.addAll(byNumericFieldSnap.documents)
+                }
+            }
+            val matchedDoc = candidateDocs.firstOrNull() ?: return Result.success(null)
+            val parsed = parseProductDocument(matchedDoc)
+            if (parsed == null || !parsed.isActive) {
+                Result.success(null)
+            } else {
+                Result.success(parsed)
+            }
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, "products/$cleanDocId")
+            Result.failure(e)
+        }
+    }
+
     private fun buildProductPayload(item: ProductItem, includeCreatedAt: Boolean): HashMap<String, Any> {
         val safeTitle = item.title.ifBlank { "ნაწილი" }.take(200)
         val safePrice = item.price.ifBlank { "ფასი შეთანხმებით" }.take(50)
@@ -989,14 +1773,18 @@ class FirestoreRepository(
             "rating" to item.rating.toString().take(20),
             "image" to item.imageUrl.take(2000),
             "imageUrl" to item.imageUrl.take(2000),
-            "category" to item.category.take(100),
+            "category" to AdminStorage.resolveCanonicalCategoryName(item.category, item.productType, item.categoryId).take(100),
+            "categoryId" to AdminStorage.resolveCanonicalCategoryId(item.category, item.productType, item.categoryId).take(100),
             "type" to item.type.take(50),
             "subcategory" to item.subcategory.take(150),
             "shortDescription" to item.shortDescription.take(1000),
             "description" to item.description.take(5000),
-            "brand" to item.brand.take(100),
+            "brand" to AdminStorage.formatCanonicalBrandDisplayName(item.brand).take(100),
+            "brandId" to AdminStorage.resolveCanonicalBrandId(item.brand, item.brandId).take(100),
             "inStock" to item.inStock,
             "isAvailable" to item.inStock,
+            "isActive" to item.isActive,
+            "active" to item.isActive,
             "isFeatured" to item.isFeatured,
             "displayOrder" to item.displayOrder,
             "sortOrder" to item.displayOrder,
@@ -1026,6 +1814,16 @@ class FirestoreRepository(
         payload["productType"] = item.productType.take(50)
         payload["condition"] = item.condition.take(50)
         payload["exactModel"] = item.exactModel.take(100)
+        payload["originalPrice"] = item.originalPrice.take(50)
+        payload["discountedPrice"] = item.discountedPrice.take(50)
+        payload["discountPercent"] = item.discountPercent
+        if (item.discountExpiresAt != null && item.discountExpiresAt > 0L) {
+            payload["discountExpiresAt"] = item.discountExpiresAt
+        } else {
+            payload.remove("discountExpiresAt")
+        }
+        payload["availabilityStatus"] = item.availabilityStatus.take(50)
+        payload["availabilityLabel"] = item.availabilityLabel.take(100)
         if (includeCreatedAt) {
             payload["createdAt"] = FieldValue.serverTimestamp()
         }
@@ -1033,6 +1831,9 @@ class FirestoreRepository(
     }
 
     suspend fun saveOrUpdateProduct(item: ProductItem): String {
+        if (ProductRepository.isProhibitedOrRetiredService(item)) {
+            throw IllegalArgumentException("PROHIBITED_PRODUCT: ციფრული გამოწერები, ანგარიშები და განბლოკვის სერვისები დაუშვებელია Google Play პოლიტიკით.")
+        }
         val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
         if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             throw IllegalStateException("PERMISSION_DENIED: Cloud-ში შესანახად საჭიროა ვერიფიცირებული ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
@@ -1083,8 +1884,8 @@ class FirestoreRepository(
             }
 
             var count = 0
-            // უსაფრთხო WriteBatch ჩანკირება (<= 400 ოპერაცია ერთ ბეჩში, Firestore 500-ლიმიტის დაცვით)
-            val uniqueByDocId = products.distinctBy { it.firestoreDocId.ifBlank { "prod_${it.id}" } }
+            val sanitizedProducts = products.filterNot { ProductRepository.isProhibitedOrRetiredService(it) }
+            val uniqueByDocId = sanitizedProducts.distinctBy { it.firestoreDocId.ifBlank { "prod_${it.id}" } }
             for (chunk in uniqueByDocId.chunked(400)) {
                 val batch = db.batch()
                 for (item in chunk) {
@@ -1105,29 +1906,75 @@ class FirestoreRepository(
 
     /**
      * უსაფრთხო საწყისი მიგრაცია (Safe Idempotent Initial & Missing-Product Migration):
-     * - ადარებს აპის სრულ კატალოგს (117 პროდუქტი) და Firestore-ის `products` კოლექციას;
-     * - არასდროს გადააწერს Firestore-ში უკვე არსებულ დოკუმენტებს ავტომატურად (ინარჩუნებს ადმინის ცვლილებებს);
-     * - არ ქმნის დუბლიკატებს განმეორებით გაშვებისას (იყენებს დეტერმინისტულ `prod_{id}` ID-ებს);
-     * - თუ მომხმარებელი ვერიფიცირებული ადმინისტრატორია და Firestore-ში კატალოგი ცარიელია ან ნაწილობრივაა
-     *   ატვირთული, უსაფრთხო WriteBatch ნაწილებით (<= 400) ტვირთავს მხოლოდ ნაკლულ პროდუქტებს.
+     * - ადარებს აპის სრულ კატალოგს (85 აპარატურული პროდუქტი) და Firestore-ის `products` კოლექციას;
+     * - თუ ვერიფიცირებული ადმინი ავტორიზებულია, ავტომატურად ასუფთავებს Cloud-იდან მოძველებულ/დაუშვებელ
+     *   პროდუქტებს (ID 86..124), `cat_software` კატეგორიას და ძველ სარეკლამო ბანერებს;
+     * - არასდროს გადააწერს Firestore-ში უკვე არსებულ ლეგიტიმურ დოკუმენტებს ავტომატურად;
+     * - ტვირთავს მხოლოდ ნაკლულ აპარატურულ პროდუქტებს.
      */
     suspend fun performSafeInitialMigrationIfNeeded(context: Context): Result<MigrationOutcome> =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
+                val isAdmin = checkIsCurrentUserAdmin()
                 val snapshot = db.collection("products").get().await()
+
+                if (isAdmin && auth.currentUser != null) {
+                    val retiredDocs = snapshot.documents.filter { doc ->
+                        parseProductDocument(doc) == null
+                    }
+                    if (retiredDocs.isNotEmpty()) {
+                        for (chunk in retiredDocs.chunked(400)) {
+                            val purgeBatch = db.batch()
+                            for (doc in chunk) {
+                                purgeBatch.delete(doc.reference)
+                            }
+                            runCatching { purgeBatch.commit().await() }
+                        }
+                    }
+                    runCatching {
+                        db.collection("categories").document("cat_software").delete().await()
+                    }
+                    runCatching {
+                        val bannersSnap = db.collection("app_config").document("home_banners").get().await()
+                        if (bannersSnap.exists()) {
+                            val rawList = bannersSnap.get("banners") as? List<*>
+                            if (rawList != null) {
+                                val parsedBanners = rawList.mapNotNull { entry ->
+                                    val map = entry as? Map<*, *> ?: return@mapNotNull null
+                                    val id = map["id"]?.toString() ?: return@mapNotNull null
+                                    val title = map["title"]?.toString() ?: ""
+                                    if (title.isBlank()) return@mapNotNull null
+                                    AdminStorage.HomeBannerItem(
+                                        id = id,
+                                        imageUrl = map["imageUrl"]?.toString() ?: "",
+                                        title = title,
+                                        subtitle = map["subtitle"]?.toString() ?: "",
+                                        targetProductId = (map["targetProductId"] as? Number)?.toInt() ?: 1,
+                                        tag = map["tag"]?.toString() ?: "სპეც შეთავაზება"
+                                    )
+                                }
+                                if (parsedBanners.any { ProductRepository.isProhibitedBanner(it) }) {
+                                    val cleanBanners = parsedBanners.filterNot { ProductRepository.isProhibitedBanner(it) }
+                                        .ifEmpty { AdminStorage.DEFAULT_HOME_BANNERS }
+                                    saveHomeBannersToCloud(cleanBanners)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 val existingRemote = snapshot.documents.mapNotNull { parseProductDocument(it) }
-                val existingDocIds = snapshot.documents.map { it.id }.toSet()
+                val existingDocIds = existingRemote.map { it.firestoreDocId.ifBlank { "prod_${it.id}" } }.toSet()
                 val existingProductIds = existingRemote.map { it.id }.toSet()
 
-                val deletedIds = AdminStorage.getDeletedProductIds(context)
+                val deletedIds = AdminStorage.getDeletedProductIds(context) + ProductRepository.RETIRED_PRODUCT_IDS
                 val knownCloudDocIds = AdminStorage.getKnownCloudDocIds(context)
                 val localCatalog = AdminStorage.loadProducts(context)
 
-                // გამოვთვალოთ მხოლოდ ის პროდუქტები, რომლებიც ჯერ საერთოდ არ არსებობს Firestore-ში
-                // და არც წინა სინქრონიზაციისას წაშლილა Cloud-იდან.
                 val missingProducts = localCatalog.filter { item ->
                     val docId = item.firestoreDocId.ifBlank { "prod_${item.id}" }
-                    item.id !in deletedIds &&
+                    !ProductRepository.isProhibitedOrRetiredService(item) &&
+                        item.id !in deletedIds &&
                         docId !in existingDocIds &&
                         item.id !in existingProductIds &&
                         docId !in knownCloudDocIds
@@ -1144,8 +1991,6 @@ class FirestoreRepository(
                     )
                 }
 
-                // შევამოწმოთ არის თუ არა მომხმარებელი ვერიფიცირებული ადმინი
-                val isAdmin = checkIsCurrentUserAdmin()
                 if (!isAdmin) {
                     return@withContext if (existingRemote.isNotEmpty()) {
                         val conflicts = AdminStorage.detectLocalVsCloudConflicts(context, existingRemote)
@@ -1251,8 +2096,9 @@ class FirestoreRepository(
                 IllegalStateException("PERMISSION_DENIED: ბანერების Cloud-ში შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
             )
         }
+        val sanitized = banners.filterNot { ProductRepository.isProhibitedBanner(it) }
         val docRef = db.collection("app_config").document("home_banners")
-        val bannersData = banners.mapIndexed { index, b ->
+        val bannersData = sanitized.mapIndexed { index, b ->
             hashMapOf<String, Any>(
                 "id" to b.id,
                 "imageUrl" to b.imageUrl,
@@ -1300,9 +2146,11 @@ class FirestoreRepository(
                             targetProductId = (map["targetProductId"] as? Number)?.toInt() ?: 1,
                             tag = map["tag"]?.toString() ?: "სპეც შეთავაზება"
                         )
-                    }
+                    }.filterNot { ProductRepository.isProhibitedBanner(it) }
                     if (parsed.isNotEmpty()) {
                         onBannersUpdated(parsed)
+                    } else {
+                        onBannersUpdated(AdminStorage.DEFAULT_HOME_BANNERS)
                     }
                 }
             }
@@ -1347,13 +2195,326 @@ class FirestoreRepository(
                     if (bogIban.isNotBlank() || tbcIban.isNotBlank()) {
                         onRequisitesUpdated(
                             AdminStorage.BankRequisites(
-                                bogIban = bogIban.ifBlank { AdminStorage.DEFAULT_BOG_IBAN },
-                                bogRecipient = bogRecipient.ifBlank { AdminStorage.DEFAULT_BOG_RECIPIENT },
-                                tbcIban = tbcIban.ifBlank { AdminStorage.DEFAULT_TBC_IBAN },
-                                tbcRecipient = tbcRecipient.ifBlank { AdminStorage.DEFAULT_TBC_RECIPIENT }
+                                bogIban = bogIban,
+                                bogRecipient = bogRecipient,
+                                tbcIban = tbcIban,
+                                tbcRecipient = tbcRecipient
                             )
                         )
                     }
+                }
+            }
+    }
+
+    suspend fun fetchBankRequisitesFromCloud(): Result<AdminStorage.BankRequisites> {
+        return try {
+            val snapshot = db.collection("app_config").document("bank_requisites").get().await()
+            if (snapshot != null && snapshot.exists()) {
+                val bogIban = snapshot.getString("bogIban")?.trim().orEmpty()
+                val bogRecipient = snapshot.getString("bogRecipient")?.trim().orEmpty()
+                val tbcIban = snapshot.getString("tbcIban")?.trim().orEmpty()
+                val tbcRecipient = snapshot.getString("tbcRecipient")?.trim().orEmpty()
+                Result.success(
+                    AdminStorage.BankRequisites(
+                        bogIban = bogIban,
+                        bogRecipient = bogRecipient,
+                        tbcIban = tbcIban,
+                        tbcRecipient = tbcRecipient
+                    )
+                )
+            } else {
+                Result.failure(NoSuchElementException("bank_requisites not found"))
+            }
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, "app_config/bank_requisites")
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================================================
+    // MULTI-BANK PAYMENT ACCOUNTS & IMMUTABLE AUDIT LOGS (/payment_bank_accounts & /payment_audit_logs)
+    // ==========================================================================
+    suspend fun savePaymentBankAccountToCloud(account: BankAccountConfig): Result<Unit> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: საბანკო ანგარიშის Cloud-ში შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
+            )
+        }
+        val docRef = db.collection("payment_bank_accounts").document(account.id)
+        val payload = hashMapOf<String, Any>(
+            "id" to account.id.take(80),
+            "bankCode" to account.bankCode.take(40),
+            "bankName" to account.bankName.take(120),
+            "recipientName" to account.recipientName.take(150),
+            "iban" to BstorePaymentManager.normalizeIban(account.iban).take(40),
+            "currency" to "GEL",
+            "description" to account.description.take(300),
+            "paymentInstructions" to account.paymentInstructions.take(1000),
+            "enabled" to account.isEnabled,
+            "isEnabled" to account.isEnabled,
+            "sortOrder" to account.displayOrder,
+            "displayOrder" to account.displayOrder,
+            "createdAtMillis" to account.createdAtMillis,
+            "updatedAtMillis" to System.currentTimeMillis(),
+            "updatedBy" to AuthAndOrderManager.SOLE_ADMIN_EMAIL,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        return try {
+            docRef.set(payload).await()
+            runCatching {
+                val allEnabled = fetchPaymentBankAccountsFromCloud().getOrNull().orEmpty().filter { it.isEnabled }
+                val bog = allEnabled.firstOrNull { it.bankCode.equals("bog", ignoreCase = true) }
+                val tbc = allEnabled.firstOrNull { it.bankCode.equals("tbc", ignoreCase = true) }
+                saveBankRequisitesToCloud(
+                    AdminStorage.BankRequisites(
+                        bogIban = bog?.iban.orEmpty(),
+                        bogRecipient = bog?.recipientName.orEmpty(),
+                        tbcIban = tbc?.iban.orEmpty(),
+                        tbcRecipient = tbc?.recipientName.orEmpty()
+                    )
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    private fun parseBankAccountDoc(doc: DocumentSnapshot): BankAccountConfig? {
+        if (!doc.exists()) return null
+        val iban = BstorePaymentManager.normalizeIban(doc.getString("iban").orEmpty())
+        val bankName = doc.getString("bankName")?.trim().orEmpty()
+        val recipient = doc.getString("recipientName")?.trim().orEmpty()
+        if (bankName.isBlank() || recipient.isBlank() || iban.isBlank()) return null
+        val enabledFlag = doc.getBoolean("enabled") ?: doc.getBoolean("isEnabled") ?: true
+        val orderNum = (doc.get("sortOrder") as? Number)?.toInt()
+            ?: (doc.get("displayOrder") as? Number)?.toInt()
+            ?: 1
+        return BankAccountConfig(
+            id = doc.getString("id")?.ifBlank { doc.id } ?: doc.id,
+            bankCode = doc.getString("bankCode")?.trim().orEmpty().ifBlank { "bog" },
+            bankName = bankName,
+            recipientName = recipient,
+            iban = iban,
+            description = doc.getString("description")?.trim().orEmpty(),
+            paymentInstructions = doc.getString("paymentInstructions")?.trim().orEmpty()
+                .ifBlank { BankAccountConfig.DEFAULT_PAYMENT_INSTRUCTIONS_KA },
+            isEnabled = enabledFlag,
+            displayOrder = orderNum,
+            createdAtMillis = (doc.get("createdAtMillis") as? Number)?.toLong() ?: System.currentTimeMillis(),
+            updatedAtMillis = (doc.get("updatedAtMillis") as? Number)?.toLong() ?: System.currentTimeMillis(),
+            updatedBy = doc.getString("updatedBy")?.trim().orEmpty().ifBlank { AuthAndOrderManager.SOLE_ADMIN_EMAIL }
+        )
+    }
+
+    suspend fun fetchPaymentBankAccountsFromCloud(): Result<List<BankAccountConfig>> {
+        if (auth.currentUser == null) return Result.failure(IllegalStateException("User not signed in"))
+        return try {
+            val snapshot = db.collection("payment_bank_accounts").get().await()
+            val accounts = snapshot.documents
+                .mapNotNull { parseBankAccountDoc(it) }
+                .sortedWith(compareBy({ it.displayOrder }, { it.bankName }))
+            Result.success(accounts)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "payment_bank_accounts")
+            Result.failure(e)
+        }
+    }
+
+    fun listenToPaymentBankAccounts(
+        onUpdated: (List<BankAccountConfig>) -> Unit
+    ): ListenerRegistration? {
+        if (auth.currentUser == null) return null
+        return db.collection("payment_bank_accounts")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.LIST, "payment_bank_accounts")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val parsed = snapshot.documents
+                        .mapNotNull { parseBankAccountDoc(it) }
+                        .sortedWith(compareBy({ it.displayOrder }, { it.bankName }))
+                    onUpdated(parsed)
+                }
+            }
+    }
+
+    suspend fun fetchPaymentAuditLogsForAdmin(): Result<List<PaymentAuditEvent>> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: გადახდების აუდიტის ჟურნალი ხელმისაწვდომია მხოლოდ ადმინისტრატორისთვის")
+            )
+        }
+        return try {
+            val snapshot = db.collection("payment_audit_logs").get().await()
+            val events = snapshot.documents.mapNotNull { doc ->
+                if (!doc.exists()) return@mapNotNull null
+                PaymentAuditEvent(
+                    id = doc.getString("id")?.ifBlank { doc.id } ?: doc.id,
+                    orderId = doc.getString("orderId").orEmpty(),
+                    orderNumber = doc.getString("orderNumber").orEmpty(),
+                    eventType = doc.getString("eventType").orEmpty().ifBlank { "PAYMENT_STATUS_CHANGED" },
+                    previousStatus = doc.getString("previousStatus").orEmpty(),
+                    newStatus = doc.getString("newStatus").orEmpty(),
+                    amount = (doc.get("amount") as? Number)?.toDouble() ?: 0.0,
+                    currency = doc.getString("currency").orEmpty().ifBlank { "GEL" },
+                    actorUid = doc.getString("actorUid").orEmpty(),
+                    actorEmail = doc.getString("actorEmail").orEmpty(),
+                    actorRole = doc.getString("actorRole").orEmpty().ifBlank { "sole_admin" },
+                    timestampMillis = (doc.get("timestampMillis") as? Number)?.toLong()
+                        ?: (doc.get("timestamp") as? Number)?.toLong()
+                        ?: doc.getTimestamp("createdAt")?.toDate()?.time
+                        ?: System.currentTimeMillis(),
+                    note = doc.getString("note").orEmpty()
+                )
+            }.sortedByDescending { it.timestampMillis }
+            Result.success(events)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "payment_audit_logs")
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================================================
+    // APP CONFIG: CONTACTS & SOCIAL MEDIA MANAGEMENT (app_config/contacts)
+    // ==========================================================================
+    suspend fun saveContactConfigToCloud(config: ContactAndSocialConfig): Result<Unit> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: კონტაქტების Cloud-ში შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
+            )
+        }
+        val docRef = db.collection("app_config").document("contacts")
+        val phonesData = config.phoneNumbers.map { it.toMap() }
+        val socialsData = config.socialLinks.map { it.toMap() }
+        val payload = hashMapOf<String, Any>(
+            "configType" to "contacts",
+            "phoneNumbers" to phonesData,
+            "socialLinks" to socialsData,
+            "serviceAddress" to config.serviceAddress,
+            "workingHours" to config.workingHours,
+            "updatedAt" to FieldValue.serverTimestamp(),
+            "updatedBy" to (auth.currentUser?.email ?: "beqa1994@gmail.com")
+        )
+        return try {
+            docRef.set(payload).await()
+            Log.d("FirestoreRepo", "Contact & social config synced to Firestore app_config/contacts")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchContactConfigFromCloud(): Result<ContactAndSocialConfig> {
+        val docRef = db.collection("app_config").document("contacts")
+        return try {
+            val snapshot = docRef.get().await()
+            if (!snapshot.exists()) {
+                return Result.success(ContactAndSocialManager.DEFAULT_CONFIG)
+            }
+            val rawPhones = snapshot.get("phoneNumbers") as? List<*> ?: emptyList<Any>()
+            val parsedPhones = rawPhones.mapNotNull { item ->
+                (item as? Map<*, *>)?.let { ContactPhoneNumber.fromMap(it) }
+            }
+            val rawSocials = snapshot.get("socialLinks") as? List<*> ?: emptyList<Any>()
+            val parsedSocials = rawSocials.mapNotNull { item ->
+                (item as? Map<*, *>)?.let { SocialMediaLink.fromMap(it) }
+            }
+            val cfg = ContactAndSocialConfig(
+                phoneNumbers = if (parsedPhones.isNotEmpty()) parsedPhones.sortedBy { it.displayOrder } else ContactAndSocialManager.DEFAULT_PHONE_NUMBERS,
+                socialLinks = if (parsedSocials.isNotEmpty()) parsedSocials.sortedBy { it.displayOrder } else ContactAndSocialManager.DEFAULT_SOCIAL_LINKS,
+                serviceAddress = snapshot.getString("serviceAddress")?.ifBlank { AppBrandConfig.SERVICE_CENTER_ADDRESS_KA } ?: AppBrandConfig.SERVICE_CENTER_ADDRESS_KA,
+                workingHours = snapshot.getString("workingHours")?.ifBlank { AppBrandConfig.WORKING_HOURS_KA } ?: AppBrandConfig.WORKING_HOURS_KA,
+                updatedAtMillis = snapshot.getTimestamp("updatedAt")?.toDate()?.time ?: System.currentTimeMillis(),
+                updatedBy = snapshot.getString("updatedBy") ?: "beqa1994@gmail.com"
+            )
+            Result.success(cfg)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    fun listenToContactConfig(onConfigUpdated: (ContactAndSocialConfig) -> Unit): ListenerRegistration {
+        return db.collection("app_config").document("contacts")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.GET, "app_config/contacts")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val rawPhones = snapshot.get("phoneNumbers") as? List<*> ?: emptyList<Any>()
+                    val parsedPhones = rawPhones.mapNotNull { item ->
+                        (item as? Map<*, *>)?.let { ContactPhoneNumber.fromMap(it) }
+                    }
+                    val rawSocials = snapshot.get("socialLinks") as? List<*> ?: emptyList<Any>()
+                    val parsedSocials = rawSocials.mapNotNull { item ->
+                        (item as? Map<*, *>)?.let { SocialMediaLink.fromMap(it) }
+                    }
+                    val cfg = ContactAndSocialConfig(
+                        phoneNumbers = if (parsedPhones.isNotEmpty()) parsedPhones.sortedBy { it.displayOrder } else ContactAndSocialManager.DEFAULT_PHONE_NUMBERS,
+                        socialLinks = if (parsedSocials.isNotEmpty()) parsedSocials.sortedBy { it.displayOrder } else ContactAndSocialManager.DEFAULT_SOCIAL_LINKS,
+                        serviceAddress = snapshot.getString("serviceAddress")?.ifBlank { AppBrandConfig.SERVICE_CENTER_ADDRESS_KA } ?: AppBrandConfig.SERVICE_CENTER_ADDRESS_KA,
+                        workingHours = snapshot.getString("workingHours")?.ifBlank { AppBrandConfig.WORKING_HOURS_KA } ?: AppBrandConfig.WORKING_HOURS_KA,
+                        updatedAtMillis = snapshot.getTimestamp("updatedAt")?.toDate()?.time ?: System.currentTimeMillis(),
+                        updatedBy = snapshot.getString("updatedBy") ?: "beqa1994@gmail.com"
+                    )
+                    onConfigUpdated(cfg)
+                }
+            }
+    }
+
+    // ==========================================================================
+    // APP CONFIG: SERVICE CENTER LOCATION (app_config/service_center_location)
+    // ==========================================================================
+    suspend fun saveServiceCenterLocation(config: ServiceCenterLocationConfig): Result<Unit> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: სერვისცენტრის ლოკაციის შესანახად საჭიროა ადმინისტრატორის ავტორიზაცია (beqa1994@gmail.com)")
+            )
+        }
+        val docRef = db.collection("app_config").document("service_center_location")
+        val payload = config.toMap()
+        return try {
+            docRef.set(payload).await()
+            Log.d("FirestoreRepo", "Service center location synced to Firestore app_config/service_center_location")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchServiceCenterLocation(): Result<ServiceCenterLocationConfig> {
+        val docRef = db.collection("app_config").document("service_center_location")
+        return try {
+            val snapshot = docRef.get().await()
+            if (!snapshot.exists()) {
+                return Result.success(ServiceCenterLocationConfig.DEFAULT)
+            }
+            val data = snapshot.data ?: emptyMap<String, Any>()
+            val cfg = ServiceCenterLocationConfig.fromMap(data)
+            Result.success(cfg)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    fun listenToServiceCenterLocation(onLocationUpdated: (ServiceCenterLocationConfig) -> Unit): ListenerRegistration {
+        return db.collection("app_config").document("service_center_location")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.GET, "app_config/service_center_location")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val data = snapshot.data ?: emptyMap<String, Any>()
+                    val cfg = ServiceCenterLocationConfig.fromMap(data)
+                    onLocationUpdated(cfg)
                 }
             }
     }
@@ -1457,6 +2618,127 @@ class FirestoreRepository(
             }
     }
 
+    private fun computeTokenSha256Hex(raw: String): String {
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(raw.toByteArray(Charsets.UTF_8))
+            digest.joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            kotlin.math.abs(raw.hashCode()).toString(16)
+        }
+    }
+
+    private suspend fun invokeCloudFunctionCallable(
+        functionName: String,
+        payloadData: JSONObject,
+        idToken: String? = null
+    ): Result<JSONObject> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val projectId = runCatching { db.app.options.projectId }.getOrNull().orEmpty()
+        if (projectId.isBlank() || projectId == "demo-no-project") {
+            return@withContext Result.success(JSONObject())
+        }
+        val endpoint = "https://us-central1-$projectId.cloudfunctions.net/$functionName"
+        val connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 3500
+            readTimeout = 3500
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            setRequestProperty("Accept", "application/json")
+            if (!idToken.isNullOrBlank()) {
+                setRequestProperty("Authorization", "Bearer $idToken")
+            }
+        }
+        try {
+            val envelope = JSONObject().put("data", payloadData)
+            connection.outputStream.use { os ->
+                os.write(envelope.toString().toByteArray(Charsets.UTF_8))
+            }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code in 200..299) {
+                val json = runCatching { JSONObject(body) }.getOrElse { JSONObject() }
+                val resObj = json.optJSONObject("result") ?: json.optJSONObject("data") ?: json
+                Result.success(resObj)
+            } else {
+                Result.failure(IllegalStateException("Callable $functionName failed with HTTP $code: $body"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    suspend fun claimFcmTokenOnBackend(
+        token: String,
+        deviceId: String,
+        deviceModel: String = android.os.Build.MODEL ?: "Android",
+        notificationsEnabled: Boolean = true,
+        preFetchedIdToken: String? = null
+    ): Result<Unit> {
+        val cleanToken = token.trim()
+        if (cleanToken.length < 10 || cleanToken.startsWith("fcm_admin_dev_")) {
+            return Result.failure(IllegalArgumentException("Invalid or synthetic FCM token"))
+        }
+        if (AuthAndOrderManager.isLoggingOut) {
+            return Result.failure(IllegalStateException("Logout in progress"))
+        }
+        val currentUser = auth.currentUser
+            ?: return Result.failure(IllegalStateException("Authentication required to claim FCM token"))
+        if (currentUser.isAnonymous) {
+            return Result.failure(SecurityException("Anonymous sessions cannot claim customer FCM tokens"))
+        }
+        val tokenStr = preFetchedIdToken?.takeIf { it.isNotBlank() }
+            ?: runCatching { currentUser.getIdToken(false).await().token }.getOrNull().orEmpty()
+        if (tokenStr.isBlank()) {
+            return Result.failure(IllegalStateException("Missing Firebase ID token"))
+        }
+        val payload = JSONObject()
+            .put("token", cleanToken.take(4096))
+            .put("deviceId", deviceId.take(64))
+            .put("deviceModel", deviceModel.take(120))
+            .put("platform", "android")
+            .put("notificationsEnabled", notificationsEnabled)
+        return invokeCloudFunctionCallable("claimFcmToken", payload, tokenStr).map { }
+    }
+
+    suspend fun releaseFcmTokenOnBackend(
+        token: String,
+        deviceId: String,
+        preFetchedIdToken: String? = null
+    ): Result<Unit> {
+        val currentUser = auth.currentUser
+        val tokenStr = preFetchedIdToken?.takeIf { it.isNotBlank() }
+            ?: if (currentUser != null && !currentUser.isAnonymous) {
+                runCatching { currentUser.getIdToken(false).await().token }.getOrNull().orEmpty()
+            } else {
+                ""
+            }
+        if (tokenStr.isBlank()) {
+            return Result.failure(IllegalStateException("No authenticated ID token available for releaseFcmToken"))
+        }
+        val payload = JSONObject()
+            .put("token", token.trim().take(4096))
+            .put("deviceId", deviceId.trim().take(64))
+        return invokeCloudFunctionCallable("releaseFcmToken", payload, tokenStr).map { }
+    }
+
+    suspend fun unbindUnauthenticatedDeviceTokenOnBackend(
+        token: String,
+        deviceId: String = ""
+    ): Result<Unit> {
+        val cleanToken = token.trim()
+        if (cleanToken.length < 80 || cleanToken.startsWith("fcm_admin_dev_")) {
+            return Result.success(Unit)
+        }
+        val payload = JSONObject()
+            .put("token", cleanToken.take(4096))
+            .put("deviceId", deviceId.trim().take(64))
+        return invokeCloudFunctionCallable("unbindUnauthenticatedDeviceToken", payload, null).map { }
+    }
+
     // ==========================================================================
     // 4. FCM TOKEN STORAGE & ADMIN PUSH NOTIFICATIONS (/fcm_tokens & /notifications)
     // ==========================================================================
@@ -1466,40 +2748,97 @@ class FirestoreRepository(
         deviceModel: String = android.os.Build.MODEL ?: "Android",
         deviceId: String = ""
     ): Result<Unit> {
+        if (AuthAndOrderManager.isLoggingOut) {
+            return Result.failure(IllegalStateException("Logout in progress"))
+        }
         val currentUser = auth.currentUser ?: return Result.failure(
             IllegalStateException("User must be signed in to save FCM token")
         )
+        if (currentUser.isAnonymous) {
+            return Result.failure(
+                SecurityException("PERMISSION_DENIED: Anonymous Firebase sessions cannot register customer FCM tokens")
+            )
+        }
         val cleanToken = token.trim()
         if (cleanToken.length < 10 || cleanToken.startsWith("fcm_admin_dev_")) {
             return Result.failure(IllegalArgumentException("Invalid or synthetic FCM token"))
         }
         val uid = currentUser.uid
-        val tokenHash = kotlin.math.abs(cleanToken.hashCode()).toString(16)
-        val safeDeviceId = deviceId.trim()
-            .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
-            .ifBlank { "dev_$tokenHash" }
-            .take(64)
-        val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+        val tokenSha = computeTokenSha256Hex(cleanToken)
+        val safeDeviceId = sanitizeTokenDeviceId(deviceId, cleanToken)
+        val multiDeviceDocId = buildDeviceTokenDocId(uid, deviceId, cleanToken)
         val primaryDocRef = db.collection("fcm_tokens").document(multiDeviceDocId)
         val legacyUserDocRef = db.collection("fcm_tokens").document(uid)
         val payload = hashMapOf<String, Any>(
             "userId" to uid,
             "token" to cleanToken.take(4096),
+            "tokenHash" to tokenSha,
             "deviceId" to safeDeviceId,
             "email" to (currentUser.email ?: "").take(150),
             "deviceModel" to deviceModel.take(120),
             "platform" to "android",
+            "active" to true,
             "notificationsEnabled" to notificationsEnabled,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         return try {
             primaryDocRef.set(payload).await()
             runCatching { legacyUserDocRef.set(payload).await() }
+            runCatching {
+                claimFcmTokenOnBackend(
+                    token = cleanToken,
+                    deviceId = safeDeviceId,
+                    deviceModel = deviceModel,
+                    notificationsEnabled = notificationsEnabled
+                )
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, primaryDocRef.path)
             Result.failure(e)
         }
+    }
+
+    private fun resolveServerNotificationClassification(
+        type: String,
+        audience: String,
+        orderId: String,
+        orderNumber: String,
+        explicitVisibility: String = "",
+        explicitRecipientUid: String = ""
+    ): Pair<String, String> {
+        val cleanType = type.trim()
+        val cleanAud = audience.trim()
+        val cleanOrderId = orderId.trim()
+        val cleanOrderNum = orderNumber.trim()
+        val extractedAudUid = if (cleanAud.startsWith("user:")) cleanAud.removePrefix("user:").trim() else ""
+        val recipientUid = explicitRecipientUid.trim().ifBlank { extractedAudUid }
+
+        if (explicitVisibility == "ADMIN_ONLY" || cleanType == "admin_order" || cleanAud == "admin_only") {
+            return "ADMIN_ONLY" to ""
+        }
+        val hasPrivateSignal = explicitVisibility == "PRIVATE_USER" ||
+            recipientUid.isNotBlank() ||
+            cleanAud.startsWith("user:") ||
+            cleanOrderId.isNotBlank() ||
+            cleanOrderNum.isNotBlank() ||
+            cleanType in setOf(
+                "order_update",
+                "payment_update",
+                "payment_confirmed",
+                "payment_instructions",
+                "account_update",
+                "direct_message"
+            )
+        if (hasPrivateSignal) {
+            return "PRIVATE_USER" to recipientUid
+        }
+        if (cleanType in setOf("announcement", "product", "product_offer", "service_update", "system_update", "promotion") &&
+            (cleanAud == "all" || cleanAud == "all_users")
+        ) {
+            return "PUBLIC" to ""
+        }
+        return "ADMIN_ONLY" to ""
     }
 
     suspend fun sendAdminNotification(
@@ -1508,7 +2847,14 @@ class FirestoreRepository(
         targetProductId: Int = 0,
         targetTab: Int = 0,
         type: String = "announcement",
-        explicitNotificationId: String? = null
+        explicitNotificationId: String? = null,
+        orderId: String = "",
+        orderNumber: String = "",
+        audience: String = "all",
+        visibility: String = "",
+        recipientUid: String = "",
+        relatedEntityId: String = "",
+        targetProductDocId: String = ""
     ): Result<String> {
         val cleanTitle = title.trim().take(160)
         val cleanBody = body.trim().take(1500)
@@ -1523,19 +2869,59 @@ class FirestoreRepository(
         val notifId = explicitNotificationId?.takeIf { it.isNotBlank() }
             ?: "notif_${System.currentTimeMillis()}"
         val docRef = db.collection("notifications").document(notifId)
-        val safeType = if (type in listOf("announcement", "product_offer", "service_update")) type else "announcement"
+        val safeType = if (type in listOf(
+                "announcement", "product", "product_offer", "service_update", "order_update",
+                "product_request", "payment_update", "payment_confirmed", "payment_instructions",
+                "account_update", "direct_message", "system_update", "app_update", "promotion", "admin_order"
+            )
+        ) type else "announcement"
+        val cleanProductDocId = targetProductDocId.trim().take(128)
+        if (safeType == "product" && cleanProductDocId.isBlank() && targetProductId <= 0) {
+            return Result.failure(IllegalArgumentException("პროდუქტის შეტყობინებისთვის კონკრეტული პროდუქტის არჩევა სავალდებულოა"))
+        }
+        val cleanOrderId = orderId.trim().take(80)
+        val cleanOrderNumber = orderNumber.trim().take(40)
+        val cleanAudience = audience.trim().ifBlank { "all" }.take(140)
+        val (resolvedVisibility, resolvedRecipientUid) = resolveServerNotificationClassification(
+            type = safeType,
+            audience = cleanAudience,
+            orderId = cleanOrderId,
+            orderNumber = cleanOrderNumber,
+            explicitVisibility = visibility.trim(),
+            explicitRecipientUid = recipientUid.trim()
+        )
+        if (resolvedVisibility == "PRIVATE_USER" && resolvedRecipientUid.isBlank()) {
+            return Result.failure(
+                IllegalArgumentException("PRIVATE_USER შეტყობინებისთვის recipientUid სავალდებულოა")
+            )
+        }
+        val normalizedAudience = when (resolvedVisibility) {
+            "PRIVATE_USER" -> "user:$resolvedRecipientUid"
+            "ADMIN_ONLY" -> "admin_only"
+            else -> if (cleanAudience == "all_users") "all_users" else "all"
+        }
         val payload = hashMapOf<String, Any>(
             "id" to notifId,
             "title" to cleanTitle,
             "body" to cleanBody,
             "type" to safeType,
+            "visibility" to resolvedVisibility,
             "targetProductId" to targetProductId.coerceAtLeast(0),
+            "targetProductDocId" to cleanProductDocId,
             "targetTab" to targetTab.coerceIn(0, 7),
+            "orderId" to if (resolvedVisibility == "PUBLIC") "" else cleanOrderId,
+            "orderNumber" to if (resolvedVisibility == "PUBLIC") "" else cleanOrderNumber,
+            "relatedEntityId" to relatedEntityId.trim().ifBlank { cleanOrderId.ifBlank { cleanProductDocId } }.take(120),
             "senderEmail" to (auth.currentUser?.email ?: "").take(150),
-            "audience" to "all",
+            "audience" to normalizedAudience,
             "status" to "submitted",
-            "createdAt" to FieldValue.serverTimestamp()
+            "isRead" to false,
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
         )
+        if (resolvedVisibility == "PRIVATE_USER" && resolvedRecipientUid.isNotBlank()) {
+            payload["recipientUid"] = resolvedRecipientUid.take(128)
+        }
         return try {
             docRef.set(payload).await()
             Result.success(notifId)
@@ -1552,7 +2938,13 @@ class FirestoreRepository(
         targetProductId: Int = 0,
         targetTab: Int = 0,
         type: String = "announcement",
-        rebroadcastNow: Boolean = true
+        rebroadcastNow: Boolean = true,
+        orderId: String = "",
+        orderNumber: String = "",
+        audience: String = "all",
+        visibility: String = "",
+        recipientUid: String = "",
+        targetProductDocId: String = ""
     ): Result<String> {
         val cleanId = notificationId.trim()
         if (cleanId.isBlank()) {
@@ -1569,19 +2961,56 @@ class FirestoreRepository(
             )
         }
         val docRef = db.collection("notifications").document(cleanId)
-        val safeType = if (type in listOf("announcement", "product_offer", "service_update")) type else "announcement"
+        val safeType = if (type in listOf(
+                "announcement", "product", "product_offer", "service_update", "order_update",
+                "product_request", "payment_update", "payment_confirmed", "payment_instructions",
+                "account_update", "direct_message", "system_update", "app_update", "promotion", "admin_order"
+            )
+        ) type else "announcement"
+        val cleanProductDocId = targetProductDocId.trim().take(128)
+        if (safeType == "product" && cleanProductDocId.isBlank() && targetProductId <= 0) {
+            return Result.failure(IllegalArgumentException("პროდუქტის შეტყობინებისთვის კონკრეტული პროდუქტის არჩევა სავალდებულოა"))
+        }
+        val cleanOrderId = orderId.trim().take(80)
+        val cleanOrderNumber = orderNumber.trim().take(40)
+        val cleanAudience = audience.trim().ifBlank { "all" }.take(140)
+        val (resolvedVisibility, resolvedRecipientUid) = resolveServerNotificationClassification(
+            type = safeType,
+            audience = cleanAudience,
+            orderId = cleanOrderId,
+            orderNumber = cleanOrderNumber,
+            explicitVisibility = visibility.trim(),
+            explicitRecipientUid = recipientUid.trim()
+        )
+        if (resolvedVisibility == "PRIVATE_USER" && resolvedRecipientUid.isBlank()) {
+            return Result.failure(
+                IllegalArgumentException("PRIVATE_USER შეტყობინებისთვის recipientUid სავალდებულოა")
+            )
+        }
+        val normalizedAudience = when (resolvedVisibility) {
+            "PRIVATE_USER" -> "user:$resolvedRecipientUid"
+            "ADMIN_ONLY" -> "admin_only"
+            else -> if (cleanAudience == "all_users") "all_users" else "all"
+        }
         val payload = hashMapOf<String, Any>(
             "id" to cleanId,
             "title" to cleanTitle,
             "body" to cleanBody,
             "type" to safeType,
+            "visibility" to resolvedVisibility,
             "targetProductId" to targetProductId.coerceAtLeast(0),
+            "targetProductDocId" to cleanProductDocId,
             "targetTab" to targetTab.coerceIn(0, 7),
+            "orderId" to if (resolvedVisibility == "PUBLIC") "" else cleanOrderId,
+            "orderNumber" to if (resolvedVisibility == "PUBLIC") "" else cleanOrderNumber,
             "senderEmail" to (auth.currentUser?.email ?: "").take(150),
-            "audience" to "all",
+            "audience" to normalizedAudience,
             "status" to "submitted",
             "updatedAt" to FieldValue.serverTimestamp()
         )
+        if (resolvedVisibility == "PRIVATE_USER" && resolvedRecipientUid.isNotBlank()) {
+            payload["recipientUid"] = resolvedRecipientUid.take(128)
+        }
         if (rebroadcastNow) {
             payload["createdAt"] = FieldValue.serverTimestamp()
         }
@@ -1611,6 +3040,27 @@ class FirestoreRepository(
         }
     }
 
+    suspend fun markUserNotificationReadInCloud(notificationId: String): Result<Unit> {
+        val currentUser = auth.currentUser
+        if (notificationId.isBlank() || currentUser == null || currentUser.isAnonymous) {
+            return Result.success(Unit)
+        }
+        return try {
+            db.collection("notifications").document(notificationId)
+                .update(
+                    mapOf(
+                        "isRead" to true,
+                        "readAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun parseDocTimestampMillis(doc: DocumentSnapshot, field: String): Long? {
         return try {
             val raw = doc.get(field) ?: return null
@@ -1630,47 +3080,79 @@ class FirestoreRepository(
         }
     }
 
+    private fun parsePushNotificationDoc(doc: DocumentSnapshot): PushNotificationRecord? {
+        return try {
+            val id = (doc.getString("id") ?: doc.id).trim()
+            val title = (doc.getString("title") ?: (doc.get("title") as? String))?.trim() ?: return null
+            val body = (doc.getString("body") ?: (doc.get("body") as? String))?.trim() ?: return null
+            if (id.isBlank() || title.isBlank() || body.isBlank() ||
+                BekaNotificationManager.isSyntheticOrTestNotification(id, title, body)
+            ) {
+                return null
+            }
+            val type = doc.getString("type") ?: (doc.get("type") as? String) ?: "announcement"
+            val targetProductId = doc.getLong("targetProductId")?.toInt()
+                ?: (doc.get("targetProductId") as? Number)?.toInt() ?: 0
+            val targetProductDocId = (doc.getString("targetProductDocId")
+                ?: doc.getString("productDocId")
+                ?: "").trim()
+            val targetTab = doc.getLong("targetTab")?.toInt()
+                ?: (doc.get("targetTab") as? Number)?.toInt() ?: 0
+            val senderEmail = doc.getString("senderEmail") ?: ""
+            val audience = doc.getString("audience") ?: "all"
+            val status = doc.getString("status") ?: "submitted"
+            val orderId = doc.getString("orderId") ?: ""
+            val orderNumber = doc.getString("orderNumber") ?: ""
+            val visibility = doc.getString("visibility")?.trim().orEmpty()
+            val recipientUid = doc.getString("recipientUid")?.trim().orEmpty()
+                .ifBlank { if (audience.startsWith("user:")) audience.removePrefix("user:").trim() else "" }
+            val relatedEntityId = doc.getString("relatedEntityId")?.trim().orEmpty()
+            val isRead = doc.getBoolean("isRead") ?: false
+            val createdAtMillis = parseDocTimestampMillis(doc, "createdAt") ?: System.currentTimeMillis()
+            val updatedAtMillis = parseDocTimestampMillis(doc, "updatedAt") ?: 0L
+            PushNotificationRecord(
+                id = id,
+                title = title,
+                body = body,
+                type = type,
+                targetProductId = targetProductId,
+                targetTab = targetTab,
+                senderEmail = senderEmail,
+                createdAtMillis = createdAtMillis,
+                updatedAtMillis = updatedAtMillis,
+                audience = audience,
+                status = status,
+                orderId = orderId,
+                orderNumber = orderNumber,
+                visibility = visibility,
+                recipientUid = recipientUid,
+                relatedEntityId = relatedEntityId,
+                isRead = isRead,
+                targetProductDocId = targetProductDocId
+            )
+        } catch (e: Exception) {
+            android.util.Log.w("BekaPush", "Skipping unparseable notification doc: ${doc.id}", e)
+            null
+        }
+    }
+
     suspend fun getBroadcastNotifications(): Result<List<PushNotificationRecord>> {
         return try {
-            val snapshot = db.collection("notifications").limit(100).get().await()
-            val items = snapshot.documents.mapNotNull { doc ->
-                try {
-                    val id = (doc.getString("id") ?: doc.id).trim()
-                    val title = (doc.getString("title") ?: (doc.get("title") as? String))?.trim() ?: return@mapNotNull null
-                    val body = (doc.getString("body") ?: (doc.get("body") as? String))?.trim() ?: return@mapNotNull null
-                    if (id.isBlank() || title.isBlank() || body.isBlank() ||
-                        BekaNotificationManager.isSyntheticOrTestNotification(id, title, body)
-                    ) {
-                        return@mapNotNull null
+            val isAdmin = checkIsCurrentUserAdmin()
+            val query = if (isAdmin) {
+                db.collection("notifications").limit(100)
+            } else {
+                db.collection("notifications").whereEqualTo("visibility", "PUBLIC").limit(100)
+            }
+            val snapshot = query.get().await()
+            val items = snapshot.documents
+                .mapNotNull { parsePushNotificationDoc(it) }
+                .let { list ->
+                    if (isAdmin) list else list.filter {
+                        BekaNotificationManager.classifyRecord(it) == NotificationVisibility.PUBLIC
                     }
-                    val type = doc.getString("type") ?: (doc.get("type") as? String) ?: "announcement"
-                    val targetProductId = doc.getLong("targetProductId")?.toInt()
-                        ?: (doc.get("targetProductId") as? Number)?.toInt() ?: 0
-                    val targetTab = doc.getLong("targetTab")?.toInt()
-                        ?: (doc.get("targetTab") as? Number)?.toInt() ?: 0
-                    val senderEmail = doc.getString("senderEmail") ?: ""
-                    val audience = doc.getString("audience") ?: "all"
-                    val status = doc.getString("status") ?: "submitted"
-                    val createdAtMillis = parseDocTimestampMillis(doc, "createdAt") ?: System.currentTimeMillis()
-                    val updatedAtMillis = parseDocTimestampMillis(doc, "updatedAt") ?: 0L
-                    PushNotificationRecord(
-                        id = id,
-                        title = title,
-                        body = body,
-                        type = type,
-                        targetProductId = targetProductId,
-                        targetTab = targetTab,
-                        senderEmail = senderEmail,
-                        createdAtMillis = createdAtMillis,
-                        updatedAtMillis = updatedAtMillis,
-                        audience = audience,
-                        status = status
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.w("BekaPush", "Skipping unparseable notification doc: ${doc.id}", e)
-                    null
                 }
-            }.sortedByDescending { it.createdAtMillis }
+                .sortedByDescending { it.createdAtMillis }
             Result.success(items)
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.LIST, "notifications")
@@ -1678,7 +3160,67 @@ class FirestoreRepository(
         }
     }
 
-    fun listenToBroadcastNotifications(
+    fun listenToPublicNotifications(
+        onError: (String) -> Unit = {},
+        onNotificationsUpdated: (List<PushNotificationRecord>) -> Unit
+    ): ListenerRegistration {
+        return db.collection("notifications")
+            .whereEqualTo("visibility", "PUBLIC")
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.LIST, "notifications")
+                    onError(formatUserFriendlyFirestoreError(error))
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val items = snapshot.documents
+                        .mapNotNull { parsePushNotificationDoc(it) }
+                        .filter { BekaNotificationManager.classifyRecord(it) == NotificationVisibility.PUBLIC }
+                        .sortedByDescending { it.createdAtMillis }
+                    onNotificationsUpdated(items)
+                }
+            }
+    }
+
+    fun listenToUserPrivateNotifications(
+        uid: String,
+        onError: (String) -> Unit = {},
+        onNotificationsUpdated: (List<PushNotificationRecord>) -> Unit
+    ): ListenerRegistration? {
+        val cleanUid = uid.trim()
+        val currentUser = auth.currentUser
+        if (cleanUid.isBlank() || currentUser == null || currentUser.isAnonymous || currentUser.uid != cleanUid) {
+            return null
+        }
+        return db.collection("notifications")
+            .whereEqualTo("recipientUid", cleanUid)
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.LIST, "notifications")
+                    onError(formatUserFriendlyFirestoreError(error))
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val activeNow = auth.currentUser
+                    if (activeNow == null || activeNow.isAnonymous || activeNow.uid != cleanUid) {
+                        onNotificationsUpdated(emptyList())
+                        return@addSnapshotListener
+                    }
+                    val items = snapshot.documents
+                        .mapNotNull { parsePushNotificationDoc(it) }
+                        .filter { rec ->
+                            BekaNotificationManager.classifyRecord(rec) == NotificationVisibility.PRIVATE_USER &&
+                                (rec.recipientUid == cleanUid || rec.audience == "user:$cleanUid")
+                        }
+                        .sortedByDescending { it.createdAtMillis }
+                    onNotificationsUpdated(items)
+                }
+            }
+    }
+
+    fun listenToAllNotificationsForAdmin(
         onError: (String) -> Unit = {},
         onNotificationsUpdated: (List<PushNotificationRecord>) -> Unit
     ): ListenerRegistration {
@@ -1691,47 +3233,22 @@ class FirestoreRepository(
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
-                    val items = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = (doc.getString("id") ?: doc.id).trim()
-                            val title = (doc.getString("title") ?: (doc.get("title") as? String))?.trim() ?: return@mapNotNull null
-                            val body = (doc.getString("body") ?: (doc.get("body") as? String))?.trim() ?: return@mapNotNull null
-                            if (id.isBlank() || title.isBlank() || body.isBlank() ||
-                                BekaNotificationManager.isSyntheticOrTestNotification(id, title, body)
-                            ) {
-                                return@mapNotNull null
-                            }
-                            val type = doc.getString("type") ?: (doc.get("type") as? String) ?: "announcement"
-                            val targetProductId = doc.getLong("targetProductId")?.toInt()
-                                ?: (doc.get("targetProductId") as? Number)?.toInt() ?: 0
-                            val targetTab = doc.getLong("targetTab")?.toInt()
-                                ?: (doc.get("targetTab") as? Number)?.toInt() ?: 0
-                            val senderEmail = doc.getString("senderEmail") ?: ""
-                            val audience = doc.getString("audience") ?: "all"
-                            val status = doc.getString("status") ?: "submitted"
-                            val createdAtMillis = parseDocTimestampMillis(doc, "createdAt") ?: System.currentTimeMillis()
-                            val updatedAtMillis = parseDocTimestampMillis(doc, "updatedAt") ?: 0L
-                            PushNotificationRecord(
-                                id = id,
-                                title = title,
-                                body = body,
-                                type = type,
-                                targetProductId = targetProductId,
-                                targetTab = targetTab,
-                                senderEmail = senderEmail,
-                                createdAtMillis = createdAtMillis,
-                                updatedAtMillis = updatedAtMillis,
-                                audience = audience,
-                                status = status
-                            )
-                        } catch (e: Exception) {
-                            android.util.Log.w("BekaPush", "Skipping unparseable notification doc: ${doc.id}", e)
-                            null
-                        }
-                    }.sortedByDescending { it.createdAtMillis }
+                    val items = snapshot.documents
+                        .mapNotNull { parsePushNotificationDoc(it) }
+                        .sortedByDescending { it.createdAtMillis }
                     onNotificationsUpdated(items)
                 }
             }
+    }
+
+    fun listenToBroadcastNotifications(
+        onError: (String) -> Unit = {},
+        onNotificationsUpdated: (List<PushNotificationRecord>) -> Unit
+    ): ListenerRegistration {
+        return listenToPublicNotifications(
+            onError = onError,
+            onNotificationsUpdated = onNotificationsUpdated
+        )
     }
 
 
@@ -1745,49 +3262,76 @@ class FirestoreRepository(
                 if (snapshot != null && !snapshot.isEmpty) {
                     val list = snapshot.documents.mapNotNull { doc ->
                         try {
+                            val rawName = doc.getString("name") ?: ""
+                            val rawProdType = doc.getString("productType") ?: ""
+                            val normName = AdminStorage.resolveCanonicalCategoryName(rawName, rawProdType, doc.id)
+                            val meta = AdminStorage.inferCategoryMetadata(normName)
+                            val canonicalId = if (doc.id == "cat_audio" || (meta.id.startsWith("cat_") && !meta.id.startsWith("cat_custom_"))) {
+                                meta.id
+                            } else {
+                                doc.id
+                            }
                             CategoryItem(
-                                id = doc.id,
-                                name = doc.getString("name") ?: "",
-                                localizedName = doc.getString("localizedName") ?: "",
-                                description = doc.getString("description") ?: "",
-                                icon = doc.getString("icon") ?: "📦",
+                                id = canonicalId,
+                                name = normName,
+                                slug = (doc.getString("slug") ?: "").ifBlank { meta.slug },
+                                productType = rawProdType.ifBlank { meta.productType },
+                                localizedName = (doc.getString("localizedName") ?: "").ifBlank { meta.localizedName },
+                                description = (doc.getString("description") ?: "").ifBlank { meta.description },
+                                icon = (doc.getString("icon") ?: "").ifBlank { meta.icon },
                                 imageUrl = doc.getString("imageUrl") ?: "",
                                 displayOrder = (doc.get("displayOrder") as? Number)?.toInt() ?: 0,
                                 isActive = doc.getBoolean("isActive") ?: true,
+                                isVisible = doc.getBoolean("isVisible") ?: true,
                                 isPopular = doc.getBoolean("isPopular") ?: false,
                                 popularOrder = (doc.get("popularOrder") as? Number)?.toInt() ?: 0,
-                                categoryType = doc.getString("categoryType") ?: "general",
+                                categoryType = (doc.getString("categoryType") ?: "").ifBlank { meta.categoryType },
                                 createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis(),
                                 updatedAt = doc.getTimestamp("updatedAt")?.toDate()?.time ?: System.currentTimeMillis()
                             )
                         } catch (_: Exception) {
                             null
                         }
-                    }.filter { it.name.isNotBlank() }
+                    }.filter { it.name.isNotBlank() && !ProductRepository.isProhibitedCategory(it) }
                     if (list.isNotEmpty()) {
-                        onCategoriesUpdated(list.sortedBy { it.displayOrder })
+                        onCategoriesUpdated(list.distinctBy { it.name.lowercase() }.sortedBy { it.displayOrder })
                     }
                 }
             }
     }
 
     suspend fun saveCategory(category: CategoryItem): Result<String> {
+        val normName = AdminStorage.resolveCanonicalCategoryName(category.name, category.productType, category.id)
+        val meta = AdminStorage.inferCategoryMetadata(normName)
+        val normalizedCat = category.copy(
+            id = if (category.id == "cat_audio") "cat_headphones" else category.id.ifBlank { meta.id },
+            name = normName,
+            slug = category.slug.ifBlank { meta.slug },
+            productType = category.productType.ifBlank { meta.productType }
+        )
+        if (normName.isBlank() || ProductRepository.isProhibitedCategory(normalizedCat)) {
+            return Result.failure(IllegalArgumentException("PROHIBITED_CATEGORY: კატეგორია დაუშვებელია."))
+        }
         if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
             return Result.failure(IllegalStateException("PERMISSION_DENIED: კატეგორიის შესანახად საჭიროა ადმინისტრატორი (beqa1994@gmail.com)"))
         }
-        val docId = category.id.ifBlank { "cat_${System.currentTimeMillis()}" }
+        val docId = normalizedCat.id.ifBlank { meta.id }
         val payload = hashMapOf<String, Any>(
             "id" to docId,
-            "name" to category.name.trim().take(100),
-            "localizedName" to category.localizedName.trim().take(100),
-            "description" to category.description.trim().take(500),
-            "icon" to category.icon.trim().take(20),
-            "imageUrl" to category.imageUrl.trim().take(2000),
-            "displayOrder" to category.displayOrder,
-            "isActive" to category.isActive,
-            "isPopular" to category.isPopular,
-            "popularOrder" to category.popularOrder,
-            "categoryType" to category.categoryType.trim().take(50),
+            "name" to normalizedCat.name.take(100),
+            "slug" to normalizedCat.slug.take(100),
+            "productType" to normalizedCat.productType.take(50),
+            "localizedName" to normalizedCat.localizedName.trim().take(100),
+            "description" to normalizedCat.description.trim().take(500),
+            "icon" to normalizedCat.icon.trim().take(20),
+            "imageUrl" to normalizedCat.imageUrl.trim().take(2000),
+            "displayOrder" to normalizedCat.displayOrder,
+            "sortOrder" to normalizedCat.displayOrder,
+            "isActive" to normalizedCat.isActive,
+            "isVisible" to normalizedCat.isVisible,
+            "isPopular" to normalizedCat.isPopular,
+            "popularOrder" to normalizedCat.popularOrder,
+            "categoryType" to normalizedCat.categoryType.trim().take(50),
             "updatedAt" to FieldValue.serverTimestamp()
         )
         return try {
@@ -1808,6 +3352,111 @@ class FirestoreRepository(
             Result.success(Unit)
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, "categories/$categoryId")
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================================================
+    // DYNAMIC BRANDS MANAGEMENT (/brands/{brandId})
+    // ==========================================================================
+    private fun parseBrandDoc(doc: DocumentSnapshot): BrandItem? {
+        if (!doc.exists()) return null
+        val rawName = doc.getString("name")?.trim().orEmpty()
+        if (rawName.isBlank()) return null
+        val displayName = AdminStorage.formatCanonicalBrandDisplayName(rawName)
+        val normName = AdminStorage.normalizeBrandKey(displayName)
+        if (normName.isBlank()) return null
+        val slug = doc.getString("slug")?.trim().orEmpty().ifBlank {
+            normName.replace(Regex("[^a-z0-9ა-ჰ]+"), "_").trim('_')
+        }
+        val id = AdminStorage.resolveCanonicalBrandId(displayName, doc.getString("id")?.ifBlank { doc.id } ?: doc.id)
+        return BrandItem(
+            id = id,
+            name = displayName,
+            normalizedName = normName,
+            slug = slug,
+            logoUrl = doc.getString("logoUrl")?.trim().orEmpty(),
+            isActive = doc.getBoolean("isActive") ?: doc.getBoolean("active") ?: true,
+            sortOrder = (doc.get("sortOrder") as? Number)?.toInt()
+                ?: (doc.get("displayOrder") as? Number)?.toInt()
+                ?: 100,
+            createdAt = doc.getTimestamp("createdAt")?.toDate()?.time ?: System.currentTimeMillis(),
+            updatedAt = doc.getTimestamp("updatedAt")?.toDate()?.time ?: System.currentTimeMillis()
+        )
+    }
+
+    suspend fun fetchAllBrands(): Result<List<BrandItem>> {
+        return try {
+            val snapshot = db.collection("brands").get().await()
+            val list = snapshot.documents
+                .mapNotNull { parseBrandDoc(it) }
+                .distinctBy { it.normalizedName }
+                .sortedWith(compareBy({ it.sortOrder }, { it.name }))
+            Result.success(list)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.LIST, "brands")
+            Result.failure(e)
+        }
+    }
+
+    fun listenToBrands(onBrandsUpdated: (List<BrandItem>) -> Unit): ListenerRegistration {
+        return db.collection("brands")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    handleFirestoreError(error, OperationType.LIST, "brands")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val list = snapshot.documents
+                        .mapNotNull { parseBrandDoc(it) }
+                        .distinctBy { it.normalizedName }
+                        .sortedWith(compareBy({ it.sortOrder }, { it.name }))
+                    if (list.isNotEmpty()) {
+                        onBrandsUpdated(list)
+                    }
+                }
+            }
+    }
+
+    suspend fun saveBrand(brand: BrandItem): Result<String> {
+        val displayName = AdminStorage.formatCanonicalBrandDisplayName(brand.name)
+        val normName = AdminStorage.normalizeBrandKey(displayName)
+        if (normName.isBlank()) {
+            return Result.failure(IllegalArgumentException("INVALID_BRAND: ბრენდის სახელი ცარიელია."))
+        }
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: ბრენდის შესანახად საჭიროა ადმინისტრატორი (beqa1994@gmail.com)"))
+        }
+        val docId = AdminStorage.resolveCanonicalBrandId(displayName, brand.id)
+        val slug = brand.slug.ifBlank { normName.replace(Regex("[^a-z0-9ა-ჰ]+"), "_").trim('_') }
+        val payload = hashMapOf<String, Any>(
+            "id" to docId,
+            "name" to displayName.take(80),
+            "normalizedName" to normName.take(80),
+            "slug" to slug.take(80),
+            "logoUrl" to brand.logoUrl.trim().take(1000),
+            "isActive" to brand.isActive,
+            "sortOrder" to brand.sortOrder,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        return try {
+            db.collection("brands").document(docId).set(payload, SetOptions.merge()).await()
+            Result.success(docId)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, "brands/$docId")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteBrand(brandId: String): Result<Unit> {
+        if (!checkIsCurrentUserAdmin() || auth.currentUser == null) {
+            return Result.failure(IllegalStateException("PERMISSION_DENIED: ბრენდის წასაშლელად საჭიროა ადმინისტრატორი (beqa1994@gmail.com)"))
+        }
+        return try {
+            db.collection("brands").document(brandId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, "brands/$brandId")
             Result.failure(e)
         }
     }
@@ -1903,7 +3552,7 @@ class FirestoreRepository(
             }
             if (uid.isNotBlank()) {
                 if (safeDeviceId.isNotBlank()) {
-                    val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+                    val multiDeviceDocId = buildDeviceTokenDocId(uid, safeDeviceId, cleanToken)
                     db.collection("fcm_tokens").document(multiDeviceDocId).delete()
                 }
                 db.collection("fcm_tokens").document(uid).delete()
@@ -1940,10 +3589,9 @@ class FirestoreRepository(
             }
             if (uid.isNotBlank()) {
                 if (safeDeviceId.isNotBlank()) {
-                    val multiDeviceDocId = "${uid}_$safeDeviceId".take(120)
+                    val multiDeviceDocId = buildDeviceTokenDocId(uid, safeDeviceId, cleanToken)
                     runCatching { db.collection("fcm_tokens").document(multiDeviceDocId).delete().await() }
                 }
-                runCatching { db.collection("fcm_tokens").document(uid).delete().await() }
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -1982,29 +3630,55 @@ class FirestoreRepository(
     suspend fun createAdminOrderNotification(
         orderId: String,
         orderType: String,
-        createdByUid: String = ""
+        createdByUid: String = "",
+        orderNumber: String = "",
+        summaryTitle: String = "",
+        priceText: String = "",
+        isStockInquiry: Boolean = false
     ): Result<AdminOrderNotificationRecord> {
         val cleanOrderId = orderId.trim()
         if (cleanOrderId.isBlank()) {
             return Result.failure(IllegalArgumentException("Order ID cannot be blank"))
         }
-        val normalizedType = if (orderType == "service_order") "service_order" else "imei_check"
+        val normalizedType = if (orderType == "imei_check") "imei_check" else "service_order"
         val notificationId = "admin_order_$cleanOrderId"
-        val sanitizedTitle = if (normalizedType == "imei_check") {
-            "ახალი IMEI შეკვეთა"
+        val ordNum = orderNumber.trim().ifBlank { "#BS-${cleanOrderId.takeLast(4).uppercase()}" }
+        val cleanSummary = BekaNotificationManager.stripSensitiveDataFromPayload(summaryTitle.trim()).take(80)
+        val cleanPrice = BekaNotificationManager.stripSensitiveDataFromPayload(priceText.trim()).take(30)
+        val rawTitle = if (isStockInquiry) {
+            buildString {
+                append("📦 პროდუქტის მოთხოვნა $ordNum")
+                if (cleanSummary.isNotBlank()) append(" • $cleanSummary")
+            }
         } else {
-            "ახალი შეკვეთა"
+            buildString {
+                append("ახალი შეკვეთა $ordNum")
+                if (cleanSummary.isNotBlank()) append(" • $cleanSummary")
+                if (cleanPrice.isNotBlank()) append(" • $cleanPrice")
+            }
         }
-        val sanitizedBody = if (normalizedType == "imei_check") {
-            "შემოვიდა ახალი IMEI შემოწმების მოთხოვნა."
+        val rawBody = if (isStockInquiry) {
+            buildString {
+                append("ახალი პოტენციური შეკვეთა $ordNum: მომხმარებელი ითხოვს მარაგის დაზუსტებას")
+                if (cleanSummary.isNotBlank()) append(" ($cleanSummary)")
+                append(".")
+            }
         } else {
-            "შემოვიდა ახალი სერვისის შეკვეთა."
+            buildString {
+                append("შემოვიდა ახალი შეკვეთა $ordNum")
+                if (cleanSummary.isNotBlank()) {
+                    append(" ($cleanSummary")
+                    if (cleanPrice.isNotBlank()) append(" — $cleanPrice")
+                    append(")")
+                } else if (cleanPrice.isNotBlank()) {
+                    append(" ($cleanPrice)")
+                }
+                append(".")
+            }
         }
-        val deepLink = if (normalizedType == "imei_check") {
-            "bekaservice://admin/orders/imei/$cleanOrderId"
-        } else {
-            "bekaservice://admin/orders/service/$cleanOrderId"
-        }
+        val sanitizedTitle = BekaNotificationManager.stripSensitiveDataFromPayload(rawTitle).take(120)
+        val sanitizedBody = BekaNotificationManager.stripSensitiveDataFromPayload(rawBody).take(400)
+        val deepLink = "bekaservice://admin/orders/service/$cleanOrderId"
 
         val record = AdminOrderNotificationRecord(
             notificationId = notificationId,
@@ -2179,16 +3853,6 @@ class FirestoreRepository(
                         )
                     ).await()
                 }
-            } else if (orderType == "imei_check" || rawOrderId.startsWith("imei_req_")) {
-                runCatching {
-                    db.collection("imei_requests").document(rawOrderId).update(
-                        mapOf(
-                            "adminRead" to true,
-                            "adminReadAt" to FieldValue.serverTimestamp(),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
-                }
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -2231,9 +3895,135 @@ class FirestoreRepository(
         }
     }
 
+    /**
+     * Permanently deletes an individual admin order notification document from `/admin_notifications`
+     * without touching the corresponding `/orders/{orderId}` document.
+     */
+    suspend fun deleteAdminOrderNotification(orderIdOrNotificationId: String): Result<Unit> {
+        val currentUser = auth.currentUser
+        if (currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: მხოლოდ ავტორიზებულ ადმინისტრატორს შეუძლია შეტყობინების წაშლა.")
+            )
+        }
+        val cleanId = orderIdOrNotificationId.trim()
+        if (cleanId.isBlank()) return Result.failure(IllegalArgumentException("Empty notification ID"))
+        val notificationId = if (cleanId.startsWith("admin_order_")) cleanId else "admin_order_$cleanId"
+        val docRef = db.collection("admin_notifications").document(notificationId)
+        return try {
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches a single customer order by document ID or orderNumber when opening an admin notification.
+     */
+    suspend fun fetchOrderByIdForAdmin(orderIdOrNumber: String): Result<OrderRecord?> {
+        val currentUser = auth.currentUser
+        if (currentUser == null || !checkIsCurrentUserAdmin()) {
+            return Result.failure(
+                IllegalStateException("PERMISSION_DENIED: მხოლოდ ავტორიზებულ ადმინისტრატორს აქვს წვდომა შეკვეთებზე.")
+            )
+        }
+        val clean = orderIdOrNumber.trim().removePrefix("admin_order_")
+        if (clean.isBlank()) return Result.success(null)
+        return try {
+            val directSnap = db.collection("orders").document(clean).get().await()
+            if (directSnap.exists()) {
+                val parsed = directSnap.toObject(FirestoreOrder::class.java)
+                    ?.let { fo -> if (fo.id.isBlank()) fo.copy(id = directSnap.id) else fo }
+                    ?.toOrderRecord()
+                return Result.success(parsed)
+            }
+            val byNumberSnap = db.collection("orders")
+                .whereEqualTo("orderNumber", clean)
+                .limit(1)
+                .get()
+                .await()
+            val firstDoc = byNumberSnap.documents.firstOrNull()
+            val byNum = firstDoc?.toObject(FirestoreOrder::class.java)
+                ?.let { fo -> if (fo.id.isBlank()) fo.copy(id = firstDoc.id) else fo }
+                ?.toOrderRecord()
+            Result.success(byNum)
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, "orders/$clean")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Fetches a customer order or product inquiry by ID or order number, validating ownership.
+     */
+    suspend fun fetchUserOrderById(orderIdOrNumber: String, activeUid: String): Result<OrderRecord?> {
+        val clean = orderIdOrNumber.trim()
+        if (clean.isBlank()) return Result.success(null)
+        val isSoleAdmin = checkIsCurrentUserAdmin()
+        return try {
+            val directSnap = db.collection("orders").document(clean).get().await()
+            if (directSnap.exists()) {
+                val parsed = directSnap.toObject(FirestoreOrder::class.java)
+                    ?.let { fo -> if (fo.id.isBlank()) fo.copy(id = directSnap.id) else fo }
+                    ?.toOrderRecord()
+                if (parsed != null) {
+                    val isOwnerOrAdmin = isSoleAdmin || parsed.userId.isBlank() || (activeUid.isNotBlank() && parsed.userId == activeUid)
+                    return if (isOwnerOrAdmin) {
+                        Result.success(parsed)
+                    } else {
+                        Result.failure(IllegalAccessException("წვდომა უარყოფილია: ეს შეკვეთა სხვა ანგარიშს ეკუთვნის"))
+                    }
+                }
+            }
+            val byNumberSnap = db.collection("orders")
+                .whereEqualTo("orderNumber", clean)
+                .limit(1)
+                .get()
+                .await()
+            val firstDoc = byNumberSnap.documents.firstOrNull()
+            val byNum = firstDoc?.toObject(FirestoreOrder::class.java)
+                ?.let { fo -> if (fo.id.isBlank()) fo.copy(id = firstDoc.id) else fo }
+                ?.toOrderRecord()
+            if (byNum != null) {
+                val isOwnerOrAdmin = isSoleAdmin || byNum.userId.isBlank() || (activeUid.isNotBlank() && byNum.userId == activeUid)
+                if (isOwnerOrAdmin) {
+                    Result.success(byNum)
+                } else {
+                    Result.failure(IllegalAccessException("წვდომა უარყოფილია: ეს შეკვეთა სხვა ანგარიშს ეკუთვნის"))
+                }
+            } else {
+                Result.success(null)
+            }
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, "orders/$clean")
+            Result.failure(e)
+        }
+    }
+
     companion object {
         @Volatile
         private var isCacheConfigured = false
+
+        fun sanitizeTokenDeviceId(deviceId: String, token: String = ""): String {
+            val cleanToken = token.trim()
+            val fallbackHash = if (cleanToken.isNotBlank()) {
+                kotlin.math.abs(cleanToken.hashCode()).toString(16)
+            } else {
+                "default"
+            }
+            return deviceId.trim()
+                .replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                .ifBlank { "dev_$fallbackHash" }
+                .take(64)
+        }
+
+        fun buildDeviceTokenDocId(uid: String, deviceId: String, token: String = ""): String {
+            val cleanUid = uid.trim().replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(50)
+            val safeDev = sanitizeTokenDeviceId(deviceId, token)
+            return "${cleanUid}_${safeDev}".take(120)
+        }
 
         fun formatUserFriendlyFirestoreError(e: Throwable?, fallbackDetail: String = ""): String {
             val msg = e?.message ?: fallbackDetail

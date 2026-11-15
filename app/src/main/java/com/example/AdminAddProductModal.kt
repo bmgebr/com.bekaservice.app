@@ -31,33 +31,48 @@ fun AdminAddProductModal(
     onAddProduct: (title: String, price: String, rating: String, imageUrl: String, category: String) -> Unit,
     onOpenFullAdmin: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val catVer = AdminStorage.categoriesVersion
     var title by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
     var rating by remember { mutableStateOf("5.0") }
     var imageUrl by remember { mutableStateOf("") }
     var category by remember { mutableStateOf("ეკრანები") }
+    var isCategoryManuallyOverridden by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
 
     val presetImages = listOf(
-        "⚡ Software" to "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600",
-        "🔓 Unlock" to "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600",
-        "⚙️ System" to "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600",
         "📱 OLED" to "https://images.unsplash.com/photo-1592899677977-9c10ca588bbd?w=600",
         "🔋 Battery" to "https://images.unsplash.com/photo-1591337676887-a217a6970a8a?w=600",
         "📸 Camera" to "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600",
-        "🔊 Speaker" to "https://images.unsplash.com/photo-1565849904461-04a58ad377e0?w=600"
+        "🔊 Speaker" to "https://images.unsplash.com/photo-1565849904461-04a58ad377e0?w=600",
+        "⚙️ System" to "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600"
     )
 
-    val softwarePresets = listOf(
-        Triple("iCloud / Activation მოხსნა", "350 ₾", "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600"),
-        Triple("Google FRP ანგარიშის Bypass", "80 ₾", "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=600"),
-        Triple("Firmware Flash / iOS & Android", "50 ₾", "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=600"),
-        Triple("Baseband & IMEI ქსელის აღდგენა", "120 ₾", "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600"),
-        Triple("სისტემის სრული დიაგნოსტიკა", "30 ₾", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600"),
-        Triple("SIM Carrier Unlock", "100 ₾", "https://images.unsplash.com/photo-1565849904461-04a58ad377e0?w=600")
-    )
-
-    val categoriesList = listOf("პროგრამული სერვისები", "ეკრანები", "ელემენტები", "კამერები", "დინამიკები", "დამტენის პორტები", "კორპუსები", "აქსესუარები")
+    val categoriesList = remember(catVer) {
+        AdminStorage.getCategories(context)
+            .filter { it.isActive && !ProductRepository.isProhibitedCategory(it) }
+            .sortedBy { it.displayOrder }
+            .map { it.name }
+            .ifEmpty {
+                listOf(
+                    "ეკრანები",
+                    "ელემენტები",
+                    "მობილური ტელეფონები",
+                    "ყურსასმენები",
+                    "დამტენები და კაბელები",
+                    "როუტერები და ქსელი",
+                    "კამერები",
+                    "დინამიკები",
+                    "დამტენის პორტები",
+                    "კორპუსები",
+                    "აქსესუარები",
+                    "კლავიატურები",
+                    "მაუსები",
+                    "ელექტრონიკა"
+                )
+            }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -113,7 +128,17 @@ fun AdminAddProductModal(
                     // დასახელება
                     OutlinedTextField(
                         value = title,
-                        onValueChange = { title = it },
+                        onValueChange = { newTitle ->
+                            title = newTitle
+                            if (!isCategoryManuallyOverridden) {
+                                val detected = AdminStorage.detectProductCategoryAssignment(title = newTitle)
+                                if (detected.confidence == AdminStorage.AssignmentConfidence.EXACT_TYPE ||
+                                    detected.confidence == AdminStorage.AssignmentConfidence.HIGH_CONFIDENCE_TEXT
+                                ) {
+                                    category = detected.categoryName
+                                }
+                            }
+                        },
                         placeholder = { Text("დასახელება (მაგ: iPhone 16 Pro)", color = Color(0xFF888888), fontSize = 13.sp) },
                         label = { Text("დასახელება", color = Color(0xFFFF7A00)) },
                         singleLine = true,
@@ -177,7 +202,10 @@ fun AdminAddProductModal(
                                         1.dp,
                                         if (isSelected) Color(0xFFFF7A00) else Color(0xFF2A2E38)
                                     ),
-                                    modifier = Modifier.clickable { category = cat }
+                                    modifier = Modifier.clickable {
+                                        category = cat
+                                        isCategoryManuallyOverridden = true
+                                    }
                                 ) {
                                     Text(
                                         cat,
@@ -186,34 +214,6 @@ fun AdminAddProductModal(
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
-                                }
-                            }
-                        }
-                    }
-
-                    // პროგრამული სერვისების სწრაფი შაბლონები
-                    if (category == "პროგრამული სერვისები") {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("⚡ სწრაფი პროგრამული შაბლონები (1-დაწკაპუნებით):", color = Color(0xFFFF7A00), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(softwarePresets) { preset ->
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFF1E222B),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF7A00).copy(alpha = 0.4f)),
-                                        modifier = Modifier.clickable {
-                                            title = preset.first
-                                            price = preset.second
-                                            imageUrl = preset.third
-                                        }
-                                    ) {
-                                        Text(
-                                            preset.first,
-                                            color = Color.White,
-                                            fontSize = 10.5.sp,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                        )
-                                    }
                                 }
                             }
                         }

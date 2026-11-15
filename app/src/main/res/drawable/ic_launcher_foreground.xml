@@ -2,14 +2,7 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:width="108dp"
-        android:height="108dp">
-        <shape android:shape="rectangle">
-            <solid android:color="@android:color/transparent" />
-        </shape>
-    </item>
-    <item
-        android:width="108dp"
         android:height="108dp"
-        android:drawable="@drawable/ic_launcher_emblem"
+        android:drawable="@drawable/ic_bstore_launcher_fg"
         android:gravity="center" />
 </layer-list>

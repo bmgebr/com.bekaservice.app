@@ -1,10 +1,14 @@
 package com.example.ui.theme
 
+import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import com.example.AppPreferencesManager
 
 val DarkColorScheme = darkColorScheme(
@@ -26,19 +30,27 @@ val DarkColorScheme = darkColorScheme(
 )
 
 val LightColorScheme = lightColorScheme(
-    primary = OrangePrimary,
+    primary = SoftGraphiteLightBrandOrange,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFEFE2),
-    onPrimaryContainer = Color(0xFF9A3412),
-    secondary = OrangeSecondary,
+    primaryContainer = SoftGraphiteLightSoftOrangeBg,
+    onPrimaryContainer = SoftGraphiteLightBrandOrange,
+    secondary = SoftGraphiteLightSecondaryOrange,
     onSecondary = Color.White,
-    background = Color(0xFFF3F6FB),
-    onBackground = Color(0xFF0F172A),
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFEEF2F8),
-    onSurfaceVariant = Color(0xFF475569),
-    outline = Color(0xFFCBD5E1),
+    secondaryContainer = SoftGraphiteLightBgSecondary,
+    onSecondaryContainer = SoftGraphiteLightTextPrimary,
+    background = SoftGraphiteLightBgPrimary,
+    onBackground = SoftGraphiteLightTextPrimary,
+    surface = SoftGraphiteLightSurfacePrimary,
+    onSurface = SoftGraphiteLightTextPrimary,
+    surfaceVariant = SoftGraphiteLightSurfaceSecondary,
+    onSurfaceVariant = SoftGraphiteLightTextSecondary,
+    surfaceContainerLowest = SoftGraphiteLightBgSecondary,
+    surfaceContainerLow = SoftGraphiteLightBgPrimary,
+    surfaceContainer = SoftGraphiteLightSurfacePrimary,
+    surfaceContainerHigh = SoftGraphiteLightSurfaceSecondary,
+    surfaceContainerHighest = SoftGraphiteLightSurfaceElevated,
+    outline = SoftGraphiteLightBorder,
+    outlineVariant = SoftGraphiteLightDisabled,
     error = DeleteRed,
     onError = Color.White
 )
@@ -48,6 +60,19 @@ fun RepairProTheme(
     darkTheme: Boolean = AppPreferencesManager.isDarkMode,
     content: @Composable () -> Unit
 ) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val context = view.context
+            if (context is Activity) {
+                val window = context.window
+                val insetsController = WindowCompat.getInsetsController(window, view)
+                insetsController.isAppearanceLightStatusBars = !darkTheme
+                insetsController.isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
+
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = Typography,
@@ -63,3 +88,4 @@ fun MyApplicationTheme(
 ) {
     RepairProTheme(darkTheme = darkTheme, content = content)
 }
+

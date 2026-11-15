@@ -26,12 +26,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,9 +69,7 @@ object ProductImageManager {
         "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600"
     )
 
-    private val defaultSoftwareUrlsById: Map<Int, String> by lazy {
-        SoftwareCatalogData.getDigitalSoftwareProducts().associate { it.id to it.imageUrl.trim() }
-    }
+    private val defaultSoftwareUrlsById: Map<Int, String> = emptyMap()
 
     /**
      * აბრუნებს true-ს, თუ პროდუქტს ადმინის მიერ მიბმული აქვს რეალური ფოტო
@@ -277,6 +277,76 @@ object ProductImageManager {
             null
         }
     }
+
+    /**
+     * გარდაქმნის ტელეფონის მეხსიერებიდან არჩეულ ლოკალურ ფოტოს (file://, content://, /data/...)
+     * მუდმივ, მოწყობილობათაშორის თავსებად data:image/jpeg;base64 ფორმატში, რათა Firestore-ში
+     * შენახვის შემდეგ ფოტო არ დაიკარგოს გადატვირთვისას და გამოჩნდეს ყველა მომხმარებელთან.
+     */
+    suspend fun ensurePersistableImageUrl(context: Context, rawUrl: String): String = withContext(Dispatchers.IO) {
+        val clean = rawUrl.trim()
+        if (clean.isBlank() || clean.equals(AUTO_GENERATED_IMAGE_MARKER, ignoreCase = true)) {
+            return@withContext AUTO_GENERATED_IMAGE_MARKER
+        }
+        if (clean.startsWith("http://", ignoreCase = true) ||
+            clean.startsWith("https://", ignoreCase = true) ||
+            clean.startsWith("data:image/", ignoreCase = true)
+        ) {
+            return@withContext clean
+        }
+        val decoded = decodeLocalBitmapIfPossible(context, clean) ?: return@withContext clean
+        try {
+            val maxDim = 520
+            val w = decoded.width.coerceAtLeast(1)
+            val h = decoded.height.coerceAtLeast(1)
+            val scaled = if (w > maxDim || h > maxDim) {
+                val ratio = w.toFloat() / h.toFloat()
+                val targetW = if (ratio >= 1f) maxDim else (maxDim * ratio).toInt().coerceAtLeast(1)
+                val targetH = if (ratio >= 1f) (maxDim / ratio).toInt().coerceAtLeast(1) else maxDim
+                Bitmap.createScaledBitmap(decoded, targetW, targetH, true)
+            } else {
+                decoded
+            }
+            val baos = java.io.ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 76, baos)
+            val bytes = baos.toByteArray()
+            val b64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            val dataUri = "data:image/jpeg;base64,$b64"
+            localBitmapCache.put(dataUri, scaled)
+            dataUri
+        } catch (_: Exception) {
+            clean
+        }
+    }
+
+    suspend fun ensurePersistableProductImages(context: Context, item: ProductItem): ProductItem = withContext(Dispatchers.IO) {
+        val persistedPrimary = ensurePersistableImageUrl(
+            context,
+            item.primaryImageUrl?.takeIf { it.isNotBlank() } ?: item.imageUrl
+        )
+        val persistedList = item.images
+            .map { it.trim() }
+            .filter { it.isNotBlank() && !it.equals(AUTO_GENERATED_IMAGE_MARKER, ignoreCase = true) }
+            .map { ensurePersistableImageUrl(context, it) }
+            .distinct()
+        val finalImages = if (persistedList.isNotEmpty()) {
+            persistedList
+        } else if (persistedPrimary.isNotBlank() && persistedPrimary != AUTO_GENERATED_IMAGE_MARKER) {
+            listOf(persistedPrimary)
+        } else {
+            emptyList()
+        }
+        val finalPrimary = if (persistedPrimary.isNotBlank() && persistedPrimary != AUTO_GENERATED_IMAGE_MARKER) {
+            persistedPrimary
+        } else {
+            finalImages.firstOrNull() ?: AUTO_GENERATED_IMAGE_MARKER
+        }
+        item.copy(
+            imageUrl = finalPrimary,
+            primaryImageUrl = if (finalPrimary == AUTO_GENERATED_IMAGE_MARKER) null else finalPrimary,
+            images = finalImages
+        )
+    }
 }
 
 /**
@@ -353,6 +423,64 @@ fun SafeProductAsyncImage(
  * - ხოლო თუ არჩეულია ავტო-გენერირებული რეჟიმი (ან ბმული ცარიელია), აჩვენებს ბრენდულ გენერირებულ ქარდს.
  */
 @Composable
+fun HardwareProductFallbackVisual(
+    product: ProductItem,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false
+) {
+    val accentColor = remember(product.brandColorHex) {
+        runCatching { Color(android.graphics.Color.parseColor(product.brandColorHex.ifBlank { "#FF7A00" })) }
+            .getOrDefault(Color(0xFFFF7A00))
+    }
+    Box(
+        modifier = modifier
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF141821),
+                        accentColor.copy(alpha = 0.22f),
+                        Color(0xFF0F1115)
+                    )
+                )
+            )
+            .padding(if (compact) 8.dp else 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Build,
+                contentDescription = product.title,
+                tint = accentColor,
+                modifier = Modifier.size(if (compact) 28.dp else 44.dp)
+            )
+            if (!compact) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = product.brand.ifBlank { "BSTORE" },
+                    color = accentColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = product.title,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ProductSmartVisual(
     product: ProductItem,
     modifier: Modifier = Modifier,
@@ -372,11 +500,10 @@ fun ProductSmartVisual(
         modifier = modifier.background(AppThemeColorAdapter.adaptSurfaceColor(Color(0xFF0F1115)))
     ) {
         if (!hasCustomPhoto) {
-            SoftwareBrandVisualHeader(
+            HardwareProductFallbackVisual(
                 product = product,
                 modifier = Modifier.fillMaxSize(),
-                compact = compact,
-                ignoreCustomImage = true
+                compact = compact
             )
         } else {
             val isLocal = remember(rawUrl) { ProductImageManager.isLocalOrEmbeddedImage(rawUrl) }
@@ -399,20 +526,18 @@ fun ProductSmartVisual(
                         contentScale = ContentScale.Crop
                     )
                 } else {
-                    SoftwareBrandVisualHeader(
+                    HardwareProductFallbackVisual(
                         product = product,
                         modifier = Modifier.fillMaxSize(),
-                        compact = compact,
-                        ignoreCustomImage = true
+                        compact = compact
                     )
                 }
             } else {
                 if (!isRemotePhotoLoaded) {
-                    SoftwareBrandVisualHeader(
+                    HardwareProductFallbackVisual(
                         product = product,
                         modifier = Modifier.fillMaxSize(),
-                        compact = compact,
-                        ignoreCustomImage = true
+                        compact = compact
                     )
                 }
                 AsyncImage(
@@ -451,8 +576,8 @@ enum class ProductCategoryType(
     ),
     HEADPHONES(
         id = "headphones",
-        displayLabel = "🎧 ყურსასმენები და აუდიო",
-        defaultCategoryName = "ყურსასმენები და აუდიო",
+        displayLabel = "🎧 ყურსასმენები",
+        defaultCategoryName = "ყურსასმენები",
         isDigitalService = false
     ),
     CHARGER_CABLE(
@@ -1288,7 +1413,7 @@ object AdminProductAiGenerator {
             .joinToString(", ") { "\"${it.key}\"" }
 
         val prompt = """
-შენ ხარ BEKASERVICE-ის ტექნიკური კატალოგის ინჟინერი და პროდუქტების მკვლევარი.
+შენ ხარ BSTORE-ის ტექნიკური კატალოგის ინჟინერი და პროდუქტების მკვლევარი.
 ადმინისტრატორმა შეიყვანა პროდუქტის დასახელება: "${identified.rawTitle}"
 იდენტიფიცირებული ბრენდი: "${identified.brand}"
 იდენტიფიცირებული მოდელი: "${identified.modelName}" (ზუსტი კოდი: "${identified.exactModelIdentifier}")
@@ -1779,115 +1904,38 @@ ${if (webContextText.isNotBlank()) "მოძიებული ვებ-სპ
         }
 
         // =========================================================================
-        // 8. ციფრული სერვისები და პროგრამული პროდუქტები (DIGITAL_SERVICE)
+        // 8. სხვა აპარატურული კომპონენტები და სერვის ცენტრის ნაწილები
         // =========================================================================
-        val detectedDuration = when {
-            lower.contains("18 თვ") || lower.contains("18 month") -> "18 თვე"
-            lower.contains("12 თვ") || lower.contains("1 წლ") || lower.contains("წლიურ") || lower.contains("year") || lower.contains("annual") -> "12 თვე"
-            lower.contains("6 თვ") || lower.contains("6 month") -> "6 თვე"
-            lower.contains("3 თვ") || lower.contains("3 month") -> "3 თვე"
-            lower.contains("უვადო") || lower.contains("lifetime") || lower.contains("სამუდამო") -> "უვადო (Lifetime)"
-            else -> "1 თვე"
-        }
-
-        val isUnlockService = lower.contains("unlock") || lower.contains("განბლოკვ") || lower.contains("frp") ||
-            lower.contains("icloud") || lower.contains("t-mobile") || lower.contains("verizon") || lower.contains("at&t") ||
-            lower.contains("carrier") || lower.contains("cpid") || lower.contains("mdm") || lower.contains("knox") ||
-            lower.contains("sim lock") || lower.contains("edl") || lower.contains("flashing")
-
-        if (isUnlockService) {
-            return GeneratedProductFields(
-                title = title,
-                price = "",
-                shortDescription = "$title — ოფიციალური ქარხნული განბლოკვა (Factory/Carrier Unlock) და SIM შეზღუდვების მოხსნა.",
-                description = "$title წარმოადგენს სერვერულ და USB პროგრამულ მომსახურებას. განბლოკვის შემდეგ მოწყობილობა მუშაობს Silknet, Magti და Cellfie ქსელებზე შეუზღუდავად და ინარჩუნებს სისტემურ განახლებებს.",
-                category = "პროგრამული სერვისები",
-                brand = detectedBrand,
-                isSoftware = true,
-                subcategory = "მობილურის პროგრამირება და განბლოკვა",
-                offerType = "დისტანციური USB / Official Unlock",
-                duration = "სამუდამო (Permanent Unlock)",
-                accountType = "სერვერული CPID / IMEI Unlock",
-                features = listOf(
-                    "მოწყობილობის მუდმივი (Permanent) ოფიციალური განბლოკვა",
-                    "ყველა ქართული და საერთაშორისო SIM ბარათის მხარდაჭერა (Silknet, Magti, Cellfie)",
-                    "ქარხნული OTA განახლებების სრული შენარჩუნება"
-                ),
-                targetAudience = "$detectedBrand სმარტფონის მფლობელები, რომელთა მოწყობილობაც დაბლოკილია ოპერატორზე.",
-                activationTerms = "განბლოკვა ხორციელდება დისტანციურად USB კაბელით ან IMEI სერვერული მოთხოვნით.",
-                compatibleModels = detectedBrand,
-                warranty = "",
-                searchKeywords = "${title.lowercase()}, ${detectedBrand.lowercase()}, unlock, sim lock, cpid, frp",
-                exactModel = exactModel,
-                productType = ProductCategoryType.DIGITAL_SERVICE.id,
-                condition = "",
-                specifications = emptyMap(),
-                researchSources = webSources.ifEmpty { listOf("Digital Unlock Service Specifications") },
-                isVerifiedFromSearch = true
-            )
-        }
-
-        val isAcrobatOrPdf = lower.contains("acrobat") || lower.contains("pdf")
-        val isAiService = lower.contains("ai") || lower.contains("gpt") || lower.contains("claude") || lower.contains("gemini") ||
-            lower.contains("grok") || lower.contains("perplexity") || lower.contains("cursor") || lower.contains("lovable") ||
-            lower.contains("midjourney") || lower.contains("runway") || lower.contains("suno") || lower.contains("elevenlabs") || lower.contains("deepseek")
-        val isDesignOrMedia = lower.contains("canva") || lower.contains("capcut") || lower.contains("adobe") || lower.contains("photoshop") ||
-            lower.contains("premiere") || lower.contains("figma") || lower.contains("youtube") || lower.contains("spotify") ||
-            lower.contains("netflix") || lower.contains("disney")
-        val isOfficeOrWin = lower.contains("office") || lower.contains("windows") || lower.contains("365") || lower.contains("word") || lower.contains("excel")
-
-        val subcategory = when {
-            isAiService -> SoftwareCatalogData.SUBCAT_AI
-            isOfficeOrWin -> SoftwareCatalogData.SUBCAT_LICENSES
-            isDesignOrMedia || isAcrobatOrPdf -> SoftwareCatalogData.SUBCAT_CREATIVE
-            lower.contains("gmail") || lower.contains("google storage") || lower.contains("google one") -> SoftwareCatalogData.SUBCAT_GOOGLE
-            else -> SoftwareCatalogData.SUBCAT_LICENSES
-        }
-
-        val shortDesc = when {
-            isAcrobatOrPdf -> "$title — პროფესიონალური PDF რედაქტირების, კონვერტაციის (Word/Excel), OCR ტექსტის ამოცნობისა და ელექტრონული ხელმოწერის პაკეტი."
-            lower.contains("claude") -> "$title — Claude AI მოდელებზე პრემიუმ წვდომა გაზრდილი ლიმიტებით, Extended Thinking რეჟიმითა და კოდის ანალიზით."
-            isAiService -> "$title — AI მოდელებზე პრემიუმ წვდომა გაზრდილი ლიმიტებით, სწრაფი გენერაციითა და პროფესიონალური ინსტრუმენტებით."
-            isOfficeOrWin -> "$title — ოფიციალური საოფისე პაკეტისა და სისტემის ლიცენზია სრული განახლებებით."
-            isDesignOrMedia -> "$title — ოფიციალური პრემიუმ გამოწერა შეუზღუდავი რესურსებით და მაღალი ხარისხის ექსპორტით."
-            else -> "$title — ციფრული პროგრამული სერვისი და ლიცენზია სრული ფუნქციონალით."
-        }
-
-        val fullDesc = "$title წარმოადგენს $detectedBrand-ის ციფრულ პროგრამულ სერვისს, რომელიც უზრუნველყოფს წვდომას პლატფორმის პრემიუმ ინსტრუმენტებსა და ფუნქციებზე."
-
-        val accountType = when {
-            lower.contains("shared") -> "Shared ანგარიში"
-            isOfficeOrWin -> "Retail ლიცენზიის გასაღები (Key)"
-            else -> "პირადი ანგარიში (Private)"
-        }
-
         return GeneratedProductFields(
             title = title,
             price = "",
-            shortDescription = shortDesc,
-            description = fullDesc,
-            category = "პროგრამული სერვისები",
+            shortDescription = "$title — ქარხნული სტანდარტის სათადარიგო ნაწილი და აპარატურული კომპონენტი.",
+            description = "$title წარმოადგენს $detectedBrand-ის მაღალი ხარისხის სათადარიგო კომპონენტს. მოწმდება BSTORE-ის ლაბორატორიაში მონტაჟამდე.",
+            category = "სხვა",
             brand = detectedBrand,
-            isSoftware = true,
-            subcategory = subcategory,
-            offerType = if (detectedDuration.contains("უვადო")) "უვადო ლიცენზია (Lifetime)" else "პრემიუმ გამოწერა ($detectedDuration)",
-            duration = detectedDuration,
-            accountType = accountType,
+            isSoftware = false,
+            subcategory = "სათადარიგო კომპონენტები",
+            offerType = "",
+            duration = "",
+            accountType = "",
             features = listOf(
-                "პლატფორმის პრემიუმ ფუნქციების სრული მხარდაჭერა",
-                "თავსებადია კომპიუტერსა და მობილურ მოწყობილობებზე",
-                "სწრაფი დისტანციური აქტივაცია"
+                "ქარხნული სტანდარტის თავსებადობა და ზუსტი მორგება",
+                "სრული ტექნიკური შემოწმება ინსტალაციამდე",
+                "ოფიციალური სერვის ცენტრის გარანტია"
             ),
-            targetAudience = "მომხმარებლები და პროფესიონალები, რომლებსაც სჭირდებათ $title",
-            activationTerms = "აქტივაცია სრულდება დისტანციურად 10-15 წუთში.",
-            compatibleModels = if (isOfficeOrWin) "Windows 10/11, macOS" else "Windows, macOS, iOS, Android, Web",
-            warranty = "",
-            searchKeywords = "${title.lowercase()}, ${detectedBrand.lowercase()}, ${subcategory.lowercase()}",
-            exactModel = "",
-            productType = ProductCategoryType.DIGITAL_SERVICE.id,
-            condition = "",
-            specifications = emptyMap(),
-            researchSources = webSources.ifEmpty { listOf("Official Digital Platform Specs ($detectedBrand)") },
+            targetAudience = "$detectedBrand მოწყობილობის მფლობელები",
+            activationTerms = "",
+            compatibleModels = exactModel.ifBlank { detectedBrand },
+            warranty = "6 თვე",
+            searchKeywords = "${title.lowercase()}, ${detectedBrand.lowercase()}, spare part, hardware",
+            exactModel = exactModel,
+            productType = ProductCategoryType.OTHER_ELECTRONICS.id,
+            condition = "ახალი",
+            specifications = mapOf(
+                "ნაწილის ტიპი" to "სათადარიგო კომპონენტი",
+                "მონტაჟის სტანდარტი" to "ქარხნული კონექტორი"
+            ),
+            researchSources = webSources.ifEmpty { listOf("Manufacturer Component Specs ($detectedBrand)") },
             isVerifiedFromSearch = true
         )
     }
@@ -2055,13 +2103,14 @@ ${if (webContextText.isNotBlank()) "მოძიებული ვებ-სპ
 
 /**
  * სურათის ჩამოჭრისა და პოზიციონირების ინტერაქტიული მოდალი (Image Cropping & Framing Modal).
- * მხარს უჭერს 1:1, 4:5, 16:9 და ორიგინალ პროპორციებს, 2-თითიან პანსა და ზუმს.
+ * მხარს უჭერს 1:1, 4:5, 16:9 და ორიგინალ პროპორციებს, Fit/Fill რეჟიმებს, ზუმის სლაიდერსა და 2-თითიან პანსა/ზუმს.
  */
 @Composable
 fun ImageCropperDialog(
     imageUriOrUrl: String,
     onDismiss: () -> Unit,
-    onCropFinished: (String) -> Unit
+    onCropFinished: (String) -> Unit,
+    initialRatioIndex: Int = 2
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -2069,11 +2118,23 @@ fun ImageCropperDialog(
     var isLoading by remember { mutableStateOf(true) }
 
     // Aspect ratio: 0 = 1:1, 1 = 4:5, 2 = 16:9, 3 = Original
-    var selectedRatioIndex by remember { mutableIntStateOf(0) }
-    val ratios = listOf("1:1 კვადრატი" to 1f, "4:5 პორტრეტი" to 0.8f, "16:9 ლანდშაფტი" to (16f / 9f), "ორიგინალი" to 0f)
+    val ratios = remember {
+        listOf(
+            "1:1 კვადრატი" to 1f,
+            "4:5 პორტრეტი" to 0.8f,
+            "16:9 ლანდშაფტი" to (16f / 9f),
+            "ორიგინალი" to 0f
+        )
+    }
+    var selectedRatioIndex by remember {
+        mutableIntStateOf(initialRatioIndex.coerceIn(0, ratios.lastIndex))
+    }
 
+    // Fit = true (მთლიანი ფოტოს ჩატევა ჩარჩოში მოჭრის გარეშე), false = Fill (ჩარჩოს სრულად შევსება)
+    var isFitMode by remember { mutableStateOf(true) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var frameSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     var isSaving by remember { mutableStateOf(false) }
 
     LaunchedEffect(imageUriOrUrl) {
@@ -2084,6 +2145,66 @@ fun ImageCropperDialog(
         }
         bitmap = loaded
         isLoading = false
+    }
+
+    val performCropAndSave = {
+        val src = bitmap
+        if (src != null && !isSaving) {
+            isSaving = true
+            coroutineScope.launch {
+                try {
+                    val savedUri = withContext(Dispatchers.IO) {
+                        val targetRatio = ratios[selectedRatioIndex].second
+                        val srcW = src.width.toFloat().coerceAtLeast(1f)
+                        val srcH = src.height.toFloat().coerceAtLeast(1f)
+                        val activeRatio = if (targetRatio <= 0f) (srcW / srcH) else targetRatio
+
+                        val maxDim = 1200
+                        val outW: Int
+                        val outH: Int
+                        if (activeRatio >= 1f) {
+                            outW = maxDim
+                            outH = (maxDim / activeRatio).toInt().coerceAtLeast(1)
+                        } else {
+                            outH = maxDim
+                            outW = (maxDim * activeRatio).toInt().coerceAtLeast(1)
+                        }
+
+                        val outBitmap = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+                        val androidCanvas = android.graphics.Canvas(outBitmap)
+                        androidCanvas.drawColor(android.graphics.Color.parseColor("#0B0E14"))
+
+                        val outBaseScale = if (isFitMode) {
+                            minOf(outW.toFloat() / srcW, outH.toFloat() / srcH)
+                        } else {
+                            maxOf(outW.toFloat() / srcW, outH.toFloat() / srcH)
+                        }
+                        val outTotalScale = outBaseScale * scale
+                        val drawW = srcW * outTotalScale
+                        val drawH = srcH * outTotalScale
+
+                        val ratioX = if (frameSize.width > 0) outW.toFloat() / frameSize.width.toFloat() else 1f
+                        val ratioY = if (frameSize.height > 0) outH.toFloat() / frameSize.height.toFloat() else 1f
+
+                        val left = (outW.toFloat() - drawW) / 2f + (offset.x * ratioX)
+                        val top = (outH.toFloat() - drawH) / 2f + (offset.y * ratioY)
+
+                        val paint = android.graphics.Paint(
+                            android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG
+                        )
+                        val dstRect = android.graphics.RectF(left, top, left + drawW, top + drawH)
+                        androidCanvas.drawBitmap(src, null, dstRect, paint)
+
+                        ProductImageManager.saveCroppedBitmap(context, outBitmap)
+                    }
+                    onCropFinished(savedUri)
+                } catch (_: Exception) {
+                    onCropFinished(imageUriOrUrl)
+                } finally {
+                    isSaving = false
+                }
+            }
+        }
     }
 
     Dialog(
@@ -2100,81 +2221,72 @@ fun ImageCropperDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .systemBarsPadding()
+                    .navigationBarsPadding()
             ) {
-                // Top Action Bar
+                // Top Action Bar — Title uses weight(1f) so the Save button is NEVER pushed off screen
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = onDismiss, enabled = !isSaving) {
+                    IconButton(
+                        onClick = onDismiss,
+                        enabled = !isSaving,
+                        modifier = Modifier.testTag("image_cropper_close_button")
+                    ) {
                         Icon(Icons.Default.Close, contentDescription = "დახურვა", tint = Color.White)
                     }
                     Text(
-                        text = "✂️ ფოტოს ჩამოჭრა & პოზიციონირება",
+                        text = "✂️ ფოტოს ზომა & პოზიცია",
                         color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 6.dp)
                     )
                     Button(
-                        onClick = {
-                            val src = bitmap ?: return@Button
-                            isSaving = true
-                            coroutineScope.launch {
-                                try {
-                                    val targetRatio = ratios[selectedRatioIndex].second
-                                    val srcW = src.width
-                                    val srcH = src.height
-                                    val desiredRatio = if (targetRatio <= 0f) srcW.toFloat() / srcH.toFloat() else targetRatio
-
-                                    // Calculate crop box
-                                    val cropW: Int
-                                    val cropH: Int
-                                    if (srcW.toFloat() / srcH.toFloat() > desiredRatio) {
-                                        cropH = (srcH / scale).toInt().coerceIn(1, srcH)
-                                        cropW = (cropH * desiredRatio).toInt().coerceIn(1, srcW)
-                                    } else {
-                                        cropW = (srcW / scale).toInt().coerceIn(1, srcW)
-                                        cropH = (cropW / desiredRatio).toInt().coerceIn(1, srcH)
-                                    }
-
-                                    val centerX = srcW / 2 - (offset.x / 2f).toInt()
-                                    val centerY = srcH / 2 - (offset.y / 2f).toInt()
-
-                                    val startX = (centerX - cropW / 2).coerceIn(0, (srcW - cropW).coerceAtLeast(0))
-                                    val startY = (centerY - cropH / 2).coerceIn(0, (srcH - cropH).coerceAtLeast(0))
-
-                                    val cropped = Bitmap.createBitmap(src, startX, startY, cropW, cropH)
-                                    val savedUri = ProductImageManager.saveCroppedBitmap(context, cropped)
-                                    onCropFinished(savedUri)
-                                } catch (_: Exception) {
-                                    onCropFinished(imageUriOrUrl)
-                                } finally {
-                                    isSaving = false
-                                }
-                            }
-                        },
+                        onClick = { performCropAndSave() },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00)),
                         shape = RoundedCornerShape(10.dp),
                         enabled = bitmap != null && !isSaving,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.testTag("image_cropper_top_save_button")
                     ) {
                         if (isSaving) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
                         } else {
-                            Text("შენახვა", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "შენახვა",
+                                color = Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 }
 
-                // Interactive Crop Area
+                // Interactive WYSIWYG Crop Area
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(16.dp)
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF14171D)),
                     contentAlignment = Alignment.Center
@@ -2182,108 +2294,128 @@ fun ImageCropperDialog(
                     if (isLoading) {
                         CircularProgressIndicator(color = Color(0xFFFF6B00))
                     } else if (bitmap != null) {
-                        val currentRatio = ratios[selectedRatioIndex].second
                         val bmp = bitmap!!
+                        val currentRatio = ratios[selectedRatioIndex].second
+                        val activeRatio = if (currentRatio <= 0f) {
+                            (bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)).coerceIn(0.5f, 3.0f)
+                        } else {
+                            currentRatio
+                        }
 
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .pointerInput(Unit) {
+                                .padding(12.dp)
+                                .pointerInput(selectedRatioIndex, isFitMode) {
                                     detectTransformGestures { _, pan, zoom, _ ->
-                                        scale = (scale * zoom).coerceIn(0.6f, 4f)
+                                        scale = (scale * zoom).coerceIn(0.5f, 3.5f)
                                         offset += pan
                                     }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Image(
-                                bitmap = bmp.asImageBitmap(),
-                                contentDescription = "Crop target",
+                            // Exact Aspect-Ratio Viewfinder Frame (What you see inside this frame is 100% what gets saved)
+                            Box(
                                 modifier = Modifier
+                                    .aspectRatio(activeRatio, matchHeightConstraintsFirst = activeRatio < 1f)
                                     .fillMaxSize()
-                                    .graphicsLayer(
-                                        scaleX = scale,
-                                        scaleY = scale,
-                                        translationX = offset.x,
-                                        translationY = offset.y
-                                    ),
-                                contentScale = ContentScale.Fit
-                            )
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF0B0E14))
+                                    .border(2.5.dp, Color(0xFFFF6B00), RoundedCornerShape(10.dp))
+                                    .onSizeChanged { frameSize = it }
+                            ) {
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val dstW = size.width
+                                    val dstH = size.height
+                                    val srcW = bmp.width.toFloat().coerceAtLeast(1f)
+                                    val srcH = bmp.height.toFloat().coerceAtLeast(1f)
 
-                            // Semi-transparent overlay with viewfinder frame
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val canvasW = size.width
-                                val canvasH = size.height
-                                val activeRatio = if (currentRatio <= 0f) bmp.width.toFloat() / bmp.height.toFloat() else currentRatio
+                                    val baseScale = if (isFitMode) {
+                                        minOf(dstW / srcW, dstH / srcH)
+                                    } else {
+                                        maxOf(dstW / srcW, dstH / srcH)
+                                    }
+                                    val totalScale = baseScale * scale
+                                    val drawW = srcW * totalScale
+                                    val drawH = srcH * totalScale
+                                    val left = (dstW - drawW) / 2f + offset.x
+                                    val top = (dstH - drawH) / 2f + offset.y
 
-                                val boxW: Float
-                                val boxH: Float
-                                if (canvasW / canvasH > activeRatio) {
-                                    boxH = canvasH * 0.85f
-                                    boxW = boxH * activeRatio
-                                } else {
-                                    boxW = canvasW * 0.85f
-                                    boxH = boxW / activeRatio
+                                    drawImage(
+                                        image = bmp.asImageBitmap(),
+                                        dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
+                                        dstSize = androidx.compose.ui.unit.IntSize(
+                                            drawW.toInt().coerceAtLeast(1),
+                                            drawH.toInt().coerceAtLeast(1)
+                                        )
+                                    )
+
+                                    // Rule-of-thirds guide lines inside viewfinder
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.28f),
+                                        start = Offset(dstW / 3f, 0f),
+                                        end = Offset(dstW / 3f, dstH),
+                                        strokeWidth = 1.dp.toPx()
+                                    )
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.28f),
+                                        start = Offset(2f * dstW / 3f, 0f),
+                                        end = Offset(2f * dstW / 3f, dstH),
+                                        strokeWidth = 1.dp.toPx()
+                                    )
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.28f),
+                                        start = Offset(0f, dstH / 3f),
+                                        end = Offset(dstW, dstH / 3f),
+                                        strokeWidth = 1.dp.toPx()
+                                    )
+                                    drawLine(
+                                        color = Color.White.copy(alpha = 0.28f),
+                                        start = Offset(0f, 2f * dstH / 3f),
+                                        end = Offset(dstW, 2f * dstH / 3f),
+                                        strokeWidth = 1.dp.toPx()
+                                    )
                                 }
-
-                                val left = (canvasW - boxW) / 2f
-                                val top = (canvasH - boxH) / 2f
-
-                                // Grid line overlay
-                                drawRect(
-                                    color = Color(0xFFFF6B00),
-                                    topLeft = Offset(left, top),
-                                    size = Size(boxW, boxH),
-                                    style = Stroke(width = 3.dp.toPx())
-                                )
-                                // 1/3 and 2/3 guidelines
-                                drawLine(
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    start = Offset(left + boxW / 3f, top),
-                                    end = Offset(left + boxW / 3f, top + boxH),
-                                    strokeWidth = 1.dp.toPx()
-                                )
-                                drawLine(
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    start = Offset(left + 2f * boxW / 3f, top),
-                                    end = Offset(left + 2f * boxW / 3f, top + boxH),
-                                    strokeWidth = 1.dp.toPx()
-                                )
-                                drawLine(
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    start = Offset(left, top + boxH / 3f),
-                                    end = Offset(left + boxW, top + boxH / 3f),
-                                    strokeWidth = 1.dp.toPx()
-                                )
-                                drawLine(
-                                    color = Color.White.copy(alpha = 0.4f),
-                                    start = Offset(left, top + 2f * boxH / 3f),
-                                    end = Offset(left + boxW, top + 2f * boxH / 3f),
-                                    strokeWidth = 1.dp.toPx()
-                                )
                             }
                         }
                     } else {
-                        Text("სურათის ჩატვირთვა ვერ მოხერხდა", color = Color(0xFFA0A5B0), fontSize = 13.sp)
+                        Text(
+                            text = "სურათის ჩატვირთვა ვერ მოხერხდა",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 13.sp
+                        )
                     }
                 }
 
-                // Aspect Ratio Selector & Controls
+                // Aspect Ratio Selector, Fit/Fill Mode, Zoom & Bottom Save Button
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "პროპორციის არჩევა (Aspect Ratio):",
-                        color = Color(0xFFA0A5B0),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "პროპორციის არჩევა (Aspect Ratio):",
+                            color = Color(0xFFA0A5B0),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (isFitMode) "რეჟიმი: სრულად ჩატევა" else "რეჟიმი: ჩარჩოს შევსება",
+                            color = Color(0xFFFF6B00),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         ratios.forEachIndexed { index, (label, _) ->
                             val isSelected = selectedRatioIndex == index
@@ -2293,36 +2425,181 @@ fun ImageCropperDialog(
                                 border = if (!isSelected) BorderStroke(1.dp, Color(0xFF2E3440)) else null,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable { selectedRatioIndex = index }
+                                    .testTag("crop_ratio_option_$index")
+                                    .clickable {
+                                        selectedRatioIndex = index
+                                        scale = 1f
+                                        offset = Offset.Zero
+                                    }
                             ) {
                                 Text(
                                     text = label,
-                                    color = if (isSelected) Color.White else Color(0xFFA0A5B0),
+                                    color = if (isSelected) Color.Black else Color(0xFFA0A5B0),
                                     fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
                                     textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(vertical = 8.dp)
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
                                 )
                             }
                         }
                     }
+
+                    // Fit vs Fill + Reset Controls
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "გამოიყენეთ 2 თითი ზუმისთვის და გადასაადგილებლად",
-                            color = Color(0xFF6B7280),
-                            fontSize = 11.sp
-                        )
-                        TextButton(
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isFitMode) Color(0xFF38BDF8).copy(alpha = 0.2f) else Color(0xFF1E222B),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isFitMode) Color(0xFF38BDF8) else Color(0xFF2E3440)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("crop_mode_fit_button")
+                                .clickable {
+                                    isFitMode = true
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                }
+                        ) {
+                            Text(
+                                text = "სრულად ჩატევა (Fit)",
+                                color = if (isFitMode) Color(0xFF38BDF8) else Color(0xFFA0A5B0),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 7.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (!isFitMode) Color(0xFF38BDF8).copy(alpha = 0.2f) else Color(0xFF1E222B),
+                            border = BorderStroke(
+                                1.dp,
+                                if (!isFitMode) Color(0xFF38BDF8) else Color(0xFF2E3440)
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("crop_mode_fill_button")
+                                .clickable {
+                                    isFitMode = false
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                }
+                        ) {
+                            Text(
+                                text = "ჩარჩოს შევსება (Fill)",
+                                color = if (!isFitMode) Color(0xFF38BDF8) else Color(0xFFA0A5B0),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 7.dp)
+                            )
+                        }
+
+                        OutlinedButton(
                             onClick = {
                                 scale = 1f
                                 offset = Offset.Zero
-                            }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFF334155)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
                         ) {
-                            Text("რესეტი", color = Color(0xFFFF6B00), fontSize = 12.sp)
+                            Text("რესეტი", color = Color(0xFFFF6B00), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Zoom Slider for easy one-handed sizing
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "ზუმი: ${(scale * 100).toInt()}%",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.width(72.dp)
+                        )
+                        Slider(
+                            value = scale,
+                            onValueChange = { scale = it },
+                            valueRange = 0.5f..3.0f,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(26.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFFFF6B00),
+                                activeTrackColor = Color(0xFFFF6B00),
+                                inactiveTrackColor = Color(0xFF2E3440)
+                            )
+                        )
+                    }
+
+                    // Prominent Bottom Action Buttons (Cancel + Save)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp, bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            enabled = !isSaving,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF475569))
+                        ) {
+                            Text(
+                                text = "გაუქმება",
+                                color = Color(0xFFE2E8F0),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        Button(
+                            onClick = { performCropAndSave() },
+                            enabled = bitmap != null && !isSaving,
+                            modifier = Modifier
+                                .weight(1.6f)
+                                .height(48.dp)
+                                .testTag("image_cropper_save_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF6B00),
+                                contentColor = Color.Black
+                            )
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(
+                                    color = Color.Black,
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "მოჭრა და შენახვა",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                     }
                 }

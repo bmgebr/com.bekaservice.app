@@ -1,0 +1,644 @@
+# BSTORE — COMPLETE GLOBAL NOTIFICATION SYSTEM SECURITY AUDIT, PRIVACY FIX & IMPLEMENTATION
+
+Act as a senior Android/Kotlin engineer, Firebase architect, backend security engineer, and mobile application security auditor.
+
+Your task is to perform a complete security audit, identify the root cause, and permanently fix notification privacy and cross-user data leakage throughout the entire BSTORE application.
+
+## 1. CRITICAL PROBLEM
+
+A serious privacy issue has been observed:
+
+When the application is launched in a fresh state and the initial setup is completed, Push Notifications belonging to an authenticated user's orders can appear even when the current application session is unauthenticated.
+
+This suggests that notifications may be incorrectly shared between users, devices, sessions, or accounts.
+
+Do NOT assume this problem is limited to order notifications.
+
+The same underlying issue could affect every notification category, notification history, unread counters, local caches, deep links, or other account-specific data.
+
+Treat this as a critical security vulnerability.
+
+The goal is to guarantee that every notification is delivered to and displayed only to its authorized recipient.
+
+## 2. FIRST: INSPECT THE EXISTING PROJECT
+
+Before modifying anything, inspect the entire existing project and understand its current architecture.
+
+The project uses:
+- Native Android development.
+- Kotlin.
+- Jetpack Compose.
+- Firebase Authentication.
+- Cloud Firestore.
+- Firebase Cloud Messaging (FCM).
+- Existing admin functionality and authorization.
+- Existing order, payment, product, profile, and notification systems.
+
+Inspect all relevant files and components, including but not limited to:
+
+- Firebase initialization.
+- Firebase Authentication lifecycle.
+- Login, registration, logout, and guest-session handling.
+- Anonymous Authentication, if implemented.
+- FCM token generation and refresh.
+- FCM token registration and storage.
+- Token-to-user associations.
+- Notification sending logic.
+- Cloud Functions or other backend notification services.
+- Firestore notification collections and queries.
+- Firestore Security Rules.
+- Notification repositories.
+- Notification ViewModels.
+- Notification screens and badges.
+- Foreground and background message handlers.
+- Android notification channels.
+- Deep links and notification navigation.
+- Local persistence, SharedPreferences, DataStore, Room, or other caches.
+- Admin notification logic.
+- Account switching and multi-device behavior.
+
+Search the entire project for every place where notifications are created, sent, received, stored, retrieved, displayed, counted, or opened.
+
+Identify the actual root cause before implementing a fix.
+
+Do not make assumptions based on the visible UI alone.
+
+## 3. CREATE A GLOBAL NOTIFICATION CLASSIFICATION SYSTEM
+
+Every notification in BSTORE must have an explicit authorization category.
+
+Classify all existing and future notifications into these groups:
+
+### A. PRIVATE_USER
+
+Notifications intended for one specific authenticated customer.
+
+Examples:
+- Order created.
+- Order accepted.
+- Order status changed.
+- Order dispatched.
+- Order delivered.
+- Order cancelled.
+- Payment instructions.
+- Payment verification.
+- Payment confirmed.
+- Payment-related updates.
+- Personal account notifications.
+- Direct messages from administrators.
+- Notifications related to the customer's own activity.
+
+These notifications must only be accessible to the intended user.
+
+### B. ADMIN_ONLY
+
+Notifications intended exclusively for authorized administrators.
+
+Examples:
+- New customer orders.
+- New order payment requests.
+- Payment verification requests.
+- Customer actions requiring administrator attention.
+- Order management events.
+- Administrative operational alerts.
+
+Only properly authorized administrators must receive these notifications.
+
+Do not rely on hiding admin screens or buttons as a security measure.
+
+### C. PUBLIC
+
+Notifications intentionally intended for all users.
+
+Examples:
+- Public announcements.
+- General application updates.
+- Public promotions.
+- Public product announcements.
+- General service information.
+
+Public notifications may be available to guests, provided they are explicitly classified as PUBLIC.
+
+IMPORTANT:
+
+A notification must NEVER become public simply because its recipient UID is missing or a security filter was omitted.
+
+Every notification must have an explicit category and authorization policy.
+
+## 4. FIX FCM TOKEN OWNERSHIP AND ACCOUNT ISOLATION
+
+This is one of the highest-priority tasks.
+
+Investigate whether FCM tokens are currently:
+- Stored globally.
+- Reused between different accounts.
+- Associated with an old UID.
+- Registered without checking the current authentication state.
+- Left active after logout.
+- Incorrectly updated after token refresh.
+- Shared through a common database record.
+- Used for notifications through shared FCM Topics.
+
+Implement a secure token lifecycle.
+
+### Login
+
+When a registered user successfully signs in:
+
+1. Retrieve the current authenticated Firebase UID.
+2. Retrieve the current FCM token.
+3. Register or update the token association through a trusted backend.
+4. Associate the device token with the correct UID.
+5. Ensure any previous account association on this device is deactivated.
+6. Confirm that the token is not simultaneously assigned to another account on the same device.
+
+### Token refresh
+
+Implement Firebase token refresh handling.
+
+Whenever the FCM token changes:
+- Update the backend association.
+- Associate the new token with the currently authenticated account.
+- Deactivate the previous token association.
+- Handle failures and retry safely.
+- Prevent stale token records.
+
+### Logout
+
+When a user logs out:
+
+1. Deactivate or remove the current device's token association with that account through the trusted backend.
+2. Clear account-specific local notification data.
+3. Clear account-specific unread counters and badges.
+4. Cancel or remove pending account-specific local notifications where appropriate.
+5. Clear account-specific navigation state and cached notification data.
+6. Ensure the previous user's private notification history is no longer visible.
+7. Ensure subsequent guest sessions cannot receive the previous user's private notifications.
+
+Do not delete server-side notification history when logging out.
+
+Do not accidentally delete tokens belonging to the same user on other devices.
+
+Implement this process safely, including network failures and retry behavior.
+
+### Account switching
+
+If User A logs out and User B logs in on the same device:
+
+- The device must stop receiving User A's private notifications.
+- The device must become associated with User B.
+- User B must never see User A's notification history.
+- User A must never see User B's notification history.
+
+Support multiple devices for the same account without allowing cross-account access.
+
+Ensure token updates and logout operations are idempotent and protected against race conditions.
+
+## 5. GUEST AND ANONYMOUS AUTHENTICATION SECURITY
+
+The application must correctly distinguish between:
+
+- A fully authenticated registered customer.
+- An authenticated administrator.
+- A Firebase Anonymous Authentication session.
+- A completely unauthenticated guest.
+
+Do not assume that every Firebase UID represents a registered customer.
+
+A guest must not receive private notifications belonging to any registered customer.
+
+An anonymous Firebase UID must not automatically gain access to registered-user notifications.
+
+If the application supports guest browsing:
+- Guests may receive explicitly PUBLIC notifications.
+- Guests must not access private order notifications.
+- Guests must not access private payment notifications.
+- Guests must not access another account's notification history.
+- Guests must not access administrator notifications.
+
+Determine how the current project handles anonymous sessions and preserve intended guest functionality while enforcing these rules.
+
+## 6. SECURE BACKEND NOTIFICATION DELIVERY
+
+Do not rely exclusively on Android-side filtering.
+
+The main security enforcement must happen on the trusted backend.
+
+Inspect the current notification sending architecture and implement secure recipient validation.
+
+For PRIVATE_USER notifications:
+
+- Require a valid recipient UID.
+- Verify that the recipient account is eligible to receive that notification.
+- Verify that the notification belongs to the intended user.
+- Verify that the device token is currently associated with that UID.
+- Send only to the intended recipient's active device tokens.
+- Never broadcast private notifications to shared topics.
+- Never send private notifications to all registered tokens.
+- Never trust a recipient UID supplied by an untrusted client without validating the underlying operation.
+
+For ADMIN_ONLY notifications:
+
+- Verify administrator authorization on the backend.
+- Use the project's existing trusted admin authorization mechanism.
+- Send only to currently authorized administrators.
+- Never allow ordinary users to subscribe themselves to admin notification channels.
+
+For PUBLIC notifications:
+
+- Use a clearly separated public delivery mechanism.
+- Explicitly identify public notifications.
+- Ensure public notifications contain no private customer information.
+
+If Cloud Functions are required, implement them using the project's existing Firebase architecture.
+
+Do not expose Firebase Admin SDK credentials, service account keys, privileged secrets, or backend authorization logic inside the Android application.
+
+If deployment requires additional Firebase billing or configuration, explain that requirement clearly. Do not claim that backend functions or security rules have been deployed unless they actually have been.
+
+## 7. AUDIT AND FIX ALL NOTIFICATION CATEGORIES
+
+Inspect every notification type currently implemented in BSTORE.
+
+At minimum, cover:
+
+### Orders
+- New order.
+- Order accepted.
+- Processing.
+- Ready for pickup.
+- Shipped.
+- Delivered.
+- Cancelled.
+- Other existing order events.
+
+### Payments
+- Payment instructions.
+- Transfer initiated by customer.
+- Payment verification pending.
+- Payment confirmed by administrator.
+- Payment-related status changes.
+- Any existing payment notifications.
+
+### Products and inventory
+- New products.
+- Discounts.
+- Promotions.
+- Price changes.
+- Restocked products.
+- Product availability changes.
+
+### Customer accounts
+- Profile-related notifications.
+- Account-related updates.
+- Direct administrator messages.
+- Other private customer notifications.
+
+### System and announcements
+- General application announcements.
+- Public updates.
+- Maintenance notifications.
+- General information.
+- Other existing system notifications.
+
+### Administration
+- New incoming orders.
+- Payment verification requests.
+- Administrative alerts.
+- Customer actions requiring attention.
+- Other existing admin notifications.
+
+Do not remove existing notification functionality.
+
+Preserve the intended behavior of each notification type while enforcing the correct authorization policy.
+
+## 8. FIRESTORE DATA ISOLATION AND SECURITY RULES
+
+Audit the complete notification database structure.
+
+Every private notification must have a reliable recipient association, such as:
+
+- recipientUid
+- notificationType
+- visibility or authorization category
+- createdAt
+- readAt or isRead
+- relatedEntityId, when applicable
+- other fields required by the existing project
+
+Adapt the schema to the actual existing database structure rather than blindly creating duplicate collections.
+
+Implement or update Firestore Security Rules so that:
+
+### PRIVATE_USER
+- A user can read only notifications belonging to their own authenticated UID.
+- A user cannot read another user's notifications.
+- A user cannot change the recipient UID.
+- A user cannot create fake payment confirmations or administrative notifications.
+- A user cannot manipulate notification ownership or authorization fields.
+
+### ADMIN_ONLY
+- Only authorized administrators can access admin notifications.
+- Ordinary customers cannot read, create, update, or delete admin-only notifications.
+
+### PUBLIC
+- Public notifications are readable according to their explicitly defined public policy.
+- Ordinary customers cannot modify privileged notification fields.
+- Public visibility must never expose private data.
+
+Do not use client-side filtering as a replacement for Firestore Security Rules.
+
+Review related Firestore collections and queries for the same cross-user data leakage risk.
+
+Validate the actual security rules against all notification operations.
+
+## 9. NOTIFICATION HISTORY, CACHE, BADGES AND LOCAL STORAGE
+
+The problem may not originate only from FCM delivery.
+
+Audit the entire local notification storage system.
+
+Inspect:
+- Room databases.
+- SharedPreferences.
+- DataStore.
+- Cached notification lists.
+- In-memory state.
+- ViewModel state.
+- Persistent unread counters.
+- Notification badges.
+- PendingIntent data.
+- Local Android notifications.
+- Background message processing.
+
+Implement account isolation.
+
+Private notification data must be associated with the correct account UID.
+
+When the active account changes:
+- Do not display cached data from the previous account.
+- Reload notification history for the new account.
+- Reset account-specific unread counters.
+- Prevent previous account notifications from appearing in the UI.
+- Avoid stale asynchronous requests overwriting the current account's state.
+
+If local notification storage is shared between accounts, introduce safe account-scoped storage or another appropriate isolation strategy.
+
+Do not delete public notifications unnecessarily.
+
+Do not delete server-side history during logout.
+
+## 10. ANDROID FOREGROUND, BACKGROUND AND LOCKSCREEN SECURITY
+
+Inspect how FCM messages are received and displayed in every application state:
+
+- App open in foreground.
+- App in background.
+- App completely closed.
+- Device locked.
+- Application recently launched.
+- User logged out.
+- User switched accounts.
+- Guest session.
+
+Remember that Android may automatically display FCM notification payloads while the application is in the background.
+
+Therefore, client-side filtering after delivery is not sufficient.
+
+Ensure the trusted backend sends private notifications only to correctly authorized tokens.
+
+Where appropriate, use data-only messages and controlled application-side display to prevent unauthorized notification content from being shown.
+
+However, do not introduce unreliable background execution or break normal notification delivery.
+
+For private notifications, avoid exposing sensitive information on the lock screen.
+
+Use neutral notification text where necessary, for example:
+"You have a new update in BSTORE."
+
+Retrieve detailed content only after validating the current authenticated account and recipient ownership.
+
+## 11. DEEP LINKS AND NOTIFICATION NAVIGATION
+
+Every notification that opens a screen must be validated.
+
+For example:
+
+- An order notification must open only the recipient's own order.
+- A payment notification must open only the recipient's own payment information.
+- An administrator notification must open the relevant administrative screen only for authorized administrators.
+- A public announcement may open its public content.
+
+Never trust order IDs, user IDs, payment IDs, or other entity IDs received from notification payloads without checking ownership and authorization.
+
+A user must not be able to access another user's order by modifying a deep link or notification payload.
+
+If authorization fails:
+- Do not display private content.
+- Show an appropriate safe message.
+- Return the user to an authorized screen.
+
+## 12. ADMIN NOTIFICATION SECURITY
+
+Preserve the existing admin panel and notification functionality.
+
+Verify that:
+- Admin authorization is enforced on the backend.
+- Admin notifications are never delivered to ordinary customers.
+- Admin device tokens are associated with authorized admin accounts.
+- Revoked administrators stop receiving admin-only notifications.
+- Ordinary users cannot register themselves as administrators.
+- Admin notification history is isolated from customer notification history.
+
+Do not change existing admin permissions without a clear technical reason.
+
+## 13. BACKWARD COMPATIBILITY AND DATA MIGRATION
+
+Preserve existing BSTORE data and functionality.
+
+Do not:
+- Delete existing orders.
+- Delete existing products.
+- Delete customer accounts.
+- Delete payment history.
+- Delete legitimate notification history unnecessarily.
+- Replace the Firebase project.
+- Replace Firebase Authentication.
+- Introduce Supabase.
+- Rebuild the application from scratch.
+
+If existing notification documents lack recipient or category fields:
+- Inspect the actual records and their origin.
+- Determine whether ownership can be established reliably.
+- Migrate only when ownership is known.
+- Do not automatically classify ambiguous private notifications as PUBLIC.
+- Do not expose unidentifiable historical notifications to all users.
+- Preserve existing data wherever possible.
+
+Ensure old application versions and existing records are handled safely where feasible.
+
+## 14. SECURITY TESTING — REQUIRED
+
+Create and execute a comprehensive test plan.
+
+Use at least these scenarios:
+
+### Test A — User A and User B
+1. Sign in as User A.
+2. Create an order.
+3. Sign out.
+4. Sign in as User B.
+5. Trigger a new notification for User A.
+6. Verify that User B receives nothing related to User A.
+
+### Test B — Unauthenticated guest
+1. Sign in as User A.
+2. Create an order and generate private notifications.
+3. Sign out.
+4. Launch the application without authentication.
+5. Verify that no private notification belonging to User A appears.
+
+### Test C — Anonymous Firebase session
+1. Create an anonymous session.
+2. Generate private notifications for a registered account.
+3. Verify that the anonymous session cannot receive or access them.
+
+### Test D — Account switching
+1. Sign in as User A.
+2. Generate private notifications.
+3. Sign out.
+4. Sign in as User B on the same device.
+5. Verify that no User A notification, history, badge, cache, or deep link is accessible.
+
+### Test E — Multiple devices
+1. Sign in as User A on two devices.
+2. Verify that both devices can receive User A's notifications.
+3. Sign out on one device.
+4. Verify that the other device continues receiving notifications.
+5. Verify that the logged-out device no longer receives User A's private notifications.
+
+### Test F — Administrator isolation
+1. Generate an admin-only notification.
+2. Verify that only authorized administrators receive it.
+3. Verify that ordinary users and guests cannot access it.
+4. Revoke admin authorization and verify that access is removed.
+
+### Test G — Public notifications
+1. Generate a clearly PUBLIC announcement.
+2. Verify that intended users and guests can receive it.
+3. Verify that the announcement does not expose any private user data.
+
+### Test H — Notification history and deep links
+1. Generate private notifications for User A.
+2. Switch to User B.
+3. Open the notification screen.
+4. Open old notification links.
+5. Verify that User B cannot access User A's content.
+
+### Test I — Token refresh and logout race conditions
+1. Refresh an FCM token.
+2. Switch accounts.
+3. Trigger logout while a token update is in progress.
+4. Simulate network interruption.
+5. Verify that stale token associations cannot cause cross-user delivery.
+
+### Test J — All notification categories
+Repeat the isolation tests for orders, payments, products, account notifications, promotions, system notifications, and admin alerts.
+
+Do not declare the problem fixed based only on successful UI testing.
+
+Verify the actual backend recipient targeting and database access restrictions.
+
+## 15. IMPLEMENTATION REQUIREMENTS
+
+After the audit:
+
+1. Identify the exact root cause.
+2. Explain which files and components are responsible.
+3. Implement the necessary changes throughout the existing project.
+4. Update the Android notification lifecycle.
+5. Update FCM token management.
+6. Update trusted backend delivery logic.
+7. Update Firestore data access and Security Rules.
+8. Update local notification storage and account switching.
+9. Fix deep-link authorization.
+10. Preserve all existing BSTORE functionality.
+
+Prefer a centralized, maintainable notification architecture instead of scattered fixes.
+
+All notification creation and delivery should follow one consistent authorization policy.
+
+Do not introduce unnecessary dependencies or duplicate notification systems.
+
+Do not merely provide recommendations or code snippets. Implement the fix in the existing project wherever the available environment permits.
+
+If any part cannot be implemented or deployed from the current environment, explicitly identify it and provide the exact remaining steps.
+
+## 16. IMPORTANT PROJECT PRESERVATION RULES
+
+This is an existing application, not a new project.
+
+Preserve:
+- Existing application identity.
+- Existing package/application ID.
+- Firebase project and configuration.
+- Kotlin and Jetpack Compose architecture.
+- Existing navigation.
+- Authentication and registration.
+- Existing admin authorization.
+- Products and catalog.
+- Cart and checkout.
+- Orders and order history.
+- Payment functionality.
+- User profiles.
+- Existing notification features.
+- Existing design system.
+- Release signing configuration and keystore.
+- Existing working functionality.
+
+Do not replace Firebase with Supabase.
+
+Do not introduce Google Play Billing for physical products.
+
+Do not expose secrets or privileged credentials in client code.
+
+Do not modify release signing files or regenerate signing keys.
+
+Do not make unrelated visual redesigns.
+
+## 17. FINAL REPORT — REQUIRED
+
+When implementation is complete, provide a clear report in Georgian.
+
+Include:
+
+1. The exact root cause of the notification leakage.
+2. Every modified file and its purpose.
+3. Changes to FCM token ownership and lifecycle.
+4. Changes to login, logout and account switching.
+5. Changes to backend notification delivery.
+6. Changes to Firestore structure and Security Rules.
+7. How private, admin-only and public notifications are separated.
+8. How guest and anonymous sessions are handled.
+9. How local notification history and caches are isolated.
+10. Which security tests were executed and their actual results.
+11. Which Firebase changes were deployed successfully.
+12. Any remaining manual configuration or deployment requirements.
+
+Clearly distinguish between:
+- Implemented and tested.
+- Implemented but not deployed.
+- Not yet implemented.
+- Requires manual Firebase Console configuration.
+
+Never claim a security fix is complete without verifying the relevant backend and database protections.
+
+FINAL OBJECTIVE:
+
+No customer, guest, anonymous session, or unauthorized administrator must ever receive or access another user's private notifications.
+
+No private notification may be delivered to a device unless its current token association and intended recipient have been verified.
+
+All BSTORE notification categories must follow the same secure, consistent, account-isolated architecture.
+
+Fix the underlying security vulnerability permanently, not just the currently visible symptom.
